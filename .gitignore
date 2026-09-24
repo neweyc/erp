@@ -1,0 +1,35 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Node / Vite
+node_modules/
+dist/
+*.local
+
+# Playwright (e2e)
+test-results/
+playwright-report/
+
+# IDE
+.idea/
+.DS_Store
+
+# Local env/secrets
+*.env
+appsettings.*.Local.json
+
+# Coverage output (coverlet / vitest)
+coverage.json
+coverage/
+
+# File-storage runtime data (Storage:Root). Keep scoped to files/ so it cannot
+# match a Data/ entity folder on case-insensitive filesystems.
+**/data/files/
+
+# Claude Code scratch worktrees. Each is its own checkout, so `git add -A` from
+# the repo root would record it as a gitlink rather than as files. Scoped to
+# worktrees/ deliberately: the rest of .claude/ holds shareable project config.
+.claude/worktrees/
