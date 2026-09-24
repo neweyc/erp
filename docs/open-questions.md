@@ -41,6 +41,15 @@ experiment, or an explicit deferral — not a default.
 - **Does the platform need its own database eventually?** One cluster is right for one
   operator. It is also the single blast radius.
 
+## Auth
+
+- **Session lifetime and sliding window values.** Absolute expiry, idle window default,
+  and how they interact with the touch throttle.
+- **Whether operator sessions need per-action re-authentication** for destructive actions
+  like retiring a tenant.
+- **Event retention window** — the number the replay promise is made against. 30 days is
+  the starting point to validate, not a decision.
+
 ## Integration
 
 - **Is API access licensed?** Charging for integration is standard, and it is also

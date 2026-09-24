@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="boundary.tests/boundary.tests.csproj" />
+  <Project Path="packages/auth/AppPlatform.Auth.csproj" />
+  <Project Path="packages/auth.tests/AppPlatform.Auth.Tests.csproj" />
+  <Project Path="packages/boundary/AppPlatform.Boundary.csproj" />
+  <Project Path="privileges.tests/privileges.tests.csproj" />
+  <Project Path="packages/tenancy/AppPlatform.Tenancy.csproj" />
+  <Project Path="packages/tenancy.tests/AppPlatform.Tenancy.Tests.csproj" />
+</Solution>

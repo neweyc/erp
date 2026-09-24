@@ -58,5 +58,13 @@ read from stdin, never a flag. Recovery is a CLI reset, not a self-service flow.
 
 The platform does not write tenant business data. `POST` to core's internal endpoint
 behind a shared secret creates tenant + company + invited admin + invite token in one
-transaction, send-then-commit. Unset secret = 404, checked before the body is read; nginx
+transaction, with the invite email staged in the outbox and sent after commit. The call
+carries an **idempotency key**: a retry after a timeout returns the original tenant rather
+than provisioning a second one. Unset secret = 404, checked before the body is read; nginx
 blocks the internal prefix publicly.
+
+Core holds **INSERT and SELECT on `platform.tenant`, and nothing else in the platform
+schema** — the one deliberate exception to the boundary, because the tenant row and its
+company, seeds, and admin invite must commit in a single transaction and a transaction
+cannot span two services. It has no UPDATE: core can bring a tenant into existence, and
+only the operator can change what it is permitted to do.

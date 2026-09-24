@@ -6,7 +6,9 @@
 ## 1. Shape
 
 One monorepo, several independently deployed processes over one PostgreSQL database with
-a schema per project.
+a schema per project. Deployment independence is not operational independence: every app
+shares the database and synchronous session lookup functions. A database outage affects
+all apps; separate processes and schema grants do not provide tenant-level isolation.
 
 ```
                       +-------------------+
@@ -60,15 +62,17 @@ read-model, apps join locally. That is the right answer *at a scale this is not 
 With views, joins keep working in SQL. "Open tickets for anyone in Station 3, sorted by
 surname, paged" stays one query. Push employees across a queue into a local replica and
 that query either N+1s or needs a projection rebuilt — solving a problem that does not
-exist yet. Operationally it is also one backup, one restore, one key rotation, one
-connection string, run by one person. Given the business thesis is *someone keeps it
+exist yet. Operationally it is also one database backup and restore, with separate runtime
+credentials per service, run by one person. Given the business thesis is *someone keeps it
 working*, that is not a small consideration.
 
 ### The escape hatch, which is the actual reason to pick views
 
 If an app ever must run on separate infrastructure, replace `core_v1.employee` with a
-locally materialized table fed by events. **The app's query code does not change**,
-because it was always reading that name. The event bus is deferred, not foreclosed.
+locally materialized table fed by events. Keeping the same relation shape may preserve
+query code, but extraction remains a migration project: bootstrap and replay, stale reads,
+deletions, reconciliation, and a replacement for the shared session lookup must be designed.
+The event bus is deferred, not foreclosed.
 
 Tenancy composes for free: the views carry `tenant_id`, so a consuming app applies its
 ordinary `ITenantScoped` global query filter to them with no new machinery.
@@ -185,10 +189,24 @@ because they do not constrain raw SQL. See `docs/database-privileges.md`.
 
 Query filters stop a tenant *reading* another's rows. Nothing in them stops a tenant B
 ticket *storing* tenant A's `employee_id`. Defences: resolve every inbound foreign id
-through the filtered context before use, carry the tenant in composite foreign keys so a
-cross-tenant reference is impossible at the database level, and test the negative. Raw
-SQL, `ExecuteUpdate`/`ExecuteDelete`, and background jobs each bypass some part of the
-machinery and are unsafe by default — see the root CLAUDE.md.
+through the filtered context before use, carry the tenant in composite foreign keys, and
+test the negative. Raw SQL, `ExecuteUpdate`/`ExecuteDelete`, and background jobs each
+bypass some part of the machinery and are unsafe by default — see the root CLAUDE.md.
+
+**Composite keys only work within a schema.** A cross-schema reference points at a
+published view; PostgreSQL cannot declare a foreign key against a view, and the consuming
+app has no grant on the table behind it either. That is an unavoidable consequence of the
+boundary, not an oversight in it — and it means the two halves of the system have
+genuinely different guarantees:
+
+| Reference | Write-time guarantee |
+|---|---|
+| Within a schema | **Database-enforced.** The row cannot exist. |
+| Across schemas (via `core_v1`) | **Convention plus a check.** Resolve through the filtered view before use, and run a scheduled integrity join reporting rows whose `(tenant_id, public_id)` finds no match. |
+
+The practical rule that follows: a cross-schema id stays untrusted for its whole life, not
+only on the way in. Anything rendering one re-reads through the view, and the display
+snapshot beside it is what makes that safe to fail.
 
 ## 9. Version independence
 
@@ -198,10 +216,12 @@ machinery and are unsafe by default — see the root CLAUDE.md.
   schema, or rollback is not possible.
 - `compatibility.md` records supported (shell x API) combinations. Independent cadences
   produce a grid; a monorepo makes it look like there is one version of the world.
-- **These rules are dormant until the first independent app release.** Until then the
-  supported matrix is "everything from the same commit", project references are correct,
-  and building a package feed first would delay the first working journey to solve a
-  coupling problem that does not exist yet.
+- Package publication and independent-release version matrices wait until the first
+  independent app release. Until then project references and one supported commit suffice.
+- **Migration safety is active from the first customer deployment.** Expand/contract and
+  an exercised application rollback against the upgraded schema gate Milestone 2, even
+  when every service ships together. Destructive contraction must wait until the supported
+  rollback window has closed.
 
 ## 10. What this design does not yet answer
 

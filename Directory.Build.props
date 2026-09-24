@@ -1,0 +1,15 @@
+<Project>
+
+  <!-- Shared by every .NET project. Settings live here rather than in each csproj so
+       a change (TFM bump, a new analyzer rule) is one edit, and so a new project
+       cannot quietly opt out of nullable reference types. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+</Project>

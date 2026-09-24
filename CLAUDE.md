@@ -67,10 +67,19 @@ in conversation but not written down will be re-litigated.
   nested classes:
   - `<Verb><Entity>Command` — request DTO.
   - `<Verb><Entity>CommandHandler` — primary-constructor DI of **interfaces only**;
-    `Handle(Guid userId, cmd)` returns `CommandResult`.
+    `Handle(Caller caller, cmd)` returns `CommandResult`.
   - `Endpoint : IEndpoint` — Minimal API `MapGet`/`MapPost`, `[FromServices]` injection,
     reads userId from `ClaimTypes.NameIdentifier`, news up the handler manually,
     `.RequireAuthorization(...)` and (in an app) `.RequireApp(...)`.
+- **`Caller`, not a user id.** EMS passed `Guid userId` because a user was the only thing
+  that could call anything. Here an API key is a first-class principal
+  (`docs/integration.md` §2.3), and a signature that can only carry a user id forces every
+  machine-authenticated call to invent a fake one — which then lands in audit rows as a
+  person who did not do it. `Caller` carries the principal id, its kind (user or api_key),
+  the tenant, the role, and the granted scopes; `UserId` is nullable and null for a key.
+  **Audit records the principal**, so "deleted by integration key 'payroll-sync'" is
+  representable. Settled before the first handler exists, because retrofitting a parameter
+  through every feature file is the expensive version.
 - Endpoints are **auto-discovered by reflection** (any `IEndpoint`) at startup. No
   manual route registration, ever.
 - **Services** live in `Services/`: `IXxxService` interface + `EFXxxService(DbContext)`
@@ -114,6 +123,11 @@ One shell calls many APIs, and they deploy on independent schedules. Therefore:
   divisions as companies fills the entity table with things that should never be
   entities.
 
+TenantId is also a concurrency token on writable tenant-scoped entities: tracked
+UPDATE/DELETE predicates must include the original tenant, including detached writes.
+Current and original tenant values must match the scope; tenant reassignment is forbidden.
+Real PostgreSQL tests cover forged attached updates/deletes, not only honest tenant values.
+
 ### Row isolation is not reference isolation
 
 Query filters stop you *reading* another tenant's rows. They do nothing to stop you
@@ -124,10 +138,17 @@ all required:
 - **Resolve, never trust.** Every inbound foreign id is loaded through the filtered
   context before use. A `null` is a validation failure, not a missing row. An id that
   arrives in a request body is user input.
-- **Composite foreign keys carry the tenant**: `(tenant_id, employee_id)` referencing
-  `(tenant_id, id)`. This makes a cross-tenant reference *impossible at the database
-  level* rather than merely unlikely — the one defence that survives a bug in the
-  resolve step. Required on every cross-schema reference.
+- **Composite foreign keys carry the tenant** *within a schema*: `(tenant_id,
+  widget_id)` referencing `(tenant_id, id)`. This makes a cross-tenant reference
+  impossible at the database level rather than merely unlikely — the one defence that
+  survives a bug in the resolve step. `TenantModelAssertions.FindReferencesNotCarryingTenant`
+  fails the build on a tenant-blind reference.
+- **Cross-schema references cannot have one.** They point at a published view, and
+  PostgreSQL cannot key to a view — an app also has no grant on the table behind it. So
+  for `tickets.ticket.assignee_employee_id -> core_v1.employee`, resolve-never-trust is
+  the *only* write-time defence, backed by a scheduled integrity check that joins on
+  `(tenant_id, public_id)` and reports orphans. Treat every cross-schema id as untrusted
+  for as long as it exists, not merely on the way in.
 - **Cross-tenant reference tests**, alongside the read/write isolation tests: tenant B
   attempting to reference tenant A's employee must fail, not silently persist.
 
@@ -138,8 +159,10 @@ Two paths bypass all of this and must be treated as unsafe by default:
   tenant stamping, no audit, and no projection rebuild. Prefer tracked saves; where bulk
   is genuinely needed, say in the code why the missing audit row is acceptable.
 - **Background jobs have no ambient tenant.** They enter one explicitly per scope. A job
-  that forgets runs unfiltered across every tenant, which is the classic version of this
-  bug.
+  that forgets **reads nothing and writes nothing** — the filter matches no rows without a
+  tenant and an insert throws. That is required behaviour, not an accident of the
+  implementation: failing empty is recoverable, failing open is a breach. The symptom is a
+  job that silently does nothing, so a job should assert it holds a tenant.
 
 Carried from redshift's QC review, non-negotiable from day one:
 
@@ -209,22 +232,35 @@ first commit.
   entitlement change take effect immediately rather than at cookie expiry.
 - APIs return **401** (not 302) for unauthenticated `/api` requests; the shell handles
   redirect-to-login client-side.
-- **Revalidation reads one published view**, `identity_v1.session_context`, which joins
-  session, user, tenant status, and licensed apps. An app therefore observes revocation,
-  role change, suspension, and entitlement change immediately **without** being granted
-  the `identity` or `platform` schemas. This is the same published-view contract that
-  `core_v1` uses, and it is what resolves the otherwise-contradiction of "apps may not
-  read platform tables" against "entitlement changes take effect at once".
-- **`packages/auth` is the only assembly permitted to read that view.** App DbContexts
-  never map identity or platform tables; they call `AddAppPlatformAuth()` and read
-  claims. `BoundaryTests` and the role grants both enforce it.
-- **Failure is specific, not a generic 401.** `session_revoked`, `role_changed`,
-  `tenant_suspended`, `app_not_licensed`, `mfa_required` — the shell shows the right
-  message instead of a bare logout.
+- **Revalidation calls one published function**, `identity_v1.session_context(session_id)`,
+  which joins session, user, tenant status, and licensed apps and returns at most one row.
+  An app therefore observes revocation, role change, suspension, and entitlement change
+  immediately **without** being granted the `identity` or `platform` schemas — which
+  resolves the otherwise-contradiction of "apps may not read platform tables" against
+  "entitlement changes take effect at once".
+- **A function, not a view like `core_v1`.** A grant on a view is a grant to read all of
+  it, and a session id is credential-equivalent — `SELECT *` would enumerate every live
+  session in every tenant. Views for joining and paging; functions for a keyed lookup that
+  must not enumerate.
+- **EXECUTE is granted to customer API roles only, never the platform role.** Operator
+  sessions live in platform tables; letting the platform resolve tenant sessions would
+  undo its isolation.
+- **"Only `packages/auth` calls it" is a code convention, not a grant.** Any code on that
+  connection can. The grant is the boundary against other *services*; `BoundaryTests` is
+  the boundary against other *code in the same service*. Neither covers the other's case.
+- **Authenticate first, then authorize.** A suspended tenant's session still establishes a
+  principal — rejecting at authentication would discard the identity the promised data
+  export needs. Suspension is **403** with an allowlist and the cookie intact; retirement
+  revokes sessions and is an ordinary 401.
+- **Failure is specific, not a generic 401** — `session_revoked`, `role_changed`,
+  `tenant_suspended`, `tenant_retired`, `app_not_licensed`, `mfa_required`.
 - **Operator and customer cookies are isolated** by name and host scope; a console
   session can never authenticate a tenant API, or the reverse.
-- **CSRF**: cookie auth requires it. `SameSite=Lax` plus a header token on every
-  state-changing request.
+- **CSRF**: cookie auth requires it. `SameSite=Lax` plus a double-submit header token on
+  every **unsafe method** — POST, PUT, PATCH, DELETE. The test is safe-versus-unsafe,
+  never idempotent-versus-not: PUT and DELETE are idempotent and change state, so a rule
+  written around idempotency leaves most of the write surface open. Key-authenticated
+  calls need no token — a browser does not attach a bearer key on its own.
 - Full design, including what tenant context is established from and how background jobs
   enter one: `docs/auth-and-access.md`. **Write that before building auth**, not after.
 - MFA (TOTP) optional per user, mandatory for platform operators. Tenant-required MFA is
@@ -268,7 +304,8 @@ first commit.
   databases by hand.
 - After each migration generate BOTH scripts into `database/<schema>/`: the per-migration
   one (`--idempotent`) and the full bootstrap used to init fresh databases.
-- **Expand/contract only.** Apps update independently and must be rollable back, so
+- **Expand/contract only, from the first customer deployment (Milestone 2).** Even
+  coordinated releases must be rollable back, so
   version N-1 of an app has to run against version N's schema. No destructive migration
   ships in the same release as the code that stops using the column.
 
@@ -348,7 +385,9 @@ false and would be believed.
 - Operator actions land in `platform.audit_log`, separate from tenant audit by design.
 - Provisioning **delegates to core.api** via an internal endpoint behind a shared secret
   (unset = 404, checked before the body is read; nginx blocks the internal prefix
-  publicly). One transaction: tenant + company + admin invite, send-then-commit.
+  publicly). One transaction: tenant + company + admin invite, with the invite email
+  staged in the outbox and sent after commit — carrying an idempotency key, so a retried
+  call returns the original tenant rather than creating a second.
 
 ## Integration surface (customers integrating with us)
 

@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Deliberately unfiltered by path. Path filters and per-project tags belong to
+# Milestone 4, when projects first deploy independently; until then everything ships
+# from one commit and filtering would only hide breakage in the half not rebuilt.
+jobs:
+  dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore app-platform.slnx
+      - run: dotnet build app-platform.slnx --no-restore -warnaserror
+      # privileges.tests needs Docker for Testcontainers; ubuntu-latest provides it.
+      # Without a daemon those tests error rather than skip, which is intended — a
+      # privilege suite that quietly does not run is worse than one that fails.
+      - run: dotnet test app-platform.slnx --no-build --verbosity normal

@@ -51,9 +51,11 @@ or shelve — rather than drifting.
    second principal kind through every policy check is the expensive version.
 6. **Public opaque ids** (`emp_...`, `tkt_...`) on every externally-referenceable entity,
    in the first migration that creates it. Irreversible once a customer stores one.
-7. `packages/outbox` — the table and worker, serving email **and** domain events. Every
-   domain write emits an event from the first feature, even with nothing subscribed:
-   emission added later yields no history (`docs/integration.md` §2.2).
+7. `packages/outbox` — one outbox **per owning schema**, serving email and domain events,
+   with the event and its per-subscription delivery rows kept separate from the start.
+   Every domain write emits an event from the first feature, even with nothing subscribed:
+   the reason is retrofit cost across every existing handler, not history
+   (`docs/integration.md` §2.2). Decide the retention window here.
 8. Core, minimal: tenant, one company, employee (name, email, status), the
    `user.employee_id` link, `core_v1.employee`, "invite this employee".
 9. Platform, minimal: create tenant with an **idempotency key**, suspend/resume,
@@ -73,17 +75,22 @@ it (`docs/integration.md` §1).
 ## Milestone 2 — safe to hold real data
 
 **Gates the first customer deployment.** Nothing below is optional once someone else's
-data is in the database.
+data is in the database. Expand/contract migrations and an application rollback rehearsal
+against the upgraded schema are required here, even with coordinated releases.
 
-12. Backup of database **and** file storage together, restored and **verified working**,
+13. Backup of database **and** file storage together, restored and **verified working**,
     not merely completed. A restore that has never been exercised is a hypothesis.
-13. **Encryption key custody and recovery.** Losing `Encryption:FieldKey` loses the data
+14. **Encryption key custody and recovery.** Losing `Encryption:FieldKey` loses the data
     permanently. Where the key lives, who can retrieve it, and how recovery is rehearsed
     must be written down and tested before the key protects anything real. Key
     *rotation* can wait; key *recovery* cannot.
-14. Restore drill script and runbook.
-15. Per-project audit logging and the operator error feed (metadata only).
-16. Rate limiting on anonymous auth endpoints and uploads.
+15. Restore drill script and runbook.
+16. **Mandatory operator MFA, enforced.** An operator reaches the control plane for every
+    tenant, so an unprotected operator account is a larger exposure than most of this
+    milestone. Enforcement belongs to the gate; enrolment polish and the recovery UX can
+    wait for M3.
+17. Per-project audit logging and the operator error feed (metadata only).
+18. Rate limiting on anonymous auth endpoints and uploads.
 
 There is an uncomfortable symmetry worth noticing: the September work concluded the
 sellable service was a recovery check. Being unable to restore this platform would be
@@ -93,13 +100,14 @@ disqualifying.
 
 ## Milestone 3 — widen
 
-17. Catalogs: departments, job titles, locations, with rename fan-out and pick-only
+19. Catalogs: departments, job titles, locations, with rename fan-out and pick-only
     controls.
-18. Terminology overrides and the settings editor.
-19. Tenant-configured ticket status and category wording over fixed enums.
-20. Comments, attachments, ticket audit trail.
-21. Operator MFA enforcement, operator audit, tenant lifecycle screens.
-22. Contextual help.
+20. Terminology overrides and the settings editor.
+21. Tenant-configured ticket status and category wording over fixed enums.
+22. Comments, attachments, ticket audit trail.
+23. Operator MFA enrolment polish and recovery UX; operator audit; tenant lifecycle
+    screens.
+24. Contextual help.
 
 ---
 
@@ -108,15 +116,16 @@ disqualifying.
 Built when a customer asks for it, not before. The groundwork is already in M1, so this
 is additive rather than invasive.
 
-23. API keys: issue, scope, rotate, revoke, with per-key audit and last-used.
-24. `/api/public/v1/` — a curated read surface over employees and tickets, OpenAPI
+25. API keys: issue, scope, rotate, revoke, with per-key audit and last-used.
+26. `/api/public/v1/` — a curated read surface over employees and tickets, OpenAPI
     generated and published, scoped per app and entitlement.
-25. Webhooks over the existing outbox: endpoint registration, HMAC signing, retry with
-    backoff, dead-letter, auto-disable. **SSRF defences and restricted worker egress ship
-    with the first endpoint, not after.**
-26. Per-tenant integration log — sent, received, retried, replayable. Ships with the first
+27. Webhooks over the existing outbox: endpoint registration, HMAC signing, retry with
+    backoff, dead-letter, auto-disable. Per-subscription delivery rows, not a flag on the
+    event. **SSRF defences and restricted worker egress ship with the first endpoint, not
+    after.**
+28. Per-tenant integration log — sent, received, retried, replayable. Ships with the first
     webhook; it is what stops integration support consuming evenings.
-27. Self-service event replay from the retention window.
+29. Self-service event replay from the retention window.
 
 Check first whether the prospect actually wants **SSO** — it is frequently the real ask
 and worth more per hour than a data API.
@@ -125,11 +134,11 @@ and worth more per hour than a data API.
 
 Activates the rules currently dormant.
 
-28. Path-filtered CI, per-project version tags, per-project changelogs.
-29. Shared packages published to an internal feed; consumers pin versions.
-30. Route version segments enforced; `docs/compatibility.md` filled in with a real
+30. Path-filtered CI, per-project version tags, per-project changelogs.
+31. Shared packages published to an internal feed; consumers pin versions.
+32. Route version segments enforced; `docs/compatibility.md` filled in with a real
     support policy.
-31. Expand/contract migration discipline verified by an actual rollback rehearsal.
+33. Extend the Milestone 2 rollback rehearsal to independently supported app versions.
 
 ---
 

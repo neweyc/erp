@@ -1,0 +1,12 @@
+{
+  "name": "app-platform",
+  "private": true,
+  "workspaces": [
+    "shell.ui",
+    "packages/*",
+    "apps/*/*.ui"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  }
+}

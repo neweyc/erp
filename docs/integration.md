@@ -44,15 +44,45 @@ genuinely irreversible** — once a customer stores our ids, they are permanent.
 
 ### 2.2 Every domain write emits an event, even with no consumers
 
-The outbox exists already for email. Domain events go in the same table, with no
+The outbox exists already for email. Domain events go in the same mechanism, with no
 transport attached until someone subscribes.
 
-The reason is asymmetric cost: adding emission later gives you **no history**. You cannot
-retroactively emit `employee.hired` for people hired before the feature shipped, so the
-first integrating customer gets a system with amnesia at exactly the moment they are
-deciding whether to trust it. Emitting from day one costs a row per write.
+**The reason is retrofit cost, not history.** An earlier draft justified this by saying
+emission preserves the past for a future integrating customer — that argument does not
+survive the retention window it sits next to. Events are pruned; emitting from day one
+buys the retention period, not the history. Be precise about what it actually buys:
 
-Events are pruned on a retention window, not kept forever.
+- Adding emission later means revisiting **every handler that already exists**, and the
+  one that gets missed is silent — no test fails when an event is not raised.
+- The emission point is where the transaction is. Bolting it on afterwards tends to put it
+  outside, which is the failure mode the outbox exists to prevent.
+- It gives operational and audit value immediately, before any subscriber.
+
+**Bootstrap captures a durable replay cursor before reading the snapshot.** Retain events
+from that cursor while the subscriber pages through current state, then replay from the
+cursor and transition to live delivery without a gap. Deduplicate by event id and apply
+per-aggregate versions so overlapping snapshot/replay cannot regress state; include deletion
+tombstones. The cursor must account for concurrent commits (a maximum allocated sequence
+alone is insufficient). If the cursor expires, restart bootstrap explicitly. The integration
+milestone must test writes and deletions during paging and the replay/live handoff.
+
+**Retention must be decided before this becomes mandatory**, because it is the number the
+replay promise is made against. Starting point to validate: **30 days** of events, which
+covers an outage and a weekend but is not an archive. If a customer needs more, that is a
+product decision with a storage bill, not a default.
+
+### 2.4 One outbox per owning schema, and delivery is not the event
+
+Two structural points that are painful to change once rows exist:
+
+- **The outbox lives in the owning service's schema**, one per schema, with that service
+  running its own worker. A single shared outbox table would be a cross-schema write on
+  every save — the boundary broken by the very mechanism meant to respect it.
+- **An event and its delivery are separate rows.** The event is immutable and written
+  once. A *delivery* exists per (event × subscription), with its own attempt count, next
+  attempt, status, and last response. A single `delivered` flag on the event cannot
+  represent two webhook endpoints where one succeeds and one is failing — and the moment
+  a second subscriber exists, that flag starts lying about the first.
 
 ### 2.3 API keys are a principal, not a user
 

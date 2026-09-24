@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AppPlatform.Auth</RootNamespace>
+    <Description>Principals, session revalidation, CSRF, and the authorization policies every service shares.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The decision types (SessionEvaluator, CsrfPolicy, SuspensionPolicy, ActivityPolicy)
+         deliberately reference nothing from here: the access-control rules stay provable
+         without standing up a host. This reference exists only for the adapter layer that
+         turns an HttpContext into a Caller. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../tenancy/AppPlatform.Tenancy.csproj" />
+  </ItemGroup>
+
+</Project>
