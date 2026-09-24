@@ -114,6 +114,33 @@ One shell calls many APIs, and they deploy on independent schedules. Therefore:
   divisions as companies fills the entity table with things that should never be
   entities.
 
+### Row isolation is not reference isolation
+
+Query filters stop you *reading* another tenant's rows. They do nothing to stop you
+*writing a reference to one*: nothing prevents a tenant B ticket storing tenant A's
+`employee_id`, or an employee pointing at another tenant's department. Three defences,
+all required:
+
+- **Resolve, never trust.** Every inbound foreign id is loaded through the filtered
+  context before use. A `null` is a validation failure, not a missing row. An id that
+  arrives in a request body is user input.
+- **Composite foreign keys carry the tenant**: `(tenant_id, employee_id)` referencing
+  `(tenant_id, id)`. This makes a cross-tenant reference *impossible at the database
+  level* rather than merely unlikely — the one defence that survives a bug in the
+  resolve step. Required on every cross-schema reference.
+- **Cross-tenant reference tests**, alongside the read/write isolation tests: tenant B
+  attempting to reference tenant A's employee must fail, not silently persist.
+
+Two paths bypass all of this and must be treated as unsafe by default:
+
+- **Raw SQL** applies no query filter. Justify it in a comment and scope it explicitly.
+- **`ExecuteUpdate`/`ExecuteDelete`** skip `SaveChanges` entirely, so they perform no
+  tenant stamping, no audit, and no projection rebuild. Prefer tracked saves; where bulk
+  is genuinely needed, say in the code why the missing audit row is acceptable.
+- **Background jobs have no ambient tenant.** They enter one explicitly per scope. A job
+  that forgets runs unfiltered across every tenant, which is the classic version of this
+  bug.
+
 Carried from redshift's QC review, non-negotiable from day one:
 
 - Never use `FindAsync` for tenant-scoped entities (it can bypass query filters via the
@@ -182,9 +209,24 @@ first commit.
   entitlement change take effect immediately rather than at cookie expiry.
 - APIs return **401** (not 302) for unauthenticated `/api` requests; the shell handles
   redirect-to-login client-side.
-- **`packages/auth` is the only assembly permitted to map the `identity` schema.** App
-  DbContexts never map it; they call `AddAppPlatformAuth()` and read claims.
-  `BoundaryTests` enforces this.
+- **Revalidation reads one published view**, `identity_v1.session_context`, which joins
+  session, user, tenant status, and licensed apps. An app therefore observes revocation,
+  role change, suspension, and entitlement change immediately **without** being granted
+  the `identity` or `platform` schemas. This is the same published-view contract that
+  `core_v1` uses, and it is what resolves the otherwise-contradiction of "apps may not
+  read platform tables" against "entitlement changes take effect at once".
+- **`packages/auth` is the only assembly permitted to read that view.** App DbContexts
+  never map identity or platform tables; they call `AddAppPlatformAuth()` and read
+  claims. `BoundaryTests` and the role grants both enforce it.
+- **Failure is specific, not a generic 401.** `session_revoked`, `role_changed`,
+  `tenant_suspended`, `app_not_licensed`, `mfa_required` — the shell shows the right
+  message instead of a bare logout.
+- **Operator and customer cookies are isolated** by name and host scope; a console
+  session can never authenticate a tenant API, or the reverse.
+- **CSRF**: cookie auth requires it. `SameSite=Lax` plus a header token on every
+  state-changing request.
+- Full design, including what tenant context is established from and how background jobs
+  enter one: `docs/auth-and-access.md`. **Write that before building auth**, not after.
 - MFA (TOTP) optional per user, mandatory for platform operators. Tenant-required MFA is
   enforced at **sign-in**, never mid-session.
 - Permissions defined once in `packages/auth` (`Roles.*` arrays + `Policy*` constants),
@@ -246,18 +288,60 @@ You have now written these twice (redshift -> EMS). A third copy is the bad outc
   metadata in the app's own `stored_file` table. **Never touch the filesystem from
   feature code.** Downloads always serve `Content-Disposition: attachment` + `nosniff`.
 - `packages/email` — `IEmailService`, transport selected by which credential is present.
-  Any "write then email" flow **stages its writes, sends, then commits**, so a failed
-  send rolls back rather than orphaning a record.
+  **Sending is never in the request transaction** — see Reliability below.
+- `packages/outbox` — the transactional outbox table and its worker.
 - `packages/ui-kit` — shadcn components, DataTable, dialogs, form primitives.
 - Shared packages are **versioned dependencies, not project references across deploy
   boundaries.** A project reference re-couples the releases this layout exists to
   decouple.
+- **That rule activates at the first independent app release.** While the supported
+  matrix is still "everything from the same commit" (see `docs/compatibility.md`),
+  project references are fine and the packaging ceremony is premature. Do not let
+  publishing infrastructure block the first working end-to-end journey.
 
-## The key boundary (what the platform must not be able to do)
+## Reliability: outbox, not send-then-commit
 
-- **The platform process never receives `Encryption:FieldKey`**, so it *cannot* read
-  customer PII even if a bug tried to. `PlatformDbContext` maps only the `platform`
-  schema plus the slim `tenant` table.
+EMS's rule was "stage the writes, send the email, then commit", so a failed send left no
+orphaned invite. **That trade is wrong and this repo does not carry it.** It swaps a
+visible failure for an invisible one: if the send succeeds and the commit then fails, the
+recipient holds a link to an invitation that does not exist, and a retry after timeout
+can provision twice.
+
+- **Commit the record and an `outbox` row in one transaction.** A database-backed worker
+  sends with retries and marks the row delivered. No event bus, no broker — one table and
+  one hosted service.
+- Delivery is **at-least-once**, so anything an email triggers must be idempotent.
+- **Every externally-triggered provisioning call carries an idempotency key** with a
+  unique index. A retry returns the original result instead of creating a second tenant.
+- The outbox relocates EMS's original problem rather than deleting it: a permanently
+  failing send now leaves a committed invite nobody received. So **delivery status is
+  visible on the record**, resend is idempotent, and an undelivered invite must never
+  block re-inviting that address. Design that in from the start; it is the whole reason
+  the old rule existed.
+
+## The key boundary (what the platform actually cannot do)
+
+Three mechanisms, each guarding a different thing. Stating the guarantee precisely
+matters, because the imprecise version — "the platform cannot read customer data" — is
+false and would be believed.
+
+| Mechanism | What it actually guarantees |
+|---|---|
+| Platform never receives `Encryption:FieldKey` | **Encrypted columns only** — PII, narratives, termination reasons — are unreadable ciphertext. It says nothing about plaintext. |
+| `PlatformDbContext` maps only `platform` + slim `tenant` | Code **in this repo** cannot accidentally query customer tables. It does not constrain raw SQL or a compromised process. |
+| **Postgres role grants** (`database/privileges.sql`) | The connection is *unable* to read `core`, `identity`, or any app schema. This is the only one of the three that holds against code that is not in this repo. |
+
+- Employee names, emails, ticket titles, and department names are **plaintext**. Without
+  role grants, a platform process connected to the same database can read all of it. The
+  encryption key protects encrypted fields and nothing else — never describe it as
+  protecting "customer data".
+- **Every project runs as its own Postgres role**, granted only its own schema plus the
+  published views it is allowed to read (`core_v1.*`, `identity_v1.session_context`).
+  That is what makes the schema whitelist a boundary rather than a coding convention —
+  and it closes the same hole for apps, where `tickets.api` could otherwise read
+  `core.employee` directly and bypass the published view.
+- **Runtime and migration credentials are separate.** The runtime role has no DDL. See
+  `docs/database-privileges.md`.
 - **Key rotation**: the console *initiates and tracks* a rotation; the re-encryption job
   runs inside the core/app process that holds the key. The console never sees the key or
   plaintext.
@@ -265,6 +349,31 @@ You have now written these twice (redshift -> EMS). A third copy is the bad outc
 - Provisioning **delegates to core.api** via an internal endpoint behind a shared secret
   (unset = 404, checked before the body is read; nginx blocks the internal prefix
   publicly). One transaction: tenant + company + admin invite, send-then-commit.
+
+## Integration surface (customers integrating with us)
+
+Full design and the deferral boundary: `docs/integration.md`. Three rules bind now.
+
+- **Every externally-referenceable entity carries a stable opaque public id** (`emp_...`,
+  `tkt_...`) in its own column, separate from the primary key. Sequential integers leak
+  row counts across tenants and cannot be re-keyed. The internal key never leaves the
+  database. This is genuinely irreversible once a customer stores our ids.
+- **Every domain write emits an event into the outbox**, from the first feature, even
+  with no subscribers. Adding emission later yields no history, so the first integrating
+  customer meets a system with amnesia. A row per write is cheap; the missing past is not.
+- **An API key is its own principal** — own table, own scopes, own audit, own revocation
+  — never a user row flagged as a service account. Machine identities modelled as users
+  end up in employee lists and inherit a permission model built for humans. Two
+  authentication schemes, one authorization model: every policy check asks what the
+  **principal** may do.
+
+The public API is a **curated** surface at `/api/public/v1/`, mapped from internal
+features and deliberately narrow — the same published-contract discipline as `core_v1`
+views and route versions, at the outer edge where it is least forgiving. Internal routes
+are never quietly promoted; the moment a route is public its shape is frozen. Webhooks
+reuse `packages/outbox` rather than introducing a second delivery mechanism: at-least-once,
+signed, **thin payloads carrying no PII**, with SSRF defences on every customer-supplied
+URL including the cloud metadata address.
 
 ## Testing
 

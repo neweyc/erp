@@ -28,12 +28,29 @@ experiment, or an explicit deferral — not a default.
   ERP app.
 - **Key rotation mechanics.** The console initiates and tracks; the job runs where the key
   lives. The handshake, progress reporting, and failure/resume semantics are unspecified.
+  Key *recovery* is a different and more urgent thing — it gates the first customer
+  deployment (`backlog.md`, Milestone 2).
+- **Row-level security as defence in depth** behind the EF tenant filter. Attractive, and
+  it changes how pooling and tenant context work. See `database-privileges.md`.
+- **Impersonation for support** ("operator views tenant as admin") is undesigned and
+  deliberately absent. It needs its own audit story before anyone builds it.
 - **Per-app vs shared file storage.** Currently one store with an app segment in the path.
   Revisit if an app needs a different retention or residency policy.
 - **Shared packages need a publishing story.** Versioned dependencies are the rule; the
   feed, release process, and upgrade cadence are not chosen.
 - **Does the platform need its own database eventually?** One cluster is right for one
   operator. It is also the single blast radius.
+
+## Integration
+
+- **Is API access licensed?** Charging for integration is standard, and it is also
+  friction working directly against the embedding strategy that motivates it.
+- Rate limits, quotas, and fair use on the public API.
+- Whether a partner or marketplace tier ever exists, or integrations stay customer-built.
+- Whether events are pollable as well as pushed, for consumers who cannot host an
+  endpoint.
+- Which integration customers actually ask for first. SSO and SCIM are frequently the
+  real ask and are worth more per hour than a data API — check before building one.
 
 ## Operations
 
@@ -42,3 +59,4 @@ experiment, or an explicit deferral — not a default.
 - **Backup and restore across schemas.** One database makes this simpler, but a per-app
   restore (one app corrupted, others fine) is not possible without a plan.
 - **Who answers at 2am?** Unchanged from the September debate, and unsolved.
+- **Secret storage** for connection strings and keys, and how they rotate.

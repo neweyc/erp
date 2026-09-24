@@ -3,14 +3,27 @@
 Owns the `platform` schema and the slim `tenant` table. Root rules in `../CLAUDE.md`
 apply.
 
-## The boundary is the missing key
+## The boundary is grants first, then the missing key
 
-The platform process **never receives `Encryption:FieldKey`**, so it cannot read customer
-PII — not "must not", *cannot*. Its own separate key encrypts only operator TOTP secrets.
-`PlatformDbContext` maps only the `platform` schema plus `tenant`. `BoundaryTests`
-enforces the whitelist, the no-reference-to-core rule, and a banned-strings source scan.
+Say the guarantee precisely. The loose version — "the platform cannot read customer
+data" — is **false**, and believing it is how a boundary quietly stops existing.
 
-Widening any of that is a design decision with a written record, never a convenience.
+1. **Postgres grants are the boundary.** `platform.api` connects as a role granted only
+   the `platform` schema and the slim `tenant` table. It has no SELECT on `core`,
+   `identity`, or any app schema, so the connection is *unable* to read customer data
+   whatever the code asks for. `docs/database-privileges.md`.
+2. **The missing field key** protects encrypted columns only — PII, narratives,
+   termination reasons. Employee names, emails, and ticket titles are **plaintext**, and
+   the key protects none of them. The platform's own separate key encrypts operator TOTP
+   secrets and nothing else.
+3. **`PlatformDbContext` maps only `platform` + `tenant`,** and `BoundaryTests` enforces
+   the whitelist, the no-reference-to-core rule, and a banned-strings source scan. This
+   catches honest mistakes in this repo. It does not constrain raw SQL, so it is a
+   guardrail, not the boundary.
+
+Runtime and migration credentials are separate; the runtime role has no DDL.
+
+Widening any of this is a design decision with a written record, never a convenience.
 
 ## What lives here
 

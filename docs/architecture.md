@@ -148,7 +148,49 @@ session payload, and a "tenant without the app gets 403" test per feature.
 Handlers and services never check entitlements — same discipline as tenancy. Disabling an
 app hides functionality, never deletes data. Apps depend only on core, never each other.
 
-## 8. Version independence
+## 8. Reliability and the platform boundary
+
+### The outbox, not send-then-commit
+
+EMS staged its writes, sent the email, then committed, so a failed send left no orphaned
+invite. **This repo does not carry that rule.** It trades a visible failure for an
+invisible one: send succeeds, commit fails, and the recipient holds a link to an
+invitation that never existed. A timeout plus a retry can also provision twice.
+
+Commit the record and an `outbox` row in one transaction; a database-backed worker sends
+with retries. One table and one hosted service — no broker, no event bus. Delivery is
+at-least-once, so anything an email triggers must be idempotent, and every externally
+triggered provisioning call carries an idempotency key with a unique index.
+
+This relocates EMS's original problem rather than deleting it — a permanently failing
+send leaves a committed invite nobody received. So delivery status is visible on the
+record, resend is idempotent, and an undelivered invite never blocks re-inviting that
+address.
+
+### What the platform boundary actually guarantees
+
+The loose claim — "the platform cannot read customer data" — is **false**, and an earlier
+draft of this document made it. Withholding `Encryption:FieldKey` protects encrypted
+columns only. Employee names, emails, department names, and ticket titles are plaintext
+in the same database.
+
+The boundary is **Postgres grants**: each deployable connects as its own role, granted
+its own schema plus the published views it may read, with no DDL and no grant on anyone
+else's tables. That also closes the same hole for apps, where `tickets.api` could
+otherwise read `core.employee` directly and bypass `core_v1` entirely. EF mapping tests
+remain useful guardrails against honest mistakes in this repo; they are not the boundary,
+because they do not constrain raw SQL. See `docs/database-privileges.md`.
+
+### Row isolation is not reference isolation
+
+Query filters stop a tenant *reading* another's rows. Nothing in them stops a tenant B
+ticket *storing* tenant A's `employee_id`. Defences: resolve every inbound foreign id
+through the filtered context before use, carry the tenant in composite foreign keys so a
+cross-tenant reference is impossible at the database level, and test the negative. Raw
+SQL, `ExecuteUpdate`/`ExecuteDelete`, and background jobs each bypass some part of the
+machinery and are unsafe by default — see the root CLAUDE.md.
+
+## 9. Version independence
 
 - Route prefixes carry a version: `/api/tickets/v1/...`. Breaking change means `v2` with
   `v1` kept for a release.
@@ -156,7 +198,11 @@ app hides functionality, never deletes data. Apps depend only on core, never eac
   schema, or rollback is not possible.
 - `compatibility.md` records supported (shell x API) combinations. Independent cadences
   produce a grid; a monorepo makes it look like there is one version of the world.
+- **These rules are dormant until the first independent app release.** Until then the
+  supported matrix is "everything from the same commit", project references are correct,
+  and building a package feed first would delay the first working journey to solve a
+  coupling problem that does not exist yet.
 
-## 9. What this design does not yet answer
+## 10. What this design does not yet answer
 
 See `open-questions.md`. The largest: whether anyone pays for any of it.

@@ -44,8 +44,13 @@ an incidental model change cannot silently alter what apps see.
 - `identity.user.employee_id` is what makes termination cut access: terminating an
   employee deactivates the linked account and revokes its sessions. An unlinked account
   survives its employee's departure, which is the bug this link exists to prevent.
-- Inviting an address that belongs to a non-terminated employee is **rejected** rather
-  than silently linked.
+- **"Invite this employee" is a first-class operation** on the employee record, linking
+  by employee **id**. It is the normal onboarding path: create the employee today, grant
+  access tomorrow.
+- Inviting a bare *address* that belongs to a non-terminated employee is **rejected**,
+  and points at the invite-this-employee action instead. Silent email-based linking stays
+  forbidden — matching on an address guesses at identity, and the rejection is only
+  reasonable because the explicit operation exists. Never ship one without the other.
 - PII (phone, address, emergency contact) is encrypted at rest via the field converter.
   Feature code only ever sees plaintext.
 
