@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Ids;
 using AppPlatform.Tenancy;
 
@@ -14,7 +15,7 @@ namespace AppPlatform.Core.Data;
 /// A company is an ACCOUNTING dimension, never an access boundary. If entity A's staff must
 /// not see entity B's data, that is two tenants.
 /// </summary>
-public class Company : ITenantScoped, IPublicIdentified
+public class Company : IAuditable
 {
     public int Id { get; set; }
     public int TenantId { get; set; }

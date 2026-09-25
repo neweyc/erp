@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Api;
 using AppPlatform.Core.Data;
 using AppPlatform.Ids;
@@ -24,6 +25,7 @@ public static class ProvisionTenantFeature
     public class ProvisionTenantCommandHandler(
         CoreDbContext db,
         IBackgroundTenantScope tenantScope,
+        IAuditActorScope auditActor,
         TimeProvider clock)
     {
         public async Task<CommandResult> Handle(
@@ -86,6 +88,10 @@ public static class ProvisionTenantFeature
 
                 throw;
             }
+
+            // Declared, because there is no session to take one from: the company and the admin
+            // account below are audited as created by provisioning, not by an unnamed "someone".
+            auditActor.UseActor(AuditActor.System("provisioning"));
 
             // Enter the new tenant so filters and stamping behave exactly as in a request.
             // Nothing below sets TenantId by hand — this is the supported way to write before a
@@ -160,6 +166,7 @@ public static class ProvisionTenantFeature
                 [FromServices] IConfiguration config,
                 [FromServices] CoreDbContext db,
                 [FromServices] IBackgroundTenantScope tenantScope,
+                [FromServices] IAuditActorScope auditActor,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
@@ -176,7 +183,7 @@ public static class ProvisionTenantFeature
                 if (cmd is null)
                     return Results.BadRequest(new { problemCode = CoreProblems.ValidationFailed });
 
-                var handler = new ProvisionTenantCommandHandler(db, tenantScope, clock);
+                var handler = new ProvisionTenantCommandHandler(db, tenantScope, auditActor, clock);
                 return (await handler.Handle(cmd, ct)).CreateIResult();
             })
             // No .RequireAuthorization(): there is no session during provisioning. The shared

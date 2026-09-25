@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
 using AppPlatform.Core.Features.Employees;
@@ -48,7 +49,8 @@ public static class SeedE2E
     /// <summary>
     /// A principal for seed-time writes, required by the handler signature and read by nothing
     /// today — `CreateEmployeeFeature` never looks at it, and neither tenancy, the outbox, nor
-    /// SaveChanges references `Caller` at all. So nothing is attributed to this.
+    /// SaveChanges references `Caller` at all. Audit attributes seed writes to the context's
+    /// actor (<see cref="SeedActor"/>), not to this.
     ///
     /// Declared as an API KEY with a null UserId on purpose. The obvious shape —
     /// `Kind = User, UserId = Guid.Empty` — would satisfy `RequireUserId()` and any role check,
@@ -68,6 +70,12 @@ public static class SeedE2E
         CompanyId = 0,
         Role = "seed",
     };
+
+    /// <summary>
+    /// Who the audit log credits with seed writes. A named system actor rather than a fabricated
+    /// user: the seed is not a person, and audit refuses a save with no actor at all.
+    /// </summary>
+    private static AmbientAuditActor SeedActor() => new(AuditActor.System("e2e-seed"));
 
     public static async Task<int> RunAsync(string connectionString)
     {
@@ -103,12 +111,14 @@ public static class SeedE2E
         DbContextOptions<CoreDbContext> options, string name, string adminEmail, string idempotencyKey)
     {
         var tenant = new AmbientTenantProvider();
-        await using var db = new CoreDbContext(options, tenant);
+        // The handler declares its own actor ("provisioning") on this scope, as it does in a request.
+        var actor = SeedActor();
+        await using var db = new CoreDbContext(options, tenant, actor, TimeProvider.System);
 
         if (await db.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Name == name)) return true;
 
         var provisioned = await new ProvisionTenantFeature.ProvisionTenantCommandHandler(
-            db, tenant, TimeProvider.System)
+            db, tenant, actor, TimeProvider.System)
             .Handle(new(name, adminEmail, idempotencyKey));
 
         if (!provisioned.Succeeded)
@@ -126,7 +136,8 @@ public static class SeedE2E
     private static async Task<int> TenantIdAsync(DbContextOptions<CoreDbContext> options)
     {
         // IgnoreQueryFilters: there is no session here to supply a tenant.
-        await using var db = new CoreDbContext(options, new AmbientTenantProvider());
+        await using var db = new CoreDbContext(
+            options, new AmbientTenantProvider(), SeedActor(), TimeProvider.System);
 
         return (await db.Tenants.IgnoreQueryFilters().SingleAsync(t => t.Name == TenantName)).Id;
     }
@@ -136,7 +147,7 @@ public static class SeedE2E
     {
         var scoped = new AmbientTenantProvider();
         scoped.UseTenant(tenantId);
-        await using var db = new CoreDbContext(options, scoped);
+        await using var db = new CoreDbContext(options, scoped, SeedActor(), TimeProvider.System);
 
         if (await db.Employees.AnyAsync(e => e.Email == EmployeeEmail)) return true;
 

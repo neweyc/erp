@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
@@ -13,5 +14,5 @@ public class TicketsDbContextFactory : IDesignTimeDbContextFactory<TicketsDbCont
                 .MigrationsHistoryTable("__ef_migrations_history", TicketsDbContext.Schema))
             .UseSnakeCaseNamingConvention()
             .Options,
-            new AmbientTenantProvider());
+            new AmbientTenantProvider(), new AmbientAuditActor(), TimeProvider.System);
 }

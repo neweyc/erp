@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Tenancy;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -31,6 +32,8 @@ public static class AuthenticationExtensions
         services.AddScoped<ITenantProvider>(sp => sp.GetRequiredService<CallerContext>());
         services.AddScoped<IBackgroundTenantScope>(sp => sp.GetRequiredService<CallerContext>());
         services.AddScoped<ICookieAuthenticationState>(sp => sp.GetRequiredService<CallerContext>());
+        services.AddScoped<IAuditActor>(sp => sp.GetRequiredService<CallerContext>());
+        services.AddScoped<IAuditActorScope>(sp => sp.GetRequiredService<CallerContext>());
 
         services.AddAuthentication(cookie.SchemeName)
             .AddCookie(cookie.SchemeName, options =>

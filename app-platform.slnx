@@ -1,5 +1,14 @@
 <Solution>
   <Project Path="apps/tickets/tickets.api/tickets.api.csproj" />
+  <Folder Name="/packages/" />
+  <Folder Name="/packages/audit.tests/">
+    <Project Path="packages/audit.tests/AppPlatform.Audit.Tests.csproj" />
+  </Folder>
+  <Folder Name="/packages/audit/">
+    <Project Path="packages/audit/AppPlatform.Audit.csproj" />
+  </Folder>
+  <Folder Name="/packages/ids/" />
+  <Folder Name="/packages/tenancy/" />
   <Project Path="apps/tickets/tickets.api.tests/tickets.api.tests.csproj" />
   <Project Path="boundary.tests/boundary.tests.csproj" />
   <Project Path="core.api/core.api.csproj" />

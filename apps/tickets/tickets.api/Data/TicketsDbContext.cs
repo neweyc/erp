@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
 using AppPlatform.Tenancy;
@@ -5,11 +6,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AppPlatform.Tickets.Data;
 
-public class TicketsDbContext(DbContextOptions<TicketsDbContext> options, ITenantProvider tenant)
-    : TenantedDbContext(options, tenant)
+public class TicketsDbContext(
+    DbContextOptions<TicketsDbContext> options, ITenantProvider tenant, IAuditActor auditActor, TimeProvider clock)
+    : AuditedDbContext(options, tenant, auditActor, clock)
 {
     public const string Schema = "tickets";
     public const string PublishedSchema = "core_v1";
+
+    protected override string AuditSchema => Schema;
 
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<PublishedEmployee> Employees => Set<PublishedEmployee>();

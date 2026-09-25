@@ -1,3 +1,5 @@
+using AppPlatform.Audit;
+
 namespace AppPlatform.Auth.Tests;
 
 public class CallerTests
@@ -38,4 +40,44 @@ public class CallerTests
     [Fact]
     public void An_api_key_caller_carries_no_user_id()
         => Assert.Null(Key().UserId);
+
+    [Fact]
+    public void In_a_request_the_audit_actor_is_the_caller()
+    {
+        var user = Guid.NewGuid();
+        var asUser = new CallerContext();
+        asUser.SetCaller(new Caller
+        {
+            PrincipalId = user, Kind = PrincipalKind.User, UserId = user,
+            TenantId = 1, CompanyId = 1, Role = "admin",
+        });
+
+        var key = Key();
+        var asKey = new CallerContext();
+        asKey.SetCaller(key);
+
+        Assert.Equal(AuditActor.User(user), asUser.Current);
+        // The KEY is the actor, never a user — an integration's writes must not read as a person's.
+        Assert.Equal(AuditActor.ApiKey(key.PrincipalId), asKey.Current);
+    }
+
+    [Fact]
+    public void A_request_cannot_re_attribute_its_own_writes()
+    {
+        var context = new CallerContext();
+        context.SetCaller(Key());
+
+        Assert.Throws<InvalidOperationException>(
+            () => context.UseActor(AuditActor.System("provisioning")));
+    }
+
+    [Fact]
+    public void Before_a_session_the_declared_actor_is_used_and_absent_means_none()
+    {
+        var context = new CallerContext();
+        Assert.Null(context.Current);
+
+        context.UseActor(AuditActor.System("provisioning"));
+        Assert.Equal(AuditActor.System("provisioning"), context.Current);
+    }
 }

@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
@@ -31,6 +32,7 @@ public class CoreDbContextFactory : IDesignTimeDbContextFactory<CoreDbContext>
 
         // No ambient tenant at design time. The query filters are still applied to the model —
         // which is what the migration is generated from — they simply resolve to nothing.
-        return new CoreDbContext(options, new AmbientTenantProvider());
+        // Nor an audit actor: nothing is saved at design time.
+        return new CoreDbContext(options, new AmbientTenantProvider(), new AmbientAuditActor(), TimeProvider.System);
     }
 }

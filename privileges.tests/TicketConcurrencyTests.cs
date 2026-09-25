@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Outbox;
 using AppPlatform.Tenancy;
 using AppPlatform.Tickets.Data;
@@ -27,7 +28,7 @@ public class TicketConcurrencyTests(PrivilegeFixture fixture)
             new DbContextOptionsBuilder<TicketsDbContext>()
                 .UseNpgsql(fixture.ConnectionStringAs("ap_tickets_rt"))
                 .UseSnakeCaseNamingConvention().Options,
-            tenant);
+            tenant, new AmbientAuditActor(AuditActor.System("test")), TimeProvider.System);
     }
 
     private async Task<string> SeedAsync()

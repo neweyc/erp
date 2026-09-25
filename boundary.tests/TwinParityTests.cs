@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Core.Data;
 using AppPlatform.Platform.Data;
 using AppPlatform.Tenancy;
@@ -26,7 +27,7 @@ public class TwinParityTests
         return new CoreDbContext(
             new DbContextOptionsBuilder<CoreDbContext>()
                 .UseNpgsql("Host=unused").UseSnakeCaseNamingConvention().Options,
-            tenant);
+            tenant, new AmbientAuditActor(), TimeProvider.System);
     }
 
     private static IModel CoreModel() => CoreContext().Model;

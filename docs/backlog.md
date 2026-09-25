@@ -108,6 +108,21 @@ Each entry names the test that would fail if the behaviour regressed.
 - Cookie decryptable across services via a shared, persisted Data Protection key ring
   — browser-verified only; no automated assertion (see D3)
 
+### Audit
+- Every create/update/delete of an `IAuditable` entity writes a row in the same save, with the
+  actor, the public id, and old/new values of changed columns only — `AuditTrailTests` (unit)
+- A redacted property records the change but never the value; the real stack stores
+  `password_hash: [redacted]` on invite acceptance — `AuditTrailTests`, inspected after e2e
+- A save with no actor throws and saves nothing; non-auditable writes (the outbox worker) need
+  none — `AuditTrailTests`
+- The change and its row share one transaction: refusing the audit INSERT rolls the ticket back
+  too — `privileges.tests/AuditTrailTests` (real Postgres, `ap_tickets_rt`)
+- Append-only for every runtime role on every `audit_log`, platform's included —
+  `AccessMatrixTests`; `99-verify` reports a regression — `VerificationTests` (3 break/repair cases)
+- A request cannot re-attribute its writes; an API key is recorded as the key — `CallerTests`
+- New tenant data with a public id cannot skip audit silently — `BoundaryTests` via
+  `AuditModelAssertions`, proven able to fail in `AuditModelAssertionTests`
+
 ### Provisioning
 - Idempotency enforced **inside** core's transaction by a unique `provisioning_key`; two
   concurrent calls create exactly one tenant — `ProvisioningTests`
@@ -169,7 +184,7 @@ to test whether these primitives survive contact with money.
 | **D12** | Low | `WalkingSkeletonTests` still licenses via raw `INSERT INTO platform.tenant_app`. | `privileges.tests/WalkingSkeletonTests.cs:131` | A handler-level fixture shortcut, not a shipped path. The operator endpoint is covered by the e2e, so this is split coverage rather than a gap — recorded so it is not invisible if the endpoint's behaviour changes. |
 | **D14** | Medium | No operator UI. Provisioning a tenant and granting an entitlement are reachable only over HTTP — `platform.console/` exists as an empty directory. | `ls platform.console` | A1 cannot be "the whole journey in a browser" until an operator has one. Deliberate for this milestone: the customer-facing surface was the priority, and the operator paths are exercised over real HTTP with real sessions. |
 | **D10** | High (blocks financial work) | No append-only mechanism. `TenantGuard` permits `Modified`/`Deleted` on any tenant-scoped row, and nothing marks a table immutable. | Inspection: `grep -riE "immutab\|append.only"` finds only a comment on `OutboxEvent` | A posted journal must be reversible, never mutated. Without a central guard, correctness would depend on every future handler remembering. Cheap now, expensive once financial features exist. |
-| **D11** | High (blocks financial work) | `packages/audit` does not exist; `IAuditable` appears nowhere in code despite being declared in `CLAUDE.md`. | `ls packages/audit` | "Who changed this and when" is baseline for a ledger. Retrofitting means finding every write path. |
+| **D11** | High — **fixed** (Cycle 5) | `packages/audit` did not exist. | — | Built: see Cycle 5 and `docs/audit.md`. Sign-in events are not audited (security log, not data history). |
 | **D7** | Low (was Medium) | The Playwright harness still applies migrations and connects as the `postgres` superuser. | `e2e/stack.mjs`, `applyMigrations` | Narrowed: `PrivilegeFixture` now applies the **shipped** scripts as `ap_owner` and every access test connects as a runtime role, so the privilege model IS exercised — just not by the browser harness. A grant regression fails `AccessMatrixTests` and `VerificationTests`. |
 | **D8** | Low | Outbox lease is taken per batch but sized for a single send. | `packages/outbox/OutboxBackoff.cs` — `LeaseDuration` 2 min vs `BatchSize` 20 | With more than one worker replica and a slow transport, the tail of a batch can outlive its lease and be re-delivered. Cannot bite today: one replica, instant local transport. |
 | **D9** | Low | No unit coverage for `accept-invite.tsx` or the new signed-out routing. | `shell.ui/src` | Four render branches and a problem-code map are exercised only through the browser journey. |
@@ -353,7 +368,7 @@ refused-close, unassign-visibility and roster-source cases.
 authenticated user of any role. That is a product decision about who may see a roster, not a defect
 in this cycle — logged in `docs/open-questions.md`.
 
-## Current cycle
+## Previous cycle
 
 **Cycle 4 — a second tenant proves isolation through the running application (A2). Accepted.**
 
@@ -393,8 +408,80 @@ journey's; isolation fails at the API, which is where this tests it.
 With A2 verified, every Milestone 1 acceptance criterion is met at the standard its row states;
 A1's operator steps remain HTTP-only (D14).
 
-Next action: choose between Milestone 2 and a thin financial slice (which needs D10 and D11
-first) — an open decision.
+## Current cycle
+
+**Cycle 5 — audit (D11). Accepted** — four Codex review rounds, the last with no blocking findings.
+
+Chosen because it is on both forward paths: a thin financial slice needs it first (with D10), and
+it is Milestone 2 item 17. The design was already settled in `CLAUDE.md`; written out in
+`docs/audit.md` before building.
+
+Changed:
+
+- **`packages/audit`** — `IAuditable` (public id + tenant scope), `[AuditRedacted]`, `AuditActor`
+  (user, API key, or named system process), `AuditedDbContext` staging rows before the tenant
+  guard so each row is stamped, and `AuditModelAssertions`.
+- **`CallerContext`** supplies the actor from the caller, as it supplies the tenant; `UseActor` for
+  pre-session paths, refused inside a request.
+- **Pre-session paths declare their actor**: provisioning (`System("provisioning")`), invite
+  acceptance and sign-in (the user), the e2e seed (`System("e2e-seed")`).
+- `Company`, `Employee`, `User`, `Ticket` are auditable; `User.PasswordHash` is redacted.
+- Migrations `AddAuditLog` for core and tickets — additive, one table and two indexes each —
+  with per-migration and regenerated bootstrap scripts.
+- `02-grants.sql` revokes UPDATE (table and column), DELETE and TRUNCATE on every `audit_log` for
+  every `ap_%_rt` role, both found by name, so a new app is covered once `02` runs after its first
+  migration; `99-verify.sql` check 12 reports a regression, column grants included.
+
+Evidence (measured, after all review rounds): 454 .NET tests pass, 121 of them against real
+PostgreSQL; 19/19 Playwright. Mutations: disabling redaction and the append-only check fails exactly the three
+tests covering them; reverting to snapshot "old" values fails exactly the three detached-write
+tests; removing the withdrawal fails exactly the retry test. The real stack's audit rows after the
+journey were inspected: provisioning, seed, user and ticket writes each attributed as designed.
+
+**Independent review (Codex) — 3 blocking, 4 optional. All taken.**
+
+| # | Finding | Resolution |
+|---|---|---|
+| B1 | A detached `Update()` sets originals equal to the supplied values, so the snapshot saw no change: the write went unaudited, even with no actor. A detached delete recorded the caller's values as history. | "Old" values are read from the database by key. Tests for detached update, delete, and no-actor. **Found while fixing:** EF's read is not tenant-filtered, so a forged write read the other tenant's row into a staged row before failing — now refused by an explicit tenant comparison, proved against real Postgres. |
+| B2 | Rows staged for a failed save stayed tracked; a corrected retry committed a row for the failed change too. | Rows are built all-or-nothing and withdrawn if the save fails. |
+| B3 | `GRANT UPDATE (changes)` is invisible to `has_table_privilege` and survives a table-level REVOKE: verify reported clean while history was rewritable. | Verify uses `has_any_column_privilege`; `02` revokes column UPDATE. Break/repair case, plus a test that re-running `02` actually removes it. |
+| O4 | Owned-type changes escape audit. | Refused by `FindUnsupportedAuditableShapes`. |
+| O5 | Database-generated values and temporary keys recorded as placeholders. | Generated non-key values refused by the same check; temporary values refused at runtime. |
+| O6 | The boundary check passed a plain context that mapped the audit table by hand. | Checks the context's type; negative fixture added. |
+| O7 | "Covered the day it is created" overstated; the role list was fixed. | Roles found by pattern in both scripts; claim corrected to "once `02` runs after its first migration". |
+
+**Re-review (Codex) — all seven fixes confirmed; 3 further blocking, 1 optional. All taken.**
+
+| # | Finding | Resolution |
+|---|---|---|
+| R1 | The database "before" was read outside the write's transaction and unlocked: a concurrent writer could change the row in between, so history recorded the wrong "before", and a detached write could overwrite a concurrent change with no row at all. | The row is locked (`FOR UPDATE`, tenant-scoped) and read inside the save's transaction — its own when the caller has none. Real-Postgres test: a concurrent UPDATE fired between the audit read and the write times out with `55P03`, and the row records the true "before". Removing the transaction fails exactly that test. |
+| R2 | A detached delete filed the row under the caller-supplied public id. | The stored public id is used; changing one is refused. |
+| R3 | `02-grants.sql` ran statement by statement, so its bulk re-grant left the audit logs writable until the revoke. | The file is one transaction. |
+| R-O | A row deleted between load and save now surfaced as a 500, not the 409 handlers give a concurrency conflict. | Raised as `DbUpdateConcurrencyException`, as is a forged write — the same outcome `TenantWriteIsolationTests` documents without audit. |
+
+**Third review (Codex) — round-two fixes confirmed; 1 blocking, 2 optional. All taken.**
+
+| # | Finding | Resolution |
+|---|---|---|
+| T1 | In its own transaction, EF accepted changes before the commit: a failed commit rolled the database back while the tracker believed the work saved, so a retry on the same context wrote nothing. | Changes are accepted only after the commit. Real-Postgres test, sync and async, injects a failed commit and retries the same context: the change lands with exactly one audit row. Reverting fails both. |
+| T2 | Rows were locked in tracking order, so two saves touching the same rows in opposite orders could deadlock. | Locked in table-then-key order. No test: a deadlock test would be timing-dependent. |
+| T3 | The lock's tenant came from the entity, so a tenant-2 context attaching a row with its genuine tenant-1 value locked and read it before the guard refused. | The tenant guard runs before any lock. Real-Postgres test counts `FOR UPDATE` statements: none. Reverting fails it. |
+
+Not covered by a test: the runtime refusal of a temporary foreign-key value (no current entity can
+produce one), lock ordering (T2), and that no other session observes `02-grants.sql` mid-way —
+that rests on PostgreSQL's transactional grants, not on anything here.
+
+Decisions taken without asking, each reversible:
+
+- One `audit_log` per **service**, not per schema — core's covers `identity`. `CLAUDE.md` said "per
+  schema"; a second log for `identity` would split one account's history across two tables.
+- `platform.audit_log` made append-only by the same grant; platform code only ever inserts.
+- Audit values include personal data. Retention and erasure are an open question, not decided.
+
+**Fourth review (Codex): all three third-round fixes confirmed, no new findings. NO BLOCKING FINDINGS.**
+
+Next action: the M2-versus-financial-slice decision. D10 (a general append-only guard) is the
+remaining prerequisite for the financial slice.
 
 ---
 

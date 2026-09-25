@@ -136,6 +136,27 @@ session_fn_reach AS (
   WHERE n.nspname IN ('identity','identity_v1')
     AND p.proname IN ('session_context','touch_session')
     AND has_function_privilege('ap_platform_rt', p.oid, 'EXECUTE')
+),
+
+-- 12. Audit logs are append-only. A runtime role that can UPDATE, DELETE or TRUNCATE one can
+--     rewrite the history it exists to keep.
+--
+--     Roles found by name pattern, not the runtime_roles list above, so a new app's role is
+--     checked without an edit here. UPDATE is tested with has_any_column_privilege, because
+--     has_table_privilege does not see a grant on individual columns — and `UPDATE (changes)`
+--     is all it takes to rewrite a row's history.
+mutable_audit AS (
+  SELECT 'runtime role can modify an audit_log',
+         format('%s on %s.%s (%s)', r.rolname, n.nspname, c.relname, p.priv)
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  CROSS JOIN (SELECT rolname FROM pg_roles WHERE rolname LIKE 'ap\_%\_rt') r
+  CROSS JOIN (SELECT unnest(ARRAY['UPDATE','DELETE','TRUNCATE']) AS priv) p
+  WHERE c.relname = 'audit_log' AND c.relkind = 'r'
+    AND CASE p.priv
+          WHEN 'UPDATE' THEN has_any_column_privilege(r.rolname, c.oid, 'UPDATE')
+          ELSE has_table_privilege(r.rolname, c.oid, p.priv)
+        END
 )
 
 SELECT * FROM invoker_views
@@ -151,4 +172,5 @@ UNION ALL SELECT * FROM core_overreach
 UNION ALL SELECT * FROM core_platform_reach
 UNION ALL SELECT * FROM public_objects
 UNION ALL SELECT * FROM session_fn_reach
+UNION ALL SELECT * FROM mutable_audit
 ORDER BY 1, 2;

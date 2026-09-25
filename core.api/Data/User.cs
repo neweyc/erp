@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Ids;
 using AppPlatform.Tenancy;
 
@@ -13,7 +14,7 @@ public enum UserStatus
 /// <summary>
 /// An account that can sign in. Lives in the <c>identity</c> schema.
 /// </summary>
-public class User : ITenantScoped, IPublicIdentified
+public class User : IAuditable
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public int TenantId { get; set; }
@@ -28,6 +29,8 @@ public class User : ITenantScoped, IPublicIdentified
     /// sign in — which is what makes an invitation mean something rather than being a
     /// pre-activated account with a link attached.
     /// </summary>
+    /// <summary>Redacted in the audit log: a hash is still a secret worth not copying.</summary>
+    [AuditRedacted]
     public string? PasswordHash { get; set; }
     public UserStatus Status { get; set; } = UserStatus.Invited;
 

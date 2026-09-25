@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
@@ -18,7 +19,8 @@ public static class AcceptInviteFeature
     public record AcceptInviteCommand(string? Token, string? Password);
 
     public class AcceptInviteCommandHandler(
-        IAuthService auth, IBackgroundTenantScope tenantScope, TimeProvider clock)
+        IAuthService auth, IBackgroundTenantScope tenantScope, IAuditActorScope auditActor,
+        TimeProvider clock)
     {
         /// <summary>
         /// Short, because a password is what people choose badly. Length is the only requirement
@@ -55,6 +57,10 @@ public static class AcceptInviteFeature
             if (user is null)
                 return CommandResult.Invalid(AuthProblems.InvalidToken, "This invitation link is not valid.");
 
+            // The person accepting is the actor: the token has just authenticated them, and there
+            // is no session yet to say so.
+            auditActor.UseActor(AuditActor.User(user.Id));
+
             user.PasswordHash = PasswordHasher.Hash(cmd.Password);
             user.Status = UserStatus.Active;
 
@@ -76,10 +82,11 @@ public static class AcceptInviteFeature
                 AcceptInviteCommand cmd,
                 [FromServices] IAuthService auth,
                 [FromServices] IBackgroundTenantScope tenantScope,
+                [FromServices] IAuditActorScope auditActor,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new AcceptInviteCommandHandler(auth, tenantScope, clock);
+                var handler = new AcceptInviteCommandHandler(auth, tenantScope, auditActor, clock);
                 return (await handler.Handle(cmd, ct)).CreateIResult();
             })
             // Anonymous by necessity: the person has no session yet, and the token is what

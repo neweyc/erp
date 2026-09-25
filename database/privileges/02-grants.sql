@@ -8,6 +8,13 @@
 
 \set ON_ERROR_STOP on
 
+-- ONE transaction, committed at the end of the file. The bulk re-grant below hands UPDATE and
+-- DELETE on every table — audit logs included — to the runtime roles, and the audit section
+-- takes them back. Run statement by statement, a live runtime connection could rewrite history
+-- in between, and a script stopped part-way would leave the logs writable. Grants are
+-- transactional in PostgreSQL, so other sessions see only the final state or none of it.
+BEGIN;
+
 -- ---------------------------------------------------------------------------
 -- Bulk re-grant (repairs drift; no-ops on a correctly bootstrapped database)
 -- ---------------------------------------------------------------------------
@@ -30,6 +37,50 @@ GRANT SELECT ON ALL TABLES IN SCHEMA identity_v1 TO ap_core_rt, ap_tickets_rt;
 -- roles. Without it every published view fails on the table behind it.
 GRANT ap_platform_migrate, ap_core_migrate, ap_tickets_migrate TO ap_owner;
 ALTER DEFAULT PRIVILEGES FOR ROLE ap_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
+-- ---------------------------------------------------------------------------
+-- Audit logs are append-only
+-- ---------------------------------------------------------------------------
+-- Every `audit_log`, in every schema, loses UPDATE, DELETE and TRUNCATE for every runtime
+-- role. The default privileges in 01 grant all of these to any new table, and the bulk
+-- re-grant above restores them — so this must come AFTER both.
+--
+-- Found by NAME, tables and roles alike: a new app's log and its `ap_<app>_rt` role are
+-- covered with no edit here, once this file runs after that app's first migration, as the
+-- runbook in database/README.md already requires.
+--
+-- Column-level UPDATE is revoked separately. A table-level REVOKE does not remove a grant
+-- made on individual columns, so `GRANT UPDATE (changes)` would otherwise survive this
+-- script and leave the history rewritable.
+--
+-- This is the defence that holds against code that is not in this repo. AuditedDbContext
+-- also refuses to save a modified or deleted entry, but that only binds code that goes
+-- through it. A history that the application could rewrite is not a history.
+
+DO $$
+DECLARE
+  log     regclass;
+  role    name;
+  columns text;
+BEGIN
+  FOR log IN
+    SELECT c.oid::regclass
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = 'audit_log' AND c.relkind = 'r'
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  LOOP
+    SELECT string_agg(quote_ident(a.attname), ', ') INTO columns
+    FROM pg_attribute a
+    WHERE a.attrelid = log AND a.attnum > 0 AND NOT a.attisdropped;
+
+    FOR role IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'ap\_%\_rt' LOOP
+      EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON %s FROM %I', log, role);
+      EXECUTE format('REVOKE UPDATE (%s) ON %s FROM %I', columns, log, role);
+    END LOOP;
+  END LOOP;
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- The provisioning exception
@@ -89,3 +140,5 @@ GRANT  EXECUTE ON FUNCTION identity_v1.touch_session(uuid) TO ap_core_rt, ap_tic
 REVOKE ALL ON SCHEMA core, identity, tickets, core_v1, identity_v1 FROM ap_platform_rt;
 REVOKE ALL ON SCHEMA platform FROM ap_tickets_rt;
 REVOKE ALL ON SCHEMA core, identity FROM ap_tickets_rt;
+
+COMMIT;

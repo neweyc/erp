@@ -80,6 +80,13 @@ public sealed class PrivilegeFixture : IAsyncLifetime
     public Task DisposeAsync() => _container.DisposeAsync().AsTask();
 
     /// <summary>
+    /// Runs 02-grants.sql again, as the runbook does to repair drift. A test uses it to prove the
+    /// script actually repairs something, not merely that 99-verify can see the damage.
+    /// </summary>
+    public Task ReapplyGrantsAsync()
+        => ExecuteFileAsync(Path.Combine(RepositoryPaths.Project("database/privileges"), "02-grants.sql"));
+
+    /// <summary>
     /// Strips psql meta-commands, which Npgsql cannot execute. Only backslash directives
     /// are removed; if a script ever needs \i or \copy to be meaningful, it has outgrown
     /// being run this way and the test should fail rather than silently skip it.

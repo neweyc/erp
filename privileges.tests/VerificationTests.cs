@@ -31,6 +31,15 @@ public class VerificationTests(PrivilegeFixture fixture)
     [InlineData("GRANT EXECUTE ON FUNCTION identity_v1.session_context(uuid) TO ap_platform_rt",
                 "REVOKE EXECUTE ON FUNCTION identity_v1.session_context(uuid) FROM ap_platform_rt")]
     [InlineData("ALTER ROLE ap_tickets_rt SUPERUSER", "ALTER ROLE ap_tickets_rt NOSUPERUSER")]
+    [InlineData("GRANT UPDATE ON core.audit_log TO ap_core_rt",
+                "REVOKE UPDATE ON core.audit_log FROM ap_core_rt")]
+    [InlineData("GRANT DELETE ON tickets.audit_log TO ap_tickets_rt",
+                "REVOKE DELETE ON tickets.audit_log FROM ap_tickets_rt")]
+    [InlineData("GRANT TRUNCATE ON platform.audit_log TO ap_platform_rt",
+                "REVOKE TRUNCATE ON platform.audit_log FROM ap_platform_rt")]
+    // A COLUMN grant: invisible to has_table_privilege, and enough to rewrite history.
+    [InlineData("GRANT UPDATE (changes) ON core.audit_log TO ap_core_rt",
+                "REVOKE UPDATE (changes) ON core.audit_log FROM ap_core_rt")]
     public async Task Breaking_a_rule_is_reported_and_repairing_it_clears(string breakSql, string repairSql)
     {
         await fixture.ExecuteAsync(breakSql);

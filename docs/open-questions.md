@@ -80,6 +80,12 @@ remain open; they are not a blanket prohibition on building experiments.
 
 ## Operations
 
+- **Audit retention and erasure.** `audit_log` is append-only and records old and new values, so an
+  employee's email change stores both addresses indefinitely. A right-to-erasure request and an
+  immutable history are in tension. Options: redact personal columns in audit by default, a
+  retention window with a privileged prune outside the runtime role, or pseudonymise on erasure.
+  Undecided; nothing prunes audit rows today. See `docs/audit.md`.
+
 - **Supported version matrix.** `compatibility.md` exists but is empty; the policy for how
   many versions back are supported has not been set.
 - **Backup and restore across schemas.** One database makes this simpler, but a per-app

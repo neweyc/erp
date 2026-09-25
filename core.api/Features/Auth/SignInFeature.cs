@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using System.Security.Claims;
 using AppPlatform.Api;
 using AppPlatform.Auth;
@@ -14,7 +15,7 @@ public static class SignInFeature
     public record SignInCommand(string? Email, string? Password);
     public record SignInOutcome(Guid? SessionId, string? Role, string? ProblemCode);
 
-    public class SignInCommandHandler(IAuthService auth, TimeProvider clock)
+    public class SignInCommandHandler(IAuthService auth, IAuditActorScope auditActor, TimeProvider clock)
     {
         /// <summary>Matches the tenant-user lifetime in docs/auth-and-access.md.</summary>
         public static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(7);
@@ -39,6 +40,10 @@ public static class SignInFeature
             // which half of a guess was right — and "that address exists but is not yet active"
             // is itself worth knowing to an attacker.
             if (user is null || !valid || user.Status != UserStatus.Active) return Failed();
+
+            // The user is the actor for anything this sign-in changes — today, only a rehash below.
+            // Declared here because the session that would normally say so does not exist yet.
+            auditActor.UseActor(AuditActor.User(user.Id));
 
             if (PasswordHasher.NeedsRehash(user.PasswordHash))
             {
@@ -79,6 +84,7 @@ public static class SignInFeature
                 [FromServices] IAuthService auth,
                 [FromServices] IBackgroundTenantScope tenantScope,
                 [FromServices] ITenantResolver tenants,
+                [FromServices] IAuditActorScope auditActor,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
@@ -91,7 +97,7 @@ public static class SignInFeature
 
                 tenantScope.UseTenant(id);
 
-                var handler = new SignInCommandHandler(auth, clock);
+                var handler = new SignInCommandHandler(auth, auditActor, clock);
                 var outcome = await handler.Handle(id, cmd, ct);
 
                 if (outcome.SessionId is not { } sessionId)

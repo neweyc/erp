@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Boundary;
 using AppPlatform.Core.Data;
 using AppPlatform.Ids;
@@ -24,7 +25,7 @@ public class CoreBoundaryTests
                 // under test would not be the shape that ships.
                 .UseNpgsql("Host=localhost;Database=unused")
                 .Options,
-            tenant);
+            tenant, new AmbientAuditActor(), TimeProvider.System);
     }
 
     [Fact]
@@ -57,6 +58,18 @@ public class CoreBoundaryTests
 
         Assert.Empty(TenantModelAssertions.FindEntitiesMissingTenantIndex(model));
         Assert.Empty(TenantModelAssertions.FindReferencesNotCarryingTenant(model));
+    }
+
+    [Fact]
+    public void Every_piece_of_tenant_data_the_outside_world_can_name_is_audited()
+    {
+        using var context = Context();
+
+        // No exemptions today. Session and UserToken are left out by construction — they carry no
+        // public id — and docs/audit.md says why neither needs a row of its own.
+        Assert.Empty(AuditModelAssertions.FindEntitiesThatShouldBeAudited(context.Model));
+        Assert.Empty(AuditModelAssertions.FindAuditableEntitiesInUnauditedContext(context));
+        Assert.Empty(AuditModelAssertions.FindUnsupportedAuditableShapes(context.Model));
     }
 
     [Fact]

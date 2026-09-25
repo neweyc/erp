@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Ids;
 using AppPlatform.Tenancy;
 
@@ -18,7 +19,7 @@ public enum EmployeeStatus
 /// historically, while being excluded from active counts. Every new employee-facing query has
 /// to decide explicitly how it treats terminated employees and say so.
 /// </summary>
-public class Employee : ITenantScoped, IPublicIdentified
+public class Employee : IAuditable
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public int TenantId { get; set; }

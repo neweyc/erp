@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Boundary;
 using AppPlatform.Ids;
 using AppPlatform.Tenancy;
@@ -13,7 +14,9 @@ namespace AppPlatform.BoundaryTests;
 /// </summary>
 public class TicketsBoundaryTests
 {
-    private static IModel Model()
+    private static IModel Model() => Context().Model;
+
+    private static TicketsDbContext Context()
     {
         var tenant = new AmbientTenantProvider();
         tenant.UseTenant(1);
@@ -21,7 +24,7 @@ public class TicketsBoundaryTests
         return new TicketsDbContext(
             new DbContextOptionsBuilder<TicketsDbContext>()
                 .UseNpgsql("Host=unused").UseSnakeCaseNamingConvention().Options,
-            tenant).Model;
+            tenant, new AmbientAuditActor(), TimeProvider.System);
     }
 
     private static ServiceBoundary Boundary()
@@ -63,6 +66,16 @@ public class TicketsBoundaryTests
 
         Assert.Empty(TenantModelAssertions.FindEntitiesMissingTenantIndex(model));
         Assert.Empty(TenantModelAssertions.FindReferencesNotCarryingTenant(model));
+    }
+
+    [Fact]
+    public void Every_piece_of_tenant_data_the_outside_world_can_name_is_audited()
+    {
+        using var context = Context();
+
+        Assert.Empty(AuditModelAssertions.FindEntitiesThatShouldBeAudited(context.Model));
+        Assert.Empty(AuditModelAssertions.FindAuditableEntitiesInUnauditedContext(context));
+        Assert.Empty(AuditModelAssertions.FindUnsupportedAuditableShapes(context.Model));
     }
 
     [Fact]

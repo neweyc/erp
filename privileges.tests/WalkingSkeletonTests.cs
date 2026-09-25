@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using System.Text.Json;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
@@ -59,22 +60,30 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
-    private CoreDbContext Core(AmbientTenantProvider tenant)
+    /// <summary>
+    /// A context whose audit actor is <paramref name="actor"/> — pass the same instance to a
+    /// handler that declares its own actor (provisioning, accept, sign-in), so the declaration
+    /// reaches the context exactly as it does through DI. Otherwise a named test actor.
+    /// </summary>
+    private CoreDbContext Core(AmbientTenantProvider tenant, AmbientAuditActor? actor = null)
         => new(new DbContextOptionsBuilder<CoreDbContext>()
-            .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options, tenant);
+            .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options,
+            tenant, actor ?? new AmbientAuditActor(AuditActor.System("test")), TimeProvider.System);
 
     private TicketsDbContext Tickets(AmbientTenantProvider tenant)
         => new(new DbContextOptionsBuilder<TicketsDbContext>()
-            .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options, tenant);
+            .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options,
+            tenant, new AmbientAuditActor(AuditActor.System("test")), TimeProvider.System);
 
     private async Task<(int TenantId, string InviteToken, string AdminEmail)> ProvisionAsync(string name)
     {
         var email = $"admin@{name.ToLowerInvariant()}.test";
         var tenant = new AmbientTenantProvider();
-        await using var db = Core(tenant);
+        var actor = new AmbientAuditActor();
+        await using var db = Core(tenant, actor);
 
         var result = await new Core.Features.Internal.ProvisionTenantFeature
-            .ProvisionTenantCommandHandler(db, tenant, TimeProvider.System)
+            .ProvisionTenantCommandHandler(db, tenant, actor, TimeProvider.System)
             .Handle(new(name, email, Guid.NewGuid().ToString()));
 
         Assert.True(result.Succeeded, result.Message);
@@ -100,20 +109,22 @@ public class WalkingSkeletonTests : IAsyncLifetime
     private async Task<Guid> AcceptAndSignInAsync(int tenantId, string email, string password)
     {
         var tenant = new AmbientTenantProvider();
-        await using var db = Core(tenant);
+        var actor = new AmbientAuditActor();
+        await using var db = Core(tenant, actor);
 
         var accepted = await new AcceptInviteFeature.AcceptInviteCommandHandler(
-            new EFAuthService(db), tenant, TimeProvider.System)
+            new EFAuthService(db), tenant, actor, TimeProvider.System)
             .Handle(new(await Task.FromResult(TokenFor(tenantId)), password));
 
         Assert.True(accepted.Succeeded, accepted.Message);
 
         var signIn = new AmbientTenantProvider();
         signIn.UseTenant(tenantId);
-        await using var signInDb = Core(signIn);
+        var signInActor = new AmbientAuditActor();
+        await using var signInDb = Core(signIn, signInActor);
 
         var outcome = await new SignInFeature.SignInCommandHandler(
-            new EFAuthService(signInDb), TimeProvider.System)
+            new EFAuthService(signInDb), signInActor, TimeProvider.System)
             .Handle(tenantId, new(email, password));
 
         Assert.NotNull(outcome.SessionId);
@@ -256,10 +267,11 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await AcceptAndSignInAsync(tenantId, email, "correct horse battery");
 
         var tenant = new AmbientTenantProvider();
-        await using var db = Core(tenant);
+        var actor = new AmbientAuditActor();
+        await using var db = Core(tenant, actor);
 
         var second = await new AcceptInviteFeature.AcceptInviteCommandHandler(
-            new EFAuthService(db), tenant, TimeProvider.System)
+            new EFAuthService(db), tenant, actor, TimeProvider.System)
             .Handle(new(token, "a different password"));
 
         // A link that still works after use is a permanent way in for anyone who saw the email.

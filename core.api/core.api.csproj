@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../packages/api/AppPlatform.Api.csproj" />
+    <ProjectReference Include="../packages/audit/AppPlatform.Audit.csproj" />
     <ProjectReference Include="../packages/ids/AppPlatform.Ids.csproj" />
     <ProjectReference Include="../packages/outbox/AppPlatform.Outbox.csproj" />
   </ItemGroup>

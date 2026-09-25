@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
@@ -17,10 +18,12 @@ public class AuthTests
     private readonly AmbientTenantProvider _tenant = new();
     private readonly FakeTimeProvider _clock = new(Now);
 
-    private AcceptInviteFeature.AcceptInviteCommandHandler Accept()
-        => new(_auth.Object, _tenant, _clock);
+    private readonly AmbientAuditActor _actor = new();
 
-    private SignInFeature.SignInCommandHandler SignIn() => new(_auth.Object, _clock);
+    private AcceptInviteFeature.AcceptInviteCommandHandler Accept()
+        => new(_auth.Object, _tenant, _actor, _clock);
+
+    private SignInFeature.SignInCommandHandler SignIn() => new(_auth.Object, _actor, _clock);
 
     private (UserToken Token, string Plaintext, User User) Invited(
         DateTimeOffset? expiresAt = null, DateTimeOffset? usedAt = null)
@@ -186,5 +189,42 @@ public class AuthTests
 
         var session = Assert.IsType<GetSessionFeature.SessionModel>(result.Value);
         Assert.Equal("Other Ltd", session.TenantName);
+    }
+
+    [Fact]
+    public async Task Accepting_an_invitation_is_attributed_to_the_person_accepting()
+    {
+        // No session exists yet, so without a declared actor the activation would be refused by
+        // audit — or, worse, attributed to nobody.
+        var (_, plaintext, user) = Invited();
+
+        await Accept().Handle(new(plaintext, "correct horse battery"));
+
+        Assert.Equal(AuditActor.User(user.Id), _actor.Current);
+    }
+
+    [Fact]
+    public async Task Signing_in_is_attributed_to_the_person_signing_in()
+    {
+        var user = new User
+        {
+            Email = "ada@acme.test", Role = "admin", Status = UserStatus.Active,
+            PasswordHash = PasswordHasher.Hash("correct horse battery"),
+        };
+        _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync(user);
+
+        await SignIn().Handle(1, new("ada@acme.test", "correct horse battery"));
+
+        Assert.Equal(AuditActor.User(user.Id), _actor.Current);
+    }
+
+    [Fact]
+    public async Task A_failed_sign_in_declares_no_actor()
+    {
+        _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync((User?)null);
+
+        await SignIn().Handle(1, new("ada@acme.test", "wrong password entirely"));
+
+        Assert.Null(_actor.Current);
     }
 }

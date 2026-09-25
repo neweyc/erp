@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Core.Data;
 using AppPlatform.Outbox;
 using AppPlatform.Tenancy;
@@ -85,6 +86,10 @@ public class OutboxWorkerTests : IAsyncLifetime
         services.AddScoped<AmbientTenantProvider>();
         services.AddScoped<ITenantProvider>(sp => sp.GetRequiredService<AmbientTenantProvider>());
         services.AddScoped<IBackgroundTenantScope>(sp => sp.GetRequiredService<AmbientTenantProvider>());
+        // Registered because the context requires one, and left EMPTY on purpose: the worker writes
+        // only outbox rows, which are not audited, so it must keep working with no actor at all.
+        services.AddScoped<IAuditActor, AmbientAuditActor>();
+        services.AddSingleton<TimeProvider>(clock);
 
         services.AddDbContext<CoreDbContext>(options => options
             .UseNpgsql(_connection).UseSnakeCaseNamingConvention());
@@ -123,7 +128,7 @@ public class OutboxWorkerTests : IAsyncLifetime
         await using var db = new CoreDbContext(
             new DbContextOptionsBuilder<CoreDbContext>()
                 .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options,
-            tenant);
+            tenant, new AmbientAuditActor(AuditActor.System("test")), TimeProvider.System);
 
         var message = new Outbox.Outbox(db, new FakeTimeProvider(now))
             .AddMessage(OutboxTransports.Email, "invitee@example.test", payload);
@@ -140,7 +145,7 @@ public class OutboxWorkerTests : IAsyncLifetime
         await using var db = new CoreDbContext(
             new DbContextOptionsBuilder<CoreDbContext>()
                 .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options,
-            tenant);
+            tenant, new AmbientAuditActor(AuditActor.System("test")), TimeProvider.System);
 
         return await db.Set<OutboxMessage>().SingleAsync(m => m.Id == messageId);
     }
@@ -420,7 +425,7 @@ public class OutboxWorkerTests : IAsyncLifetime
         await using var db = new CoreDbContext(
             new DbContextOptionsBuilder<CoreDbContext>()
                 .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options,
-            tenant);
+            tenant, new AmbientAuditActor(AuditActor.System("test")), TimeProvider.System);
 
         Assert.Empty(await db.Set<OutboxMessage>().Where(m => m.Id == messageId).ToListAsync());
     }

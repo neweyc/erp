@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Ids;
 using AppPlatform.Tenancy;
 
@@ -16,7 +17,7 @@ public enum TicketStatus
     Closed,
 }
 
-public class Ticket : ITenantScoped, IPublicIdentified
+public class Ticket : IAuditable
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public int TenantId { get; set; }

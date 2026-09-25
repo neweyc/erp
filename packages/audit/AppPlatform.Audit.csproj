@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AppPlatform.Audit</RootNamespace>
+    <Description>Automatic audit rows for IAuditable entities, written in the same SaveChanges as the change.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ids/AppPlatform.Ids.csproj" />
+    <ProjectReference Include="../tenancy/AppPlatform.Tenancy.csproj" />
+  </ItemGroup>
+</Project>

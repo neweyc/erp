@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Auth;
 using AppPlatform.Boundary;
 using AppPlatform.Core.Data;
@@ -49,21 +50,24 @@ public class ProvisioningTests : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
-    private (CoreDbContext Db, AmbientTenantProvider Tenant) Open()
+    /// <summary>The actor is returned so the handler declares "provisioning" on the SAME scope
+    /// the context reads from, as it does in the running service.</summary>
+    private (CoreDbContext Db, AmbientTenantProvider Tenant, AmbientAuditActor Actor) Open()
     {
         var tenant = new AmbientTenantProvider();
+        var actor = new AmbientAuditActor();
         return (new CoreDbContext(
             new DbContextOptionsBuilder<CoreDbContext>()
                 .UseNpgsql(_connection).UseSnakeCaseNamingConvention().Options,
-            tenant), tenant);
+            tenant, actor, TimeProvider.System), tenant, actor);
     }
 
     private async Task<Api.CommandResult> ProvisionAsync(string name, string email, string key)
     {
-        var (db, tenant) = Open();
+        var (db, tenant, actor) = Open();
         await using var _ = db;
 
-        return await new ProvisionTenantCommandHandler(db, tenant, TimeProvider.System)
+        return await new ProvisionTenantCommandHandler(db, tenant, actor, TimeProvider.System)
             .Handle(new(name, email, key));
     }
 
@@ -74,7 +78,7 @@ public class ProvisioningTests : IAsyncLifetime
 
         Assert.True(result.Succeeded, $"provisioning failed: {result.Message}");
 
-        var (db, tenant) = Open();
+        var (db, tenant, actor) = Open();
         await using var _ = db;
 
         var row = await db.Tenants.SingleAsync(t => t.Name == "Acme");
@@ -99,7 +103,7 @@ public class ProvisioningTests : IAsyncLifetime
 
         Assert.True(second.Succeeded);
 
-        var (db, _) = Open();
+        var (db, _, _) = Open();
         await using var __ = db;
         Assert.Single(await db.Tenants.Where(t => t.ProvisioningKey == key).ToListAsync());
     }
@@ -118,7 +122,7 @@ public class ProvisioningTests : IAsyncLifetime
 
         Assert.All(results, r => Assert.True(r.Succeeded, r.Message));
 
-        var (db, _) = Open();
+        var (db, _, _) = Open();
         await using var _unused = db;
         Assert.Single(await db.Tenants.Where(t => t.ProvisioningKey == key).ToListAsync());
     }
@@ -132,13 +136,16 @@ public class ProvisioningTests : IAsyncLifetime
         // seeded lowercase, accommodating the bug rather than mirroring the migrations.
         await ProvisionAsync("Session Ltd", "a@session.test", Guid.NewGuid().ToString());
 
-        var (db, tenant) = Open();
+        var (db, tenant, actor) = Open();
         await using var _ = db;
 
         var row = await db.Tenants.SingleAsync(t => t.Name == "Session Ltd");
         tenant.UseTenant(row.Id);
 
         var user = await db.Users.SingleAsync();
+
+        // Stands in for the person accepting, whom audit requires be named.
+        actor.UseActor(AuditActor.User(user.Id));
 
         // Accepting the invitation is what makes an account usable. A provisioned admin is
         // Invited, and the session function reports user_active false for them — correctly: an
@@ -174,7 +181,7 @@ public class ProvisioningTests : IAsyncLifetime
     {
         await ProvisionAsync("Suspended Ltd", "a@susp.test", Guid.NewGuid().ToString());
 
-        var (db, tenant) = Open();
+        var (db, tenant, actor) = Open();
         await using var _ = db;
 
         var row = await db.Tenants.SingleAsync(t => t.Name == "Suspended Ltd");
@@ -186,6 +193,9 @@ public class ProvisioningTests : IAsyncLifetime
             $"UPDATE platform.tenant SET status = 'Suspended' WHERE id = {row.Id}");
 
         var user = await db.Users.SingleAsync();
+
+        // Stands in for the person accepting, whom audit requires be named.
+        actor.UseActor(AuditActor.User(user.Id));
 
         // Accepting the invitation is what makes an account usable. A provisioned admin is
         // Invited, and the session function reports user_active false for them — correctly: an
@@ -230,7 +240,7 @@ public class ProvisioningTests : IAsyncLifetime
         await ProvisionAsync("Alpha", "a@alpha.test", Guid.NewGuid().ToString());
         await ProvisionAsync("Beta", "b@beta.test", Guid.NewGuid().ToString());
 
-        var (db, tenant) = Open();
+        var (db, tenant, actor) = Open();
         await using var _ = db;
 
         var alpha = await db.Tenants.SingleAsync(t => t.Name == "Alpha");

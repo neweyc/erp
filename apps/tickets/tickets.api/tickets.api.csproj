@@ -18,6 +18,7 @@
     <!-- No reference to core.api. Tickets reads employees through the PUBLISHED VIEW, and the
          Postgres grants make that true even for code that is not in this repo. -->
     <ProjectReference Include="../../../packages/api/AppPlatform.Api.csproj" />
+    <ProjectReference Include="../../../packages/audit/AppPlatform.Audit.csproj" />
     <ProjectReference Include="../../../packages/entitlements/AppPlatform.Entitlements.csproj" />
     <ProjectReference Include="../../../packages/ids/AppPlatform.Ids.csproj" />
     <ProjectReference Include="../../../packages/outbox/AppPlatform.Outbox.csproj" />

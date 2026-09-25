@@ -64,6 +64,22 @@ public class AccessMatrixTests(PrivilegeFixture fixture)
         { "an app cannot update the session table directly", "ap_tickets_rt",
           "UPDATE identity.session SET last_seen_at = now()", false },
 
+        // Audit logs are append-only: each service writes and reads its own, and none can
+        // rewrite one — not even the service whose history it is.
+        { "core reads its audit log", "ap_core_rt", "SELECT * FROM core.audit_log", true },
+        { "core appends to its audit log", "ap_core_rt",
+          "INSERT INTO core.audit_log (tenant_id, occurred_at, actor_kind, action, entity_type, entity_id, changes) " +
+          "VALUES (1, now(), 'System', 'Created', 'probe', 'probe', '{}')", true },
+        { "core cannot rewrite its audit log", "ap_core_rt", "UPDATE core.audit_log SET changes = '{}'", false },
+        { "core cannot delete from its audit log", "ap_core_rt", "DELETE FROM core.audit_log", false },
+        { "core cannot truncate its audit log", "ap_core_rt", "TRUNCATE core.audit_log", false },
+        { "an app cannot rewrite its audit log", "ap_tickets_rt", "UPDATE tickets.audit_log SET changes = '{}'", false },
+        { "an app cannot delete from its audit log", "ap_tickets_rt", "DELETE FROM tickets.audit_log", false },
+        { "the platform cannot rewrite the operator audit log", "ap_platform_rt",
+          "UPDATE platform.audit_log SET detail = detail", false },
+        { "the platform cannot delete from the operator audit log", "ap_platform_rt",
+          "DELETE FROM platform.audit_log", false },
+
         // No runtime role has DDL. A bug cannot drop a table.
         { "an app cannot create a table", "ap_tickets_rt", "CREATE TABLE tickets.nope (id int)", false },
         { "an app cannot drop its own table", "ap_tickets_rt", "DROP TABLE tickets.ticket", false },

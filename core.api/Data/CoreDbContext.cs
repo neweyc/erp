@@ -1,3 +1,4 @@
+using AppPlatform.Audit;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
 using AppPlatform.Tenancy;
@@ -12,11 +13,18 @@ namespace AppPlatform.Core.Data;
 /// to the boundary, whitelisted in BoundaryRegistry and enforced at the database by a grant of
 /// SELECT and INSERT only.
 /// </summary>
-public class CoreDbContext(DbContextOptions<CoreDbContext> options, ITenantProvider tenant)
-    : TenantedDbContext(options, tenant)
+public class CoreDbContext(
+    DbContextOptions<CoreDbContext> options, ITenantProvider tenant, IAuditActor auditActor, TimeProvider clock)
+    : AuditedDbContext(options, tenant, auditActor, clock)
 {
     public const string Schema = "core";
     public const string IdentitySchema = "identity";
+
+    /// <summary>
+    /// One audit log for everything core owns, identity included: <c>identity</c> is core's schema
+    /// too, and a second log for it would split one account's history across two tables.
+    /// </summary>
+    protected override string AuditSchema => Schema;
 
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Employee> Employees => Set<Employee>();

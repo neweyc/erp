@@ -369,15 +369,18 @@ You have now written these twice (redshift -> EMS). A third copy is the bad outc
 - `packages/outbox` — event and message tables, claim, worker, retry, prune.
 - `packages/api` — `IEndpoint` discovery, `CommandResult`.
 - `packages/boundary` — the architecture checks.
+- `packages/audit` — `IAuditable` entities in a context deriving from `AuditedDbContext` get a
+  row in their service's own `audit_log` for every create/update/delete, in the same save.
+  **Handlers never write audit rows.** The actor is the `Caller`; before a session exists the
+  path declares one through `IAuditActorScope` (the user accepting an invite, `System("provisioning")`),
+  and a save with no actor **throws** rather than recording "someone". `[AuditRedacted]` on secrets
+  and on anything that will be encrypted. Append-only: runtime roles hold no UPDATE/DELETE/TRUNCATE
+  on any `audit_log`. `BoundaryTests` requires every tenant-scoped, publicly identified entity to be
+  auditable. Not built: login and other non-entity events. Design: `docs/audit.md`.
 
 **Not built.** Declared here because the shape is decided, not because it exists. Do not write
 code that assumes one of these is available — check first.
 
-- `packages/audit` — `IAuditable`; create/update/delete rows written automatically in
-  `SaveChangesAsync`. Each schema owns its own `audit_log`. Entity CRUD handlers never call
-  audit methods; only non-entity events (login, password change) audit manually.
-  **Needed before any financial feature**: retrofitting audit after write paths exist means
-  finding every one of them.
 - `packages/encryption` — AES-256-GCM field converter. Encrypted columns get no max length and
   **cannot be searched or filtered in SQL** — keep queryable fields plaintext.
 - `packages/storage` — `IFileStore`; bytes at `tenant-{id}/{app}/{yyyy}/{MM}/{guid}`, metadata in
@@ -386,9 +389,10 @@ code that assumes one of these is available — check first.
   `FileEmailTransport`, a capture-to-disk substitute gated out of Production.
 - `packages/ui-kit` — shadcn components, DataTable, dialogs, form primitives.
 
-**Also not built, and the central ledger invariant:** there is no append-only mechanism. A posted
-journal must be reversible, never mutable, and `TenantGuard` currently permits an update to any
-tenant-scoped row. Anything financial needs that guard first.
+**Also not built, and the central ledger invariant:** there is no general append-only mechanism. A
+posted journal must be reversible, never mutable, and `TenantGuard` currently permits an update to
+any tenant-scoped row. Anything financial needs that guard first. `audit_log` is append-only by
+grant and by a check in `AuditTrail` — a pattern to generalise, not the general mechanism.
 
 - Shared packages are **versioned dependencies, not project references across deploy
   boundaries.** A project reference re-couples the releases this layout exists to

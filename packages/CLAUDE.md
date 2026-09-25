@@ -36,8 +36,9 @@ knowing what the app does? If no, it is not a package.
   only assembly permitted to map the `identity` schema.**
 - `entitlements` / `entitlements-ts` — app constants and the `.RequireApp()` filter.
   Mirrored pair; keep in sync.
-- `audit` — `IAuditable` and the `SaveChangesAsync` interceptor. Each schema owns its own
-  `audit_log`.
+- `audit` — `IAuditable` and `AuditedDbContext`, which stages audit rows on every save. Each
+  service owns its own `audit_log` in its own schema (core's covers `identity` too). See
+  `docs/audit.md`.
 - `encryption` — AES-256-GCM field converter. Encrypted columns get no max length and
   **cannot be searched or filtered in SQL**; cap plaintext length in handler validation.
 - `storage` — `IFileStore`. Never touch the filesystem from feature code.
