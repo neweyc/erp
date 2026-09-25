@@ -5,6 +5,7 @@ using AppPlatform.Core.Data;
 using AppPlatform.Core.Services;
 using AppPlatform.Outbox;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,8 +29,12 @@ builder.Services.AddDbContext<CoreDbContext>(options => options
 builder.Services.AddAppPlatformAuth(SessionCookie.Tenant);
 builder.Services.AddAuthorization();
 
-builder.Services.AddScoped<ISessionStore>(sp =>
-    new NpgsqlSessionStore(Npgsql.NpgsqlDataSource.Create(connection)));
+// Registered, not newed up per scope: a data source owns a connection pool, and creating one
+// per request leaks pools until the process dies. DI also disposes it on shutdown.
+// A singleton the container OWNS, so it is disposed on shutdown. A data source holds a
+// connection pool; creating one per scope leaks pools until the process dies.
+builder.Services.AddSingleton(NpgsqlDataSource.Create(connection));
+builder.Services.AddScoped<ISessionStore, NpgsqlSessionStore>();
 
 builder.Services.AddScoped<IEmployeeService, EFEmployeeService>();
 builder.Services.AddScoped<IUserService, EFUserService>();

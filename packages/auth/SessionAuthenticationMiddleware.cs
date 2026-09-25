@@ -13,11 +13,17 @@ namespace AppPlatform.Auth;
 /// </summary>
 public sealed class SessionAuthenticationMiddleware(
     RequestDelegate next,
-    ISessionStore sessions,
     TimeProvider clock,
     SessionCookie cookie)
 {
-    public async Task InvokeAsync(HttpContext context, CallerContext callerContext)
+    /// <param name="sessions">
+    /// Resolved PER REQUEST, never through the constructor. Conventional middleware is a
+    /// singleton, so a scoped dependency taken in its constructor is captured from the root
+    /// scope — which fails at startup under scope validation, and silently shares one
+    /// DbContext across every request when validation is off.
+    /// </param>
+    public async Task InvokeAsync(
+        HttpContext context, CallerContext callerContext, ISessionStore sessions)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(callerContext);
@@ -51,14 +57,15 @@ public sealed class SessionAuthenticationMiddleware(
 
         callerContext.SetCaller(result.Caller!);
 
-        await TouchAsync(context, stored!, id);
+        await TouchAsync(context, sessions, stored!, id);
         await next(context);
     }
 
     private static Guid? ReadSessionId(ClaimsPrincipal user)
         => Guid.TryParse(user.FindFirstValue(SessionCookie.SessionIdClaim), out var id) ? id : null;
 
-    private async Task TouchAsync(HttpContext context, SessionContext stored, Guid sessionId)
+    private async Task TouchAsync(
+        HttpContext context, ISessionStore sessions, SessionContext stored, Guid sessionId)
     {
         var path = context.Request.Path.Value ?? "/";
 

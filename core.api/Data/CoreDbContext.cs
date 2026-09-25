@@ -38,6 +38,7 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options, ITenantProvi
             e.HasKey(x => x.Id);
             e.Property(x => x.Name).HasMaxLength(200);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.ProvisioningKey).HasMaxLength(200);
             e.HasPublicId("ten");
         });
 

@@ -40,5 +40,16 @@ public static class BoundaryRegistry
             ReadableViewSchemas: [],
             ForbiddenAssemblyPrefixes: ["AppPlatform.Platform", "AppPlatform.Tickets"],
             BannedSourceStrings: []),
+
+        // platform.api sees the commercial record and nothing else. The banned strings are belt
+        // to the grants' braces: it can neither NAME the tenant field key nor reach the schemas
+        // it would decrypt. The source scan is also the only check that sees raw SQL, which the
+        // EF model checks are blind to.
+        new(
+            ProjectDirectory: "platform.api",
+            OwnSchemas: ["platform"],
+            ReadableViewSchemas: [],
+            ForbiddenAssemblyPrefixes: ["AppPlatform.Core", "AppPlatform.Tickets"],
+            BannedSourceStrings: ["core.employee", "identity.user", "identity_v1.", "tickets."]),
     ];
 }

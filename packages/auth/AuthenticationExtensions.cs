@@ -28,6 +28,7 @@ public static class AuthenticationExtensions
         services.AddScoped<ICallerContext>(sp => sp.GetRequiredService<CallerContext>());
         services.AddScoped<ITenantProvider>(sp => sp.GetRequiredService<CallerContext>());
         services.AddScoped<IBackgroundTenantScope>(sp => sp.GetRequiredService<CallerContext>());
+        services.AddScoped<ICookieAuthenticationState>(sp => sp.GetRequiredService<CallerContext>());
 
         services.AddAuthentication(cookie.SchemeName)
             .AddCookie(cookie.SchemeName, options =>

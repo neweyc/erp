@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>AppPlatform.Platform</RootNamespace>
+    <AssemblyName>AppPlatform.Platform</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AppPlatform.Platform.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Deliberately NOT referencing core.api or any app. BoundaryTests enforces it, and the
+         Postgres grants make it true even for code that is not in this repo. -->
+    <ProjectReference Include="../packages/api/AppPlatform.Api.csproj" />
+    <ProjectReference Include="../packages/ids/AppPlatform.Ids.csproj" />
+  </ItemGroup>
+</Project>

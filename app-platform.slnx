@@ -10,6 +10,8 @@
   <Project Path="packages/ids.tests/AppPlatform.Ids.Tests.csproj" />
   <Project Path="packages/outbox/AppPlatform.Outbox.csproj" />
   <Project Path="packages/outbox.tests/AppPlatform.Outbox.Tests.csproj" />
+  <Project Path="platform.api/platform.api.csproj" />
+  <Project Path="platform.api.tests/platform.api.tests.csproj" />
   <Project Path="packages/api/AppPlatform.Api.csproj" />
   <Project Path="packages/tenancy/AppPlatform.Tenancy.csproj" />
   <Project Path="packages/tenancy.tests/AppPlatform.Tenancy.Tests.csproj" />

@@ -21,8 +21,12 @@ public interface ICallerContext
 /// header, a query string, or a request body is an attack, not a feature — and with this
 /// wiring there is no code path that could honour one.
 /// </summary>
-public sealed class CallerContext : ICallerContext, ITenantProvider, IBackgroundTenantScope
+public sealed class CallerContext
+    : ICallerContext, ITenantProvider, IBackgroundTenantScope, ICookieAuthenticationState
 {
+    /// <summary>An API key is not sent by a browser, so only a user session carries CSRF risk.</summary>
+    public bool IsCookieAuthenticated => _caller?.Kind is PrincipalKind.User;
+
     private Caller? _caller;
     private int? _backgroundTenantId;
 

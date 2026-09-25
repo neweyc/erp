@@ -7,6 +7,11 @@ namespace AppPlatform.Boundary;
 /// This is the only check here that sees raw SQL at all. The EF model checks are blind to
 /// a string handed to FromSqlRaw, which is exactly where a boundary gets crossed by
 /// someone in a hurry.
+///
+/// **Deliberately text-only, comments included.** Teaching it to skip comments would mean
+/// parsing C#, and every exemption it learned would become somewhere to hide. The cost is
+/// that a service's own documentation must not quote another schema's identifiers — a real
+/// tax, paid knowingly, in exchange for a check with no way around it.
 /// </summary>
 public static class SourceScan
 {

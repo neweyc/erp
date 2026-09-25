@@ -25,4 +25,16 @@ public class Tenant : IPublicIdentified
     public required string Name { get; set; }
     public TenantLifecycle Status { get; set; } = TenantLifecycle.Active;
     public int? IdleTimeoutMinutes { get; set; }
+
+    /// <summary>
+    /// Not-null in the platform schema with no database default, so core MUST supply it. A twin
+    /// entity that omits a required column compiles, passes every unit test, and fails on the
+    /// first real INSERT — which is why TwinParityTests compares the two models directly.
+    /// </summary>
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset? StatusChangedAt { get; set; }
+
+    /// <summary>Written by provisioning; unique, and what makes a retry safe. See the platform twin.</summary>
+    public string? ProvisioningKey { get; set; }
 }
