@@ -185,6 +185,20 @@ otherwise read `core.employee` directly and bypass `core_v1` entirely. EF mappin
 remain useful guardrails against honest mistakes in this repo; they are not the boundary,
 because they do not constrain raw SQL. See `docs/database-privileges.md`.
 
+### Two mechanisms guard writes, and they fail differently
+
+Worth stating because the weaker one is easy to mistake for the whole story.
+
+| Attack | Caught by |
+|---|---|
+| Write a row whose `TenantId` is someone else's | `TenantGuard`, before SQL is issued |
+| Take someone else's **row id** and label it with your own `TenantId` | Only the tenant filter EF appends to the UPDATE/DELETE predicate — zero rows match, so the save fails as a concurrency conflict |
+
+The guard is blind to the second case by construction: the entity's tenant and the ambient
+tenant agree, because the attacker made them agree. This is precisely why raw SQL,
+`ExecuteUpdate`, and `ExecuteDelete` are unsafe by default — they keep the guard and
+discard the filter, which is the half that covers the harder attack.
+
 ### Row isolation is not reference isolation
 
 Query filters stop a tenant *reading* another's rows. Nothing in them stops a tenant B

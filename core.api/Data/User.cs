@@ -1,0 +1,35 @@
+using AppPlatform.Ids;
+using AppPlatform.Tenancy;
+
+namespace AppPlatform.Core.Data;
+
+public enum UserStatus
+{
+    Invited,
+    Active,
+    Deactivated,
+}
+
+/// <summary>
+/// An account that can sign in. Lives in the <c>identity</c> schema.
+/// </summary>
+public class User : ITenantScoped, IPublicIdentified
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public int TenantId { get; set; }
+    public int CompanyId { get; set; }
+    public string PublicId { get; set; } = "";
+
+    public required string Email { get; set; }
+    public required string Role { get; set; }
+    public UserStatus Status { get; set; } = UserStatus.Invited;
+
+    /// <summary>
+    /// The link that makes termination cut access: terminating an employee deactivates the
+    /// LINKED account and revokes its sessions, so an unlinked account would survive its
+    /// employee's departure. It also gates every self-service surface.
+    /// </summary>
+    public Guid? EmployeeId { get; set; }
+
+    public bool Active => Status == UserStatus.Active;
+}

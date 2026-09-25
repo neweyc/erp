@@ -30,8 +30,22 @@ Anything that will ever be referenced from outside carries a **stable, opaque pu
 in its own column with a unique index — separate from the primary key.
 
 ```
-emp_01JQ8Z3K2M4P6R8T0V2X4Y6A8C      tickets_ticket -> tkt_...
+emp_7h2k3m4n5p6q7r8s9t0v1w2      tickets.ticket -> tkt_...
 ```
+
+**Format, now fixed:** a 2–8 lowercase-letter prefix, an underscore, then 25 characters of
+Crockford base32 carrying 125 bits from a cryptographic source.
+
+- **Crockford, not plain base32 or hex**: it omits I, L, O, and U, so an id read aloud to
+  support has no ambiguous characters — and it defines how to fold the mistakes people still
+  make, so a transcribed `O` for `0` resolves instead of 404ing.
+- **25 characters, not 26.** 32^25 is exactly 2^125, so every position is uniformly
+  distributed. At 26 characters the body would hold 130 bits against a 128-bit value and
+  the leading character could only ever be 0–7 — a permanent visible artefact in every id.
+- **Random, not time-ordered** (no UUIDv7, no ULID): a sortable id publishes creation order
+  and approximate creation time to anyone holding two of them.
+- **Unique globally, not per tenant**, so an id belonging to tenant A and presented by
+  tenant B matches nothing rather than matching a *different* row.
 
 Sequential integers leak row counts and growth rate across tenants, cannot be re-keyed,
 and tie the external contract to a storage decision. The prefix is not decoration: it
@@ -78,6 +92,11 @@ Two structural points that are painful to change once rows exist:
 - **The outbox lives in the owning service's schema**, one per schema, with that service
   running its own worker. A single shared outbox table would be a cross-schema write on
   every save — the boundary broken by the very mechanism meant to respect it.
+- **Claiming is one statement**, `UPDATE ... WHERE id IN (SELECT ... FOR UPDATE)`, and that is
+  what stops two workers leasing the same row. `SKIP LOCKED` is throughput, not safety
+  (measured: removing it keeps the concurrency test green and merely serialises the workers).
+  A select-then-update pair in application code has a race between the two statements, and the
+  symptom is every message delivered twice.
 - **An event and its delivery are separate rows.** The event is immutable and written
   once. A *delivery* exists per (event × subscription), with its own attempt count, next
   attempt, status, and last response. A single `delivered` flag on the event cannot

@@ -138,6 +138,18 @@ all required:
 - **Resolve, never trust.** Every inbound foreign id is loaded through the filtered
   context before use. A `null` is a validation failure, not a missing row. An id that
   arrives in a request body is user input.
+- **Write isolation rests on TWO mechanisms, and only one of them covers the worst case.**
+  `TenantGuard` rejects a row whose `TenantId` disagrees with the ambient tenant. It does
+  **not** catch an attacker who takes another tenant's row id and labels it with their
+  *own* tenant — that passes the guard cleanly, because the two ids match. What stops it is
+  the **query filter EF appends to the UPDATE/DELETE predicate**, so zero rows match and the
+  save fails as a concurrency conflict.
+  That is the load-bearing reason raw SQL, `ExecuteUpdate`, and `ExecuteDelete` are unsafe
+  by default: they drop the second mechanism, leaving only the guard, which the forged-id
+  case walks straight through. Covered by `TenantWriteIsolationTests` against real
+  Postgres — a forged write there raises `DbUpdateConcurrencyException`, not
+  `TenantScopeViolationException`, and that distinction is the finding, not a quirk of the
+  test.
 - **Composite foreign keys carry the tenant** *within a schema*: `(tenant_id,
   widget_id)` referencing `(tenant_id, id)`. This makes a cross-tenant reference
   impossible at the database level rather than merely unlikely — the one defence that
@@ -297,7 +309,23 @@ first commit.
 - **Each project owns its own schema's migrations**, with its own history table
   (`MigrationsHistoryTable("__ef_migrations_history", "<schema>")`). This is a deliberate
   break from EMS, where one project owned every migration including the platform's —
-  that only worked because nothing deployed independently.
+  that only worked because nothing deployed independently. **Configure the history table
+  explicitly**: the default puts `__EFMigrationsHistory` in `public`, outside every grant, and
+  two services sharing the database then share one history table and corrupt each other's
+  chain. `99-verify.sql` catches it as an object in `public`.
+- **A table another service owns is mapped, never migrated** —
+  `.ToTable(name, schema, t => t.ExcludeFromMigrations())`. Core maps `platform.tenant` for
+  provisioning; without the exclusion its migration emits `CREATE TABLE platform.tenant`, which
+  collides with platform's own migration and fails anyway because the migration role has no DDL
+  on that schema.
+- **Published views are their own migration, applied as `ap_owner`.** A view executes with its
+  owner's privileges — that is the whole mechanism — and the migration role cannot
+  `SET ROLE ap_owner`, because membership runs the other way. `CREATE OR REPLACE` on a view
+  owned by someone else fails with "must be owner of view", so fixing a misowned view means
+  DROP and recreate. `99-verify.sql` reports one owned by anything but `ap_owner`.
+- Apply the snake_case convention in **both** `Program` and the design-time factory. The
+  migration is generated from the design-time model, so a convention applied in only one place
+  produces a schema the running app cannot read.
 - Entity mapping in `OnModelCreating`; **snake_case** tables and columns.
 - Workflow: change the model -> `dotnet ef migrations add <Name>` -> review the generated
   migration -> generate SQL. **Never auto-migrate on startup.** Chris applies SQL to live
@@ -394,9 +422,16 @@ false and would be believed.
 Full design and the deferral boundary: `docs/integration.md`. Three rules bind now.
 
 - **Every externally-referenceable entity carries a stable opaque public id** (`emp_...`,
-  `tkt_...`) in its own column, separate from the primary key. Sequential integers leak
-  row counts across tenants and cannot be re-keyed. The internal key never leaves the
-  database. This is genuinely irreversible once a customer stores our ids.
+  `tkt_...`) in its own column, separate from the primary key — `packages/ids`, via
+  `IPublicIdentified` and `HasPublicId(prefix)`. Sequential integers leak row counts across
+  tenants and cannot be re-keyed. The internal key never leaves the database. This is
+  genuinely irreversible once a customer stores our ids; the format is pinned in
+  `docs/integration.md` §2.1.
+- **Parse a public id with the expected prefix, always** (`PublicId.TryParse(input, "emp",
+  out var id)`). That is what the prefix is FOR: without the check, a ticket id passed where
+  an employee id was meant simply finds nothing, the caller gets a 404, and the real
+  mistake — two kinds of thing sharing one parameter — never surfaces. `TryParseAny` is for
+  logs only, never for a lookup.
 - **Every domain write emits an event into the outbox**, from the first feature, even
   with no subscribers. Adding emission later yields no history, so the first integrating
   customer meets a system with amnesia. A row per write is cheap; the missing past is not.

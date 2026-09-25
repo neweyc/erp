@@ -23,15 +23,22 @@ public static class BoundaryRegistry
     public static readonly string[] PublishedSchemas = ["core_v1", "identity_v1"];
 
     /// <summary>
-    /// Empty until the first service lands in Milestone 1. The shape each entry will take:
-    ///
-    ///   new("platform.api", ["platform"], [], ["AppPlatform.Core"], ["Encryption:FieldKey"])
-    ///   new("core.api",     ["core", "identity"], [], [], [])
-    ///   new("apps/tickets/tickets.api", ["tickets"], ["core_v1", "identity_v1"],
-    ///       ["AppPlatform.Platform"], ["core.employee", "identity."])
-    ///
-    /// platform.api banning "Encryption:FieldKey" in source is the belt to the grants'
-    /// braces: it can neither name the key nor read the schemas it would decrypt.
+    /// One entry per deployable. Adding a service to the solution without one fails
+    /// <see cref="ServiceCoverageTests"/>.
     /// </summary>
-    public static readonly ServiceBoundary[] Services = [];
+    public static readonly ServiceBoundary[] Services =
+    [
+        // core.api owns core and identity. `platform` appears because of the ONE deliberate
+        // exception in the design: the tenant row, its company, and the admin invite must
+        // commit in a single transaction, and a transaction cannot span two services. At the
+        // database that exception is SELECT + INSERT on platform.tenant only — no UPDATE, and
+        // nothing else in the schema. Core can bring a tenant into existence; only the
+        // operator can change what it is permitted to do.
+        new(
+            ProjectDirectory: "core.api",
+            OwnSchemas: ["core", "identity", "platform"],
+            ReadableViewSchemas: [],
+            ForbiddenAssemblyPrefixes: ["AppPlatform.Platform", "AppPlatform.Tickets"],
+            BannedSourceStrings: []),
+    ];
 }

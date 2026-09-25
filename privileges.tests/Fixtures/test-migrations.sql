@@ -30,6 +30,26 @@ SET ROLE ap_tickets_migrate;
 CREATE TABLE tickets.ticket (
   id uuid PRIMARY KEY, tenant_id int NOT NULL, public_id text NOT NULL, title text NOT NULL,
   assignee_employee_id uuid, assignee_display_name text);
+
+-- One outbox per owning schema. A shared table would make every save a cross-schema write,
+-- breaking the boundary with the mechanism meant to respect it.
+CREATE TABLE tickets.outbox_event (
+  id uuid PRIMARY KEY, tenant_id int NOT NULL, aggregate_type varchar(50) NOT NULL,
+  aggregate_public_id varchar(40) NOT NULL, aggregate_version bigint NOT NULL,
+  event_type varchar(100) NOT NULL, payload jsonb NOT NULL, occurred_at timestamptz NOT NULL,
+  UNIQUE (tenant_id, id),
+  UNIQUE (tenant_id, aggregate_type, aggregate_public_id, aggregate_version));
+
+CREATE TABLE tickets.outbox_message (
+  id uuid PRIMARY KEY, tenant_id int NOT NULL, event_id uuid,
+  transport varchar(20) NOT NULL, destination varchar(320) NOT NULL, payload jsonb NOT NULL,
+  status varchar(20) NOT NULL, attempts int NOT NULL, next_attempt_at timestamptz NOT NULL,
+  locked_until timestamptz, completed_at timestamptz, last_error varchar(1000),
+  created_at timestamptz NOT NULL,
+  FOREIGN KEY (tenant_id, event_id) REFERENCES tickets.outbox_event (tenant_id, id) ON DELETE CASCADE);
+
+CREATE INDEX outbox_message_due ON tickets.outbox_message (status, next_attempt_at)
+  WHERE status = 'Pending';
 RESET ROLE;
 
 -- Published contracts, created as ap_owner. A view executes with its OWNER's privileges,

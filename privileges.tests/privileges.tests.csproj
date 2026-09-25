@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="../packages/auth/AppPlatform.Auth.csproj" />
     <ProjectReference Include="../packages/boundary/AppPlatform.Boundary.csproj" />
+    <ProjectReference Include="../packages/outbox/AppPlatform.Outbox.csproj" />
   </ItemGroup>
 
   <ItemGroup>
