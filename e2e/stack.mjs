@@ -71,12 +71,15 @@ export function startDatabase() {
  */
 export function isStackReady() {
   try {
+    // BOTH tenants. A database warmed by a seed that predates the second tenant would otherwise
+    // count as ready, and the isolation spec's core.api would start pinned to a tenant that does
+    // not exist — every tenant B sign-in failing as invalid credentials.
     const out = execFileSync('docker', [
       'exec', CONTAINER, 'psql', '-U', 'postgres', '-d', 'appplatform', '-tAc',
-      "SELECT 1 FROM platform.tenant WHERE name = 'E2E Ltd'",
+      `SELECT count(*) FROM platform.tenant WHERE name IN ('${TENANT_NAME}', '${OTHER_TENANT_NAME}')`,
     ], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
 
-    return out === '1'
+    return out === '2'
   } catch {
     return false
   }
@@ -103,7 +106,10 @@ function hasOnlyStaleInvitation() {
   }
 }
 
-/** Idempotent: safe to call from every config evaluation. Returns the seeded tenant's public id. */
+/**
+ * Idempotent: safe to call from every config evaluation. Returns both seeded tenants' public ids,
+ * because each core.api that signs a tenant in is pinned to one at startup.
+ */
 export function ensureStack() {
   // Cleared in the MAIN process only. Playwright re-evaluates this config in each worker, where
   // TEST_WORKER_INDEX is set; clearing there would delete mail the running services had already
@@ -128,7 +134,7 @@ export function ensureStack() {
     seedOperator()
   }
 
-  return seededTenantPublicId()
+  return { tenant: seededTenantPublicId(), otherTenant: otherTenantPublicId() }
 }
 
 export function stopDatabase() {
@@ -241,12 +247,26 @@ export function seed() {
   })
 }
 
+/** Names as `SeedE2E` writes them. */
+export const TENANT_NAME = 'E2E Ltd'
+export const OTHER_TENANT_NAME = 'Other Ltd'
+
+/** The journey's tenant. */
 export function seededTenantPublicId() {
+  return tenantPublicId(TENANT_NAME)
+}
+
+/** The second tenant, which exists only to prove it cannot reach the first. */
+export function otherTenantPublicId() {
+  return tenantPublicId(OTHER_TENANT_NAME)
+}
+
+function tenantPublicId(name) {
   const out = execFileSync('docker', [
     'exec', CONTAINER, 'psql', '-U', 'postgres', '-d', 'appplatform', '-tAc',
-    "SELECT public_id FROM platform.tenant WHERE name = 'E2E Ltd'",
+    `SELECT public_id FROM platform.tenant WHERE name = '${name}'`,
   ]).toString().trim()
 
-  if (!out) throw new Error('seed did not create the E2E tenant')
+  if (!out) throw new Error(`seed did not create the tenant '${name}'`)
   return out
 }

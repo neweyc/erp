@@ -24,8 +24,8 @@ public class EFAuthService(CoreDbContext db) : IAuthService
     public Task<Session?> FindSessionAsync(Guid sessionId, CancellationToken ct = default)
         => db.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId, ct);
 
-    public Task<string> TenantNameAsync(CancellationToken ct = default)
-        => db.Tenants.Select(t => t.Name).FirstAsync(ct);
+    public Task<string> TenantNameAsync(int tenantId, CancellationToken ct = default)
+        => db.Tenants.Where(t => t.Id == tenantId).Select(t => t.Name).SingleAsync(ct);
 
     public Task RevokeSessionAsync(Guid sessionId, DateTimeOffset now, CancellationToken ct = default)
         => db.Sessions

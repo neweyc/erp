@@ -18,6 +18,11 @@ namespace AppPlatform.Core;
 ///
 /// It stops at provisioning. The invitation is delivered by the outbox worker and accepted in
 /// the browser, because "the invitation arrives" is part of the journey being proved.
+///
+/// A SECOND tenant is provisioned alongside, for the isolation spec. It exists here rather than
+/// being created by an operator mid-run because anonymous sign-in resolves its tenant from
+/// configuration (D5), so the core.api that signs tenant B in needs B's id at startup — before
+/// any spec runs.
 /// </summary>
 public static class SeedE2E
 {
@@ -32,6 +37,13 @@ public static class SeedE2E
     public const string EmployeeFirstName = "Ada";
     public const string EmployeeLastName = "Lovelace";
     public const string EmployeeEmail = "ada@e2e.test";
+
+    /// <summary>
+    /// The second tenant. Deliberately seeded with NO employee: its admin creates one over HTTP
+    /// in the isolation spec, so the roster comparison is between two tenants' real writes.
+    /// </summary>
+    public const string OtherTenantName = "Other Ltd";
+    public const string OtherAdminEmail = "admin@other.test";
 
     /// <summary>
     /// A principal for seed-time writes, required by the handler signature and read by nothing
@@ -70,33 +82,38 @@ public static class SeedE2E
         // failed to create the employee could never recover: the tenant row survived, every later
         // run reported success, and the journey failed at the assignee picker — which reads as a
         // tickets-UI bug rather than a half-finished seed.
-        if (!await ProvisionIfMissingAsync(options)) return 1;
+        if (!await ProvisionIfMissingAsync(options, TenantName, AdminEmail, "e2e-seed")) return 1;
 
         var tenantId = await TenantIdAsync(options);
 
         if (!await CreateEmployeeIfMissingAsync(options, tenantId)) return 1;
 
+        if (!await ProvisionIfMissingAsync(options, OtherTenantName, OtherAdminEmail, "e2e-seed-other"))
+            return 1;
+
         Console.WriteLine(
-            $"seed-e2e: tenant ready, unlicensed; employee {EmployeeFirstName} {EmployeeLastName} " +
-            $"present; invitation for {AdminEmail} awaits delivery");
+            $"seed-e2e: tenants '{TenantName}' and '{OtherTenantName}' ready, unlicensed; employee " +
+            $"{EmployeeFirstName} {EmployeeLastName} present in '{TenantName}'; invitations for " +
+            $"{AdminEmail} and {OtherAdminEmail} await delivery");
 
         return 0;
     }
 
-    private static async Task<bool> ProvisionIfMissingAsync(DbContextOptions<CoreDbContext> options)
+    private static async Task<bool> ProvisionIfMissingAsync(
+        DbContextOptions<CoreDbContext> options, string name, string adminEmail, string idempotencyKey)
     {
         var tenant = new AmbientTenantProvider();
         await using var db = new CoreDbContext(options, tenant);
 
-        if (await db.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Name == TenantName)) return true;
+        if (await db.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Name == name)) return true;
 
         var provisioned = await new ProvisionTenantFeature.ProvisionTenantCommandHandler(
             db, tenant, TimeProvider.System)
-            .Handle(new(TenantName, AdminEmail, "e2e-seed"));
+            .Handle(new(name, adminEmail, idempotencyKey));
 
         if (!provisioned.Succeeded)
         {
-            Console.Error.WriteLine($"seed-e2e: provisioning failed: {provisioned.Message}");
+            Console.Error.WriteLine($"seed-e2e: provisioning {name} failed: {provisioned.Message}");
             return false;
         }
 

@@ -14,7 +14,7 @@ import { CAPTURE_DIR, CONNECTION, ensureStack, ROOT } from './stack.mjs'
  * worker process, and a second unconditional rebuild would destroy the database the already-
  * running APIs are connected to.
  */
-const tenantPublicId = ensureStack()
+const tenants = ensureStack()
 
 const apiEnv = {
   ConnectionStrings__Core: CONNECTION,
@@ -22,7 +22,7 @@ const apiEnv = {
   ConnectionStrings__Platform: CONNECTION,
   // Pins the tenant for anonymous sign-in. On localhost there is no hostname to resolve, and
   // falling back to "the first tenant" would be a cross-tenant login.
-  Tenant__PublicId: tenantPublicId,
+  Tenant__PublicId: tenants.tenant,
   // Shared key ring. Without it the cookie issued by core.api cannot be decrypted by
   // tickets.api, and every app API answers 401 to a user who has just signed in successfully.
   DataProtection__KeyPath: join(ROOT, 'e2e/.keys'),
@@ -42,6 +42,20 @@ const platformEnv = {
   ...apiEnv,
   Internal__ApiKey: 'e2e-internal-key',
   Core__BaseUrl: 'http://localhost:5100',
+}
+
+/**
+ * The second tenant's sign-in door. Identical to core.api in every respect but the pinned tenant.
+ *
+ * Needed only because anonymous sign-in resolves its tenant from configuration rather than the
+ * hostname (D5), so one process can sign in exactly one tenant. It is used for SIGN-IN AND NOTHING
+ * ELSE: every other tenant B request goes to the same core.api and tickets.api that serve tenant
+ * A, so the isolation being proved is the session-scoped filter inside a shared process — not two
+ * processes that were never able to see each other's tenant in the first place.
+ */
+const otherCoreEnv = {
+  ...apiEnv,
+  Tenant__PublicId: tenants.otherTenant,
 }
 
 export default defineConfig({
@@ -68,6 +82,9 @@ export default defineConfig({
     // Guards depend on `license` but nothing depends on them, so a guard regression cannot mask
     // the journey by making it skip.
     { name: 'guards', testMatch: /license-guards\.spec\.mjs/, dependencies: ['license'] },
+    // A2. Needs tenant A licensed with an accepted admin, which `license` guarantees. Nothing
+    // depends on it, for the same reason as `guards`.
+    { name: 'isolation', testMatch: /tenant-isolation\.spec\.mjs/, dependencies: ['license'] },
   ],
   timeout: 30_000,
   use: {
@@ -104,6 +121,13 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       env: platformEnv,
+    },
+    {
+      command: `dotnet run --project ${join(ROOT, 'core.api')} --no-launch-profile --no-restore --urls http://localhost:5103`,
+      url: 'http://localhost:5103/api/core/v1/auth/session',
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: otherCoreEnv,
     },
     {
       command: `npm run dev --workspace @app-platform/shell -- --port 5273 --strictPort`,

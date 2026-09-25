@@ -170,4 +170,21 @@ public class AuthTests
 
         Assert.Equal(AuthProblems.InvalidCredentials, outcome.ProblemCode);
     }
+
+    [Fact]
+    public async Task The_session_names_the_callers_tenant_not_the_first_tenant()
+    {
+        // Regression: the name was read with no tenant id from a table no filter narrows, so every
+        // tenant saw whichever tenant the database returned first. Found by the second-tenant e2e.
+        var caller = Fake.Caller() with { TenantId = 7 };
+        _auth.Setup(a => a.FindUserAsync(caller.UserId!.Value, default))
+            .ReturnsAsync(new User { Email = "grace@other.test", Role = "admin" });
+        _auth.Setup(a => a.TenantNameAsync(It.IsAny<int>(), default)).ReturnsAsync("E2E Ltd");
+        _auth.Setup(a => a.TenantNameAsync(7, default)).ReturnsAsync("Other Ltd");
+
+        var result = await new GetSessionFeature.GetSessionQueryHandler(_auth.Object).Handle(caller);
+
+        var session = Assert.IsType<GetSessionFeature.SessionModel>(result.Value);
+        Assert.Equal("Other Ltd", session.TenantName);
+    }
 }

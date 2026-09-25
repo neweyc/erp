@@ -44,7 +44,7 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 | # | Criterion | State |
 |---|---|---|
 | A1 | Full journey works **through the browser** against the real stack | **Verified for every step that has a UI** — accept, sign in, create, assign, close. Provision and license have **no operator UI** (D14) and run over real HTTP and handler paths instead. Delivery is a background worker with no UI by nature. Marking this plainly rather than borrowing A6's standard |
-| A2 | A second tenant proves isolation | **Incomplete** — proven at handler level, not through the running application |
+| A2 | A second tenant proves isolation | **Verified** — a real second tenant, signed in with its own session, cannot read, close, reassign, or reference the first tenant's tickets and employees through the running core.api and tickets.api that serve both (`tenant-isolation.spec.mjs`). Found and fixed a real cross-tenant leak on the way (D15) |
 | A3 | Unlicensed access rejected by the **API** | **Verified** — an authenticated tenant admin is refused 403 `app_not_licensed` by the *running* tickets service before the grant, and accepted after, on the same session |
 | A4 | Fresh-database initialization succeeds using the documented scripts | **Verified** — `PrivilegeFixture` builds an empty database from `database/privileges/01`, all three `migrations-all.sql`, then `02-grants`, applied **as `ap_owner`**, and `99-verify` reports zero findings. The browser harness does the same as superuser (D7) |
 | A5 | Workflow automated as a CI gate | **Verified** — run `36146705790` passed all three jobs (dotnet, ui, e2e) in 3m24s after the D13 readiness fix |
@@ -72,6 +72,12 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 Each entry names the test that would fail if the behaviour regressed.
 
 ### Tenancy and isolation
+- **Through the running application**: a second tenant's session, against the same core.api and
+  tickets.api processes that serve the first, sees neither its tickets nor its employees, gets 404
+  closing or reassigning one by id, and cannot assign the other's employee — `tenant-isolation.spec.mjs`.
+  Confirmed non-vacuous: removing the filter from `EFTicketService` fails exactly the three
+  ticket cases. Each refusal has a positive control — B's own list, own close, own assignment —
+  and a refused assignment is checked for persisted state before the control can overwrite it.
 - Query filter scopes reads; no tenant yields **no rows, not all rows** — `TenantFilterTests`
 - Insert stamping; insert without a tenant context throws — `TenantGuardTests`
 - Cross-tenant update/delete rejected, sync and async — `TenantWriteIsolationTests` (real Postgres)
@@ -158,6 +164,7 @@ to test whether these primitives survive contact with money.
 
 | ID | Sev | Defect | Reproduction | Consequence |
 |---|---|---|---|---|
+| **D15** | High — **fixed** | The session endpoint showed every tenant the name of whichever tenant was provisioned first. `TenantNameAsync` read `db.Tenants.FirstAsync()` with no id, and the tenant table has no query filter — it is what tenants are scoped *by*. | Tenant B's session on a core.api reports "E2E Ltd". Invisible with one tenant, which is why nothing caught it. | A cross-tenant disclosure on every dashboard load. Now takes the caller's tenant id explicitly; `AuthTests.The_session_names_the_callers_tenant_not_the_first_tenant` and the e2e cover it. `Tenant` is the only entity without the filter, and its other two reads are keyed. |
 | **D13** | High — **was failing CI on main** | `startDatabase` used `pg_isready -d appplatform` as its readiness check. `pg_isready` only reports that the server accepts connections; the postgres image runs a temporary init server before creating `POSTGRES_DB`, so readiness passed while the database did not exist. **Fixed** — readiness is now a real `SELECT 1` against the target database. | Reproduced: polling a fresh container showed `pg_isready=yes` while `SELECT 1` still failed, a ~0.4s window. CI run `36143741902` failed with `database "appplatform" does not exist` at `applyMigrations`. | The whole e2e job failed. It passed locally because a cached image wins the race, which is why it reached main — a flake class that only appears on a cold runner. |
 | **D12** | Low | `WalkingSkeletonTests` still licenses via raw `INSERT INTO platform.tenant_app`. | `privileges.tests/WalkingSkeletonTests.cs:131` | A handler-level fixture shortcut, not a shipped path. The operator endpoint is covered by the e2e, so this is split coverage rather than a gap — recorded so it is not invisible if the endpoint's behaviour changes. |
 | **D14** | Medium | No operator UI. Provisioning a tenant and granting an entitlement are reachable only over HTTP — `platform.console/` exists as an empty directory. | `ls platform.console` | A1 cannot be "the whole journey in a browser" until an operator has one. Deliberate for this milestone: the customer-facing surface was the priority, and the operator paths are exercised over real HTTP with real sessions. |
@@ -168,7 +175,7 @@ to test whether these primitives survive contact with money.
 | **D9** | Low | No unit coverage for `accept-invite.tsx` or the new signed-out routing. | `shell.ui/src` | Four render branches and a problem-code map are exercised only through the browser journey. |
 | **D6** | Low | `EFAuthService.FindTokenAsync` uses `IgnoreQueryFilters`, so a token lookup is tenant-blind before the scope is entered. | Inspection, `core.api/Services/EFAuthService.cs` | Necessary — acceptance precedes any session — but it means token-hash uniqueness is the only thing preventing a cross-tenant match. Mitigated by a unique index on the hash and 256 bits of entropy. Recorded so it is a considered exception, not an oversight. |
 | **D3** | Medium | The shared Data Protection key ring has no automated assertion. | Remove `DataProtection__KeyPath` from `e2e/playwright.config.mjs`; specs fail with 401 but for an unexplained reason | A regression reappears as "signed in but every API call is 401", which took a browser run to diagnose once already. |
-| **D5** | Low | Host-based tenant resolution is unimplemented; `EFTenantResolver` returns null unless `Tenant:PublicId` is configured. | `core.api/Services/ITenantResolver.cs` | Multi-tenant sign-in on one deployment does not work. Deliberate: returning null is safer than guessing, and single-tenant pinning covers current needs. |
+| **D5** | Medium (was Low) | Host-based tenant resolution is unimplemented; `EFTenantResolver` returns null unless `Tenant:PublicId` is configured. | `core.api/Services/ITenantResolver.cs` | Multi-tenant sign-in on one deployment does not work. Deliberate: returning null is safer than guessing. Raised because A2 needed a workaround — the e2e runs a second core.api pinned to tenant B, used for sign-in only — and a real second customer would need the same, or this. |
 
 ---
 
@@ -348,14 +355,46 @@ in this cycle — logged in `docs/open-questions.md`.
 
 ## Current cycle
 
-**Cycle 4 — a second tenant proves isolation through the running application (A2). In progress.**
+**Cycle 4 — a second tenant proves isolation through the running application (A2). Accepted.**
 
 Objective: tenant isolation is proven at handler level; prove it where it can actually fail — a
 real tenant B session against the running services, unable to read, modify or reference tenant
 A's data.
 
-Next action: build the second-tenant journey, then independent review (tenant isolation is a
-security change).
+Changed:
+
+- **`SeedE2E`** provisions a second tenant, "Other Ltd", through the same real handler. No
+  employee: its admin creates one over HTTP in the spec.
+- **A second core.api (5103)** pinned to tenant B, because sign-in resolves its tenant from
+  configuration (D5). Used for **sign-in only**; every other tenant B request goes to the shared
+  core.api (5100) and tickets.api (5102), so the filter is proved inside one process serving both.
+- **`tenant-isolation.spec.mjs`** — B's invitation delivered and accepted, B licensed by an
+  operator over HTTP, then five cases: session and sign-in scoped to the tenant; tickets invisible
+  across tenants; close and reassign by a known id return 404 and change nothing; the other
+  tenant's employee refused as `assignee_not_found` on create and on assign; rosters disjoint.
+- **D15 fixed** — the cross-tenant tenant-name leak the first run found.
+- `isStackReady` now requires both tenants, so a database warmed by the old seed is rebuilt
+  rather than starting B's core.api pinned to nothing.
+
+Evidence (measured): 19 Playwright tests pass, 5 of them the new isolation cases; 399 .NET tests
+pass including 99 against real PostgreSQL; the filter-removal mutation fails exactly the three
+ticket cases.
+
+Not in scope: tenant B through a **browser**. The browser seams (cookie, CSRF, gating) are the
+journey's; isolation fails at the API, which is where this tests it.
+
+**Independent review (Codex) — 0 blocking findings, 2 optional. Both taken; re-review confirmed.**
+
+| # | Finding | Resolution |
+|---|---|---|
+| O1 | The refused cross-tenant assignment was never checked for persisted state; the positive control that followed would overwrite a wrongly saved assignment, so a "refuse but save anyway" regression passed. | The ticket is asserted unassigned immediately after the refusal, before the control runs. |
+| O2 | No positive control for closing: a close path returning 404 to tenant B for everything would have passed. | B closes a separate ticket of its own and its persisted status is asserted `Closed`. |
+
+With A2 verified, every Milestone 1 acceptance criterion is met at the standard its row states;
+A1's operator steps remain HTTP-only (D14).
+
+Next action: choose between Milestone 2 and a thin financial slice (which needs D10 and D11
+first) — an open decision.
 
 ---
 

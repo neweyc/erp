@@ -10,7 +10,12 @@ public interface IAuthService
     Task<User?> FindUserAsync(Guid userId, CancellationToken ct = default);
     Task<UserToken?> FindTokenAsync(string tokenHash, TokenPurpose purpose, CancellationToken ct = default);
     Task<Session?> FindSessionAsync(Guid sessionId, CancellationToken ct = default);
-    Task<string> TenantNameAsync(CancellationToken ct = default);
+    /// <summary>
+    /// The name of the given tenant. The id is REQUIRED because the tenant table is not
+    /// tenant-scoped — it is what tenants are scoped by — so no query filter narrows it, and a
+    /// read without an explicit id returns whichever tenant the database yields first.
+    /// </summary>
+    Task<string> TenantNameAsync(int tenantId, CancellationToken ct = default);
     Task RevokeSessionAsync(Guid sessionId, DateTimeOffset now, CancellationToken ct = default);
     void AddSession(Session session);
     void AddToken(UserToken token);

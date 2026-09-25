@@ -27,7 +27,10 @@ public static class GetSessionFeature
 
             return CommandResult.Ok(new SessionModel(
                 user.PublicId, user.Email, caller.Role,
-                await auth.TenantNameAsync(ct),
+                // The CALLER's tenant, passed explicitly. This read once had no id and relied on a
+                // filter the tenant table does not have, so every tenant was shown the name of
+                // whichever tenant was provisioned first. Found by the second-tenant e2e (A2).
+                await auth.TenantNameAsync(caller.TenantId, ct),
                 // Straight from the session contract, which reads the platform's entitlement
                 // rows. The shell gates nav on this; the API gates access independently.
                 caller.LicensedApps,
