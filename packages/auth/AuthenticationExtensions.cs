@@ -1,5 +1,6 @@
 using AppPlatform.Tenancy;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,13 +14,14 @@ public static class AuthenticationExtensions
     /// <see cref="UseAppPlatformAuth"/> to insert the middleware in the right order.
     /// </summary>
     public static IServiceCollection AddAppPlatformAuth(
-        this IServiceCollection services, SessionCookie cookie)
+        this IServiceCollection services, SessionCookie cookie, string? dataProtectionKeyPath = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(cookie);
 
         services.AddSingleton(cookie);
         services.TryAddTimeProvider();
+        services.AddSharedDataProtection(cookie, dataProtectionKeyPath);
 
         // One instance per scope, resolved through three interfaces. The tenant that query
         // filters and insert stamping use is therefore THE SAME OBJECT the authentication
@@ -78,6 +80,36 @@ public static class AuthenticationExtensions
         app.UseMiddleware<SuspensionMiddleware>();
 
         return app;
+    }
+
+    /// <summary>
+    /// One key ring across every process that shares a cookie.
+    ///
+    /// **This is not a tuning detail — without it the cookie simply does not work across
+    /// services.** The auth cookie is encrypted by Data Protection, and by default each process
+    /// derives its own keys from its own application name and content root. A cookie issued by
+    /// core.api is then undecryptable by tickets.api, which rejects it as invalid: the user signs
+    /// in, sees the shell, and every call to an app API answers 401. Nothing in either service's
+    /// own tests can see it, because each is correct in isolation.
+    ///
+    /// Two parts, both required: a shared application NAME so the key derivation matches, and a
+    /// PERSISTED key ring so the keys survive a restart — with an in-memory ring, every deploy
+    /// silently signs out every user.
+    ///
+    /// Operator and tenant surfaces get DIFFERENT purposes, so a console cookie can never be
+    /// decrypted as a tenant one even though both rings live in the same place.
+    /// </summary>
+    private static void AddSharedDataProtection(
+        this IServiceCollection services, SessionCookie cookie, string? keyPath)
+    {
+        var builder = services.AddDataProtection()
+            .SetApplicationName($"app-platform:{cookie.SchemeName}");
+
+        if (keyPath is { Length: > 0 })
+        {
+            Directory.CreateDirectory(keyPath);
+            builder.PersistKeysToFileSystem(new DirectoryInfo(keyPath));
+        }
     }
 
     private static void TryAddTimeProvider(this IServiceCollection services)

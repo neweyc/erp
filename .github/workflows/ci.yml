@@ -36,3 +36,21 @@ jobs:
       # test would otherwise reach main and fail the image build there instead.
       - run: npm run build --workspace @app-platform/shell
       - run: npm run test --workspace @app-platform/shell
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # The browser leg. It boots the real services against the GENERATED migration scripts, so
+      # it is the only test that crosses the seams a browser owns: whether the auth cookie is
+      # accepted across services, whether the CSRF token issued at sign-in is usable, and
+      # whether the shell fetches the bundle it was told it may have.
+      - run: npm run test --workspace @app-platform/e2e

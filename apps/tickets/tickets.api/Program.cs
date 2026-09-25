@@ -21,7 +21,10 @@ builder.Services.AddDbContext<TicketsDbContext>(options => options
     .UseSnakeCaseNamingConvention());
 
 builder.Services.AddSingleton(NpgsqlDataSource.Create(connection));
-builder.Services.AddAppPlatformAuth(SessionCookie.Tenant);
+// The key path is SHARED with every other tenant-facing service: they all read the same auth
+// cookie, and a per-process key ring makes that cookie undecryptable one service over.
+builder.Services.AddAppPlatformAuth(
+    SessionCookie.Tenant, builder.Configuration["DataProtection:KeyPath"]);
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<ISessionStore, NpgsqlSessionStore>();
 

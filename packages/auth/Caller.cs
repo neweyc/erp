@@ -17,6 +17,13 @@ public enum PrincipalKind
 public sealed record Caller
 {
     public required Guid PrincipalId { get; init; }
+
+    /// <summary>
+    /// The session this request arrived on. Needed so sign-out can REVOKE the row rather than
+    /// only deleting the cookie — a deleted cookie leaves a session that still validates for
+    /// anyone who kept a copy of it.
+    /// </summary>
+    public Guid? SessionId { get; init; }
     public required PrincipalKind Kind { get; init; }
     public required int TenantId { get; init; }
     public required int CompanyId { get; init; }

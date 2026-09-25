@@ -22,6 +22,13 @@ public class User : ITenantScoped, IPublicIdentified
 
     public required string Email { get; set; }
     public required string Role { get; set; }
+
+    /// <summary>
+    /// Null until the invitation is accepted. An invited account has no password and cannot
+    /// sign in — which is what makes an invitation mean something rather than being a
+    /// pre-activated account with a link attached.
+    /// </summary>
+    public string? PasswordHash { get; set; }
     public UserStatus Status { get; set; } = UserStatus.Invited;
 
     /// <summary>

@@ -20,7 +20,8 @@ builder.Services.AddDbContext<PlatformDbContext>(options => options
         .MigrationsHistoryTable("__ef_migrations_history", PlatformDbContext.Schema))
     .UseSnakeCaseNamingConvention());
 
-builder.Services.AddAppPlatformAuth(SessionCookie.Operator);
+builder.Services.AddAppPlatformAuth(
+    SessionCookie.Operator, builder.Configuration["DataProtection:KeyPath"]);
 builder.Services.AddAuthorization();
 
 builder.Services.AddScoped<OperatorContext>();

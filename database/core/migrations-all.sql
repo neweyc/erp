@@ -432,3 +432,60 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925045109_AddUserPasswordsAndTokens') THEN
+    ALTER TABLE identity."user" ADD password_hash character varying(200);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925045109_AddUserPasswordsAndTokens') THEN
+    CREATE TABLE identity.user_token (
+        id uuid NOT NULL,
+        tenant_id integer NOT NULL,
+        user_id uuid NOT NULL,
+        purpose character varying(20) NOT NULL,
+        token_hash character varying(64) NOT NULL,
+        created_at timestamp with time zone NOT NULL,
+        expires_at timestamp with time zone NOT NULL,
+        used_at timestamp with time zone,
+        CONSTRAINT pk_user_token PRIMARY KEY (id),
+        CONSTRAINT fk_user_token_user_tenant_id_user_id FOREIGN KEY (tenant_id, user_id) REFERENCES identity."user" (tenant_id, id) ON DELETE CASCADE
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925045109_AddUserPasswordsAndTokens') THEN
+    CREATE INDEX ix_user_token_tenant_id ON identity.user_token (tenant_id);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925045109_AddUserPasswordsAndTokens') THEN
+    CREATE INDEX ix_user_token_tenant_id_user_id ON identity.user_token (tenant_id, user_id);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925045109_AddUserPasswordsAndTokens') THEN
+    CREATE UNIQUE INDEX ix_user_token_token_hash ON identity.user_token (token_hash);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925045109_AddUserPasswordsAndTokens') THEN
+    INSERT INTO core.__ef_migrations_history (migration_id, product_version)
+    VALUES ('20260925045109_AddUserPasswordsAndTokens', '10.0.10');
+    END IF;
+END $EF$;
+COMMIT;
+

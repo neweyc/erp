@@ -62,6 +62,7 @@ public static class SessionEvaluator
         return AuthenticationResult.Success(new Caller
         {
             PrincipalId = context.UserId,
+            SessionId = context.SessionId,
             Kind = PrincipalKind.User,
             UserId = context.UserId,
             TenantId = context.TenantId,

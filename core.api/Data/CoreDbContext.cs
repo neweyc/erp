@@ -23,6 +23,7 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options, ITenantProvi
     public DbSet<User> Users => Set<User>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<UserToken> UserTokens => Set<UserToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -89,6 +90,7 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options, ITenantProvi
             e.HasKey(x => x.Id);
             e.Property(x => x.Email).HasMaxLength(320);
             e.Property(x => x.Role).HasMaxLength(50);
+            e.Property(x => x.PasswordHash).HasMaxLength(200);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.Ignore(x => x.Active);
             e.HasPublicId("usr");
@@ -108,6 +110,28 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options, ITenantProvi
                 .HasForeignKey(x => new { x.TenantId, x.EmployeeId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<UserToken>(e =>
+        {
+            e.ToTable("user_token", IdentitySchema);
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Purpose).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+
+            e.HasIndex(x => x.TenantId);
+            // Looked up BY HASH, because the plaintext is only ever in the email.
+            e.HasIndex(x => x.TokenHash).IsUnique();
+
+            // The token cannot be consumed twice: EF adds used_at to the UPDATE predicate, so a
+            // second simultaneous use matches no row instead of both succeeding.
+            e.Property(x => x.UsedAt).IsConcurrencyToken();
+
+            e.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.UserId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Session>(e =>

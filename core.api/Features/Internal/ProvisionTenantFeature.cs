@@ -111,12 +111,27 @@ public static class ProvisionTenantFeature
             };
             db.Users.Add(admin);
 
+            // The invitation itself. Stored as a HASH — the plaintext exists only in the email,
+            // because a token is password-equivalent until used.
+            var (plaintext, hash) = Services.TokenGenerator.Create();
+
+            db.UserTokens.Add(new UserToken
+            {
+                UserId = admin.Id,
+                Purpose = TokenPurpose.Invite,
+                TokenHash = hash,
+                CreatedAt = now,
+                // Long enough to survive a weekend and a spam folder; short enough that a
+                // forgotten invitation is not a permanent way in.
+                ExpiresAt = now.AddDays(7),
+            });
+
             // Staged, then committed with everything else. Sending first and committing after
             // is how a recipient ends up holding a link to a tenant that does not exist.
             new Outbox.Outbox(db, clock).AddMessage(
                 OutboxTransports.Email,
                 destination: email,
-                payload: $$"""{"kind":"tenant_admin_invite","userId":"{{admin.PublicId}}"}""");
+                payload: $$"""{"kind":"tenant_admin_invite","userId":"{{admin.PublicId}}","token":"{{plaintext}}"}""");
 
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);

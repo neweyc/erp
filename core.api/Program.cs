@@ -9,6 +9,15 @@ using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// A command, not a server. Kept in-process so the seed uses the same handlers the application
+// does — a separate seeding script is exactly what drifts from the migrations.
+if (args.Contains("seed-e2e"))
+{
+    return await AppPlatform.Core.SeedE2E.RunAsync(
+        builder.Configuration.GetConnectionString("Core")
+        ?? throw new InvalidOperationException("ConnectionStrings:Core is required."));
+}
+
 var connection = builder.Configuration.GetConnectionString("Core")
     ?? throw new InvalidOperationException(
         "ConnectionStrings:Core is required. Core connects as ap_core_rt, which holds no DDL " +
@@ -26,7 +35,10 @@ builder.Services.AddDbContext<CoreDbContext>(options => options
     // per-property so a new column cannot quietly arrive in PascalCase.
     .UseSnakeCaseNamingConvention());
 
-builder.Services.AddAppPlatformAuth(SessionCookie.Tenant);
+// The key path is SHARED with every other tenant-facing service: they all read the same auth
+// cookie, and a per-process key ring makes that cookie undecryptable one service over.
+builder.Services.AddAppPlatformAuth(
+    SessionCookie.Tenant, builder.Configuration["DataProtection:KeyPath"]);
 builder.Services.AddAuthorization();
 
 // Registered, not newed up per scope: a data source owns a connection pool, and creating one
@@ -36,6 +48,8 @@ builder.Services.AddAuthorization();
 builder.Services.AddSingleton(NpgsqlDataSource.Create(connection));
 builder.Services.AddScoped<ISessionStore, NpgsqlSessionStore>();
 
+builder.Services.AddScoped<IAuthService, EFAuthService>();
+builder.Services.AddScoped<ITenantResolver, EFTenantResolver>();
 builder.Services.AddScoped<IEmployeeService, EFEmployeeService>();
 builder.Services.AddScoped<IUserService, EFUserService>();
 builder.Services.AddScoped<IOutbox>(sp => new Outbox(
@@ -51,3 +65,5 @@ app.UseAuthorization();
 app.MapEndpoints(Assembly.GetExecutingAssembly());
 
 app.Run();
+
+return 0;

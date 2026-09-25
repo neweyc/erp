@@ -4,7 +4,8 @@
   "workspaces": [
     "shell.ui",
     "packages/*",
-    "apps/*/*.ui"
+    "apps/*/*.ui",
+    "e2e"
   ],
   "engines": {
     "node": ">=20.19"
