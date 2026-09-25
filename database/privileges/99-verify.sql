@@ -9,8 +9,8 @@
 
 WITH
 published_schemas AS (SELECT unnest(ARRAY['core_v1','identity_v1']) AS nspname),
-owned_schemas     AS (SELECT unnest(ARRAY['platform','core','identity','tickets']) AS nspname),
-runtime_roles     AS (SELECT unnest(ARRAY['ap_platform_rt','ap_core_rt','ap_tickets_rt']) AS rolname),
+owned_schemas     AS (SELECT unnest(ARRAY['platform','core','identity','tickets','ledger']) AS nspname),
+runtime_roles     AS (SELECT unnest(ARRAY['ap_platform_rt','ap_core_rt','ap_tickets_rt','ap_ledger_rt']) AS rolname),
 
 -- 1. security_invoker on a published view resolves permissions as the CALLER, which
 --    collapses the entire boundary: the consumer has no grant on the underlying table,
@@ -82,7 +82,7 @@ runtime_with_create AS (
 --    not permitted to see, encrypted columns notwithstanding.
 platform_reach AS (
   SELECT 'ap_platform_rt can reach a customer schema', s.nspname
-  FROM (SELECT unnest(ARRAY['core','identity','tickets','core_v1','identity_v1']) AS nspname) s
+  FROM (SELECT unnest(ARRAY['core','identity','tickets','ledger','core_v1','identity_v1']) AS nspname) s
   WHERE has_schema_privilege('ap_platform_rt', s.nspname, 'USAGE')
 ),
 platform_table_reach AS (
@@ -90,16 +90,19 @@ platform_table_reach AS (
          format('%s.%s', n.nspname, c.relname)
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname IN ('core','identity','tickets','core_v1','identity_v1')
+  WHERE n.nspname IN ('core','identity','tickets','ledger','core_v1','identity_v1')
     AND c.relkind IN ('r','v')
     AND has_table_privilege('ap_platform_rt', c.oid, 'SELECT')
 ),
 
--- 8. An app reads the published view, never the schema behind it.
+-- 8. An app reads the published view, never the schema behind it — and never another app's
+--    schema at all.
 app_bypasses_view AS (
-  SELECT 'ap_tickets_rt can reach an owning schema directly', s.nspname
-  FROM (SELECT unnest(ARRAY['core','identity','platform']) AS nspname) s
-  WHERE has_schema_privilege('ap_tickets_rt', s.nspname, 'USAGE')
+  SELECT format('%s can reach a schema it does not own', a.rolname), s.nspname
+  FROM (VALUES ('ap_tickets_rt', 'tickets'), ('ap_ledger_rt', 'ledger')) AS a(rolname, own)
+  CROSS JOIN (SELECT unnest(ARRAY['core','identity','platform','tickets','ledger']) AS nspname) s
+  WHERE s.nspname <> a.own
+    AND has_schema_privilege(a.rolname, s.nspname, 'USAGE')
 ),
 
 -- 9. Core may create a tenant; only the operator may change one. The split is the whole
@@ -138,25 +141,42 @@ session_fn_reach AS (
     AND has_function_privilege('ap_platform_rt', p.oid, 'EXECUTE')
 ),
 
--- 12. Audit logs are append-only. A runtime role that can UPDATE, DELETE or TRUNCATE one can
---     rewrite the history it exists to keep.
+-- 12. Append-only tables stay append-only: every audit_log, and the listed tables (the SAME
+--     list as 02-grants.sql; BoundaryTests keeps the two in step with the IAppendOnly entities).
+--     A runtime role that can UPDATE, DELETE or TRUNCATE one can rewrite the history it keeps.
 --
 --     Roles found by name pattern, not the runtime_roles list above, so a new app's role is
 --     checked without an edit here. UPDATE is tested with has_any_column_privilege, because
 --     has_table_privilege does not see a grant on individual columns — and `UPDATE (changes)`
 --     is all it takes to rewrite a row's history.
-mutable_audit AS (
-  SELECT 'runtime role can modify an audit_log',
-         format('%s on %s.%s (%s)', r.rolname, n.nspname, c.relname, p.priv)
-  FROM pg_class c
-  JOIN pg_namespace n ON n.oid = c.relnamespace
+mutable_append_only AS (
+  SELECT 'runtime role can modify an append-only table',
+         format('%s on %s (%s)', r.rolname, t.oid::regclass, p.priv)
+  FROM (
+    SELECT c.oid FROM pg_class c
+    WHERE c.relname = 'audit_log' AND c.relkind = 'r'
+    UNION
+    SELECT to_regclass(listed)::oid
+    FROM unnest(ARRAY[
+      'ledger.journal_entry',
+      'ledger.journal_line'
+    ]) AS listed
+    WHERE to_regclass(listed) IS NOT NULL
+  ) t
   CROSS JOIN (SELECT rolname FROM pg_roles WHERE rolname LIKE 'ap\_%\_rt') r
   CROSS JOIN (SELECT unnest(ARRAY['UPDATE','DELETE','TRUNCATE']) AS priv) p
-  WHERE c.relname = 'audit_log' AND c.relkind = 'r'
-    AND CASE p.priv
-          WHEN 'UPDATE' THEN has_any_column_privilege(r.rolname, c.oid, 'UPDATE')
-          ELSE has_table_privilege(r.rolname, c.oid, p.priv)
+  WHERE CASE p.priv
+          WHEN 'UPDATE' THEN has_any_column_privilege(r.rolname, t.oid, 'UPDATE')
+          ELSE has_table_privilege(r.rolname, t.oid, p.priv)
         END
+),
+
+-- 13. The ledger's number counter can be advanced but never removed (see 02-grants.sql).
+counter_removable AS (
+  SELECT 'ap_ledger_rt can remove the entry number counter', p.priv
+  FROM (SELECT unnest(ARRAY['DELETE','TRUNCATE']) AS priv) p
+  WHERE to_regclass('ledger.entry_sequence') IS NOT NULL
+    AND has_table_privilege('ap_ledger_rt', 'ledger.entry_sequence', p.priv)
 )
 
 SELECT * FROM invoker_views
@@ -172,5 +192,6 @@ UNION ALL SELECT * FROM core_overreach
 UNION ALL SELECT * FROM core_platform_reach
 UNION ALL SELECT * FROM public_objects
 UNION ALL SELECT * FROM session_fn_reach
-UNION ALL SELECT * FROM mutable_audit
+UNION ALL SELECT * FROM mutable_append_only
+UNION ALL SELECT * FROM counter_removable
 ORDER BY 1, 2;

@@ -123,6 +123,27 @@ Each entry names the test that would fail if the behaviour regressed.
 - New tenant data with a public id cannot skip audit silently — `BoundaryTests` via
   `AuditModelAssertions`, proven able to fail in `AuditModelAssertionTests`
 
+### Ledger
+- Lines must be two or more, non-zero, and sum to zero, summed in 128 bits so an overflow cannot
+  fake a balance — `ledger.api.tests/LedgerTests`
+- The database refuses an unbalanced entry written by raw SQL as the ledger's own role —
+  `privileges.tests/LedgerTests` (deferred trigger; removing it fails exactly this and the race test)
+- Entry numbers stay gapless under 20 concurrent posts of which 5 fail after being numbered —
+  `privileges.tests/LedgerTests` (removing the posting transaction fails it)
+- A posted entry cannot be edited: code refuses with `AppendOnlyViolationException`, the database
+  with `42501` — `privileges.tests/LedgerTests`, `AccessMatrixTests`; `99-verify` reports a regression
+- Two racing reversals yield exactly one, and the loser's number is given back — real Postgres
+- Another tenant's account is refused by the handler (resolve) and by the database (composite key)
+- Every ledger route answers an unlicensed tenant 403 — `ledger.api.tests/EntitlementTests`,
+  through the real route table (removing one `RequireApp` fails it)
+- Posts are audited against the caller — `privileges.tests/LedgerTests`
+- Raw SQL as `ap_ledger_rt` cannot add a line to a posted entry, use another company's account, move
+  an account between companies, skip or waste a number, pick a fiscal year, forge a reversal, or
+  delete the counter — `privileges.tests/LedgerTests`, one test per rule, each shown to fail when
+  its trigger is dropped
+- A retried post (three concurrent, one key) yields one entry; a reused key is refused
+- Balances whose totals exceed 64 bits are exact
+
 ### Provisioning
 - Idempotency enforced **inside** core's transaction by a unique `provisioning_key`; two
   concurrent calls create exactly one tenant — `ProvisioningTests`
@@ -155,14 +176,14 @@ delivery; session revalidation, CSRF, and a cookie shared across services.
 
 **Not probed by tickets** — an ERP's hardest primitives, which a ticket system cannot reach:
 
-| Primitive | Why tickets cannot exercise it |
-|---|---|
-| Monetary invariants | Tickets have no amounts, currency, rounding, or reversal. Balanced double-entry is the central ERP constraint and nothing here touches it. |
-| Correction semantics | A ticket is edited freely; a posted journal is reversed, never mutated. Different persistence discipline entirely. |
-| Gapless document numbering | Legally required per company per year in many jurisdictions, and contentious under concurrency. Public ids here are deliberately random — the opposite property. |
-| Period close and immutability | No concept of a closed period that rejects writes. |
-| Aggregate reporting | Trial balance, aging, valuation — read patterns tickets does not have. |
-| Multi-company posting | The `company_id` column exists; nothing writes or reads across entities. |
+| Primitive | Why tickets cannot exercise it | Ledger (cycle 6) |
+|---|---|---|
+| Monetary invariants | Tickets have no amounts, currency, rounding, or reversal. Balanced double-entry is the central ERP constraint and nothing here touches it. | **Proved.** Integer minor units; balance enforced by handler and by a deferred trigger that refuses raw SQL too |
+| Correction semantics | A ticket is edited freely; a posted journal is reversed, never mutated. Different persistence discipline entirely. | **Proved.** `IAppendOnly` in code and by grant; reversal at most once, under a race |
+| Gapless document numbering | Legally required per company per year in many jurisdictions, and contentious under concurrency. Public ids here are deliberately random — the opposite property. | **Proved.** 20 concurrent posts, 5 failing after numbering, yield exactly 1–15 |
+| Period close and immutability | No concept of a closed period that rejects writes. | Not yet — next ledger cycle |
+| Aggregate reporting | Trial balance, aging, valuation — read patterns tickets does not have. | **Trial balance only**, summed in SQL, per currency. No performance data |
+| Multi-company posting | The `company_id` column exists; nothing writes or reads across entities. | **Partly.** Every account and entry carries a company resolved through `core_v1.company`; an entry cannot span two. Tested with one company per tenant |
 
 **Consequence.** Infrastructure built against a weak consumer can be subtly wrong for a stronger
 one. Two known candidates: the outbox emits one event per aggregate version, which may not fit a
@@ -172,6 +193,18 @@ period- or company-partitioned financial reads.
 Neither is a reason to stop. Both are reasons that the next proving app should be a thin
 *financial* slice rather than more ticket features — the smallest thing with a ledger invariant,
 to test whether these primitives survive contact with money.
+
+**What the ledger found about those two candidates.** The outbox fits: the entry is the aggregate,
+many lines ride inside it, and it has exactly one version because it is never edited — one event
+per post is natural rather than forced. Row-level tenant filtering composed without friction with
+company-scoped reads (the trial balance filters by tenant through the query filter and by company
+explicitly), but nothing here is large enough to say anything about its cost.
+
+**What the ledger found that was not predicted.** Two primitives needed more than a thin app
+suggests: numbering needed raw SQL (an atomic upsert holding a row lock to commit) because EF has no
+shape for it, and the balance rule needed a database trigger because a rule spanning rows cannot be
+a check constraint. Both are justified in comments where they live; both are the kind of thing an
+ERP will need again.
 
 ---
 
@@ -183,7 +216,7 @@ to test whether these primitives survive contact with money.
 | **D13** | High — **was failing CI on main** | `startDatabase` used `pg_isready -d appplatform` as its readiness check. `pg_isready` only reports that the server accepts connections; the postgres image runs a temporary init server before creating `POSTGRES_DB`, so readiness passed while the database did not exist. **Fixed** — readiness is now a real `SELECT 1` against the target database. | Reproduced: polling a fresh container showed `pg_isready=yes` while `SELECT 1` still failed, a ~0.4s window. CI run `36143741902` failed with `database "appplatform" does not exist` at `applyMigrations`. | The whole e2e job failed. It passed locally because a cached image wins the race, which is why it reached main — a flake class that only appears on a cold runner. |
 | **D12** | Low | `WalkingSkeletonTests` still licenses via raw `INSERT INTO platform.tenant_app`. | `privileges.tests/WalkingSkeletonTests.cs:131` | A handler-level fixture shortcut, not a shipped path. The operator endpoint is covered by the e2e, so this is split coverage rather than a gap — recorded so it is not invisible if the endpoint's behaviour changes. |
 | **D14** | Medium | No operator UI. Provisioning a tenant and granting an entitlement are reachable only over HTTP — `platform.console/` exists as an empty directory. | `ls platform.console` | A1 cannot be "the whole journey in a browser" until an operator has one. Deliberate for this milestone: the customer-facing surface was the priority, and the operator paths are exercised over real HTTP with real sessions. |
-| **D10** | High (blocks financial work) | No append-only mechanism. `TenantGuard` permits `Modified`/`Deleted` on any tenant-scoped row, and nothing marks a table immutable. | Inspection: `grep -riE "immutab\|append.only"` finds only a comment on `OutboxEvent` | A posted journal must be reversible, never mutated. Without a central guard, correctness would depend on every future handler remembering. Cheap now, expensive once financial features exist. |
+| **D10** | High — **fixed** (Cycle 6) | There was no append-only mechanism. | — | Built: `IAppendOnly`, refused in code and by grant, the two kept in step by `BoundaryTests`. See `docs/ledger.md`. |
 | **D11** | High — **fixed** (Cycle 5) | `packages/audit` did not exist. | — | Built: see Cycle 5 and `docs/audit.md`. Sign-in events are not audited (security log, not data history). |
 | **D7** | Low (was Medium) | The Playwright harness still applies migrations and connects as the `postgres` superuser. | `e2e/stack.mjs`, `applyMigrations` | Narrowed: `PrivilegeFixture` now applies the **shipped** scripts as `ap_owner` and every access test connects as a runtime role, so the privilege model IS exercised — just not by the browser harness. A grant regression fails `AccessMatrixTests` and `VerificationTests`. |
 | **D8** | Low | Outbox lease is taken per batch but sized for a single send. | `packages/outbox/OutboxBackoff.cs` — `LeaseDuration` 2 min vs `BatchSize` 20 | With more than one worker replica and a slow transport, the tail of a batch can outlive its lease and be re-delivered. Cannot bite today: one replica, instant local transport. |
@@ -408,7 +441,7 @@ journey's; isolation fails at the API, which is where this tests it.
 With A2 verified, every Milestone 1 acceptance criterion is met at the standard its row states;
 A1's operator steps remain HTTP-only (D14).
 
-## Current cycle
+## Previous cycle
 
 **Cycle 5 — audit (D11). Accepted** — four Codex review rounds, the last with no blocking findings.
 
@@ -480,8 +513,92 @@ Decisions taken without asking, each reversible:
 
 **Fourth review (Codex): all three third-round fixes confirmed, no new findings. NO BLOCKING FINDINGS.**
 
-Next action: the M2-versus-financial-slice decision. D10 (a general append-only guard) is the
-remaining prerequisite for the financial slice.
+## Current cycle
+
+**Cycle 6 — the thin financial slice (D10 and the ledger app). Accepted** — four Codex review rounds,
+the last with no blocking findings.
+
+Chosen by Chris over Milestone 2. Scope and deferrals are in `docs/ledger.md`, written before
+building.
+
+Changed:
+
+- **D10** — `IAppendOnly` and `AppendOnlyGuard` in packages/tenancy, run by `TenantedDbContext` and
+  first in `AuditedDbContext`. `AuditEntry` now uses it instead of its own check. `02-grants.sql` and
+  `99-verify.sql` generalise the audit_log rule to listed tables; `AppendOnlyGrantTests` keeps the
+  lists in step with the code.
+- **apps/ledger/ledger.api** — accounts, post, reverse, list entries, trial balance. Schema
+  `ledger`, role `ap_ledger_rt` (its schema, `core_v1`, the session functions; nothing else),
+  entitlement `ledger`, boundary registry entry. Migrations `InitialLedger` and `AddBalanceTrigger`
+  with generated scripts.
+- **No UI and no browser journey** — deferred with period close; the shell registry therefore has no
+  ledger entry, and licensing it shows nothing in the nav yet.
+
+Evidence (measured, after all review rounds): 541 .NET tests pass, 156 of them against real PostgreSQL;
+19/19 Playwright (unchanged — the ledger is not in the browser stack). Mutations: dropping each
+database trigger in turn, the posting transaction, one `RequireApp`, or the 128-bit sum each fails
+exactly the tests meant to catch it.
+
+**Independent review (Codex) — 9 blocking, 3 optional. All taken.**
+
+The central finding was that the database enforced *balance* but not the rest of what "posted"
+means, so a client holding the runtime role could still change the books without going through a
+handler. Each rule is now enforced at the database too — `docs/ledger.md` has the table.
+
+| # | Finding | Resolution |
+|---|---|---|
+| B1 | A balanced pair of lines could be added to an entry already posted, changing the books with no new entry. | Sealed: a deferred trigger requires a line and its entry to share an inserting transaction. |
+| B2 | Keys carried the tenant but not the company: an entry could use another company's accounts, and an account could be moved to another company after posting. | `(tenant, company, id)` keys on account and entry; lines carry company. |
+| B3 | Numbering and fiscal year were posting conventions: raw SQL could skip numbers, leave issued numbers unused, or pick a year. | Counter triggers (advance by one; every issued number used; no unissued number), counter undeletable by grant, fiscal-year check constraint. |
+| B4 | A retried post created a second entry. | Required idempotency key, unique per tenant, with a request fingerprint; concurrent retries return one entry. |
+| B5 | `long.MinValue` passed every check and made the entry unreversible. | Refused by handler and check constraint; reversal negation is `checked`. |
+| B6 | Balances and totals were `long` and could overflow. | Summed as `numeric`, returned as `decimal`; test with totals of 2 × `long.MaxValue`. |
+| B7 | Raw SQL could post a "reversal" that reversed nothing and took the original's only slot. | Deferred trigger: exact multiset negation, same currency, not earlier, not a reversal of a reversal. |
+| B8 | The cross-tenant test could pass with the account key broken — a random entry id failed first. | Valid entry; asserts the named account constraint. |
+| B9 | Accounts and balances were read in two statements; a concurrent create-and-post broke the lookup. | One query. |
+| O10 | The consistency test used a hard-coded model list and matched names in comments. | Discovers every registered service through its design-time factory; parses only the executed list; requires an exact match. |
+| O11 | The overflow example wrapped to −4, not 0, so it could not fail. | `[MaxValue, MaxValue, 2]`; reverting to a 64-bit sum fails it. |
+| O12 | "ISO currency" was not checked against ISO. | Described honestly as ISO *form*; supported currencies logged as an open question. |
+
+**Re-review (Codex) — ten fixes confirmed; 2 blocking, 1 optional. All taken.**
+
+| # | Finding | Resolution |
+|---|---|---|
+| R1 | The reversal-mirror check ran only when the reversal row was inserted. `SET CONSTRAINTS … IMMEDIATE` could run it early, after which a balanced pair appended to the reversal escaped it. | Queued again by every line inserted into a reversal or into an entry that has one. Test forces the check early and appends; dropping the line trigger fails it. |
+| R2 | The seal compared `xmin`, which wraps around (freezing keeps the old value, so an old entry can match a new transaction) and wrongly refused a legitimate post split across a savepoint. | Replaced by a declared line count: numbers in 1..count, unique, exact at commit. No transaction ids involved. Tests: a late line inside and outside the range, a savepoint-split post accepted, an entry short of its count, an entry with no lines. |
+| R-O | The consistency test stripped only `--` comments inside the list, and a service with no factory contributed nothing silently. | All comments stripped from the whole script first, with tests for both comment forms; every registered service must contribute a model. |
+
+**Third review (Codex) — round-two fixes confirmed; 1 blocking. Taken.**
+
+| # | Finding | Resolution |
+|---|---|---|
+| T1 | The range trigger skipped lines whose entry did not exist yet, leaving it to the foreign key — but a data-modifying CTE can insert lines before their entry, and the key is checked only at statement end. Lines 3 and 4 of a two-line entry then left slots 1 and 2 free for a later, unbalancing line. | A line whose entry does not yet exist is refused. Test reproduces the CTE; restoring the skip fails it. |
+
+**Also simplified:** with the seal, the per-line completeness trigger was redundant — once the entry's
+check passes there is no slot left — and dropping it failed no test, so it was removed rather than
+kept untested. The entry-level check is the one that catches an entry with no lines at all.
+
+Found while building:
+
+- A PL/pgSQL `CASE` resolves every field it names, so the first trigger failed on journal entries,
+  which have no `entry_id`. Rewritten as `IF`.
+- A deferred trigger fails at COMMIT, so the error surfaces as a raw `PostgresException`, not EF's
+  `DbUpdateException`. A handler bug that posted an unbalanced entry would therefore be a 500 — the
+  right outcome for a backstop, and why the handler checks first.
+- `Enum.TryParse` accepts `"asset,liability"` (= Liability) and `"4"`; account types are matched by
+  exact name.
+
+Decisions taken without asking, each reversible:
+
+- Any signed-in user of a licensed tenant may post and reverse. Logged in open questions.
+- An entry is posted on creation — no drafts. A reversal cannot itself be reversed; re-post instead.
+- A reversal cannot be dated before the entry it reverses.
+- Posting requires an idempotency key (the review's B4 — a retry must not post twice).
+
+**Fourth review (Codex): the fix confirmed; CTEs, INSERT … SELECT, multi-row VALUES, COPY and
+ON CONFLICT checked for further bypasses — none. NO BLOCKING FINDINGS.**
+
+Next action: the next ledger cycle (period close and a UI) or Milestone 2.
 
 ---
 

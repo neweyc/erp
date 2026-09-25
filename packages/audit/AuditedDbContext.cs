@@ -31,9 +31,10 @@ public abstract class AuditedDbContext(
 
     // Five rules shape both save methods below.
     //
-    // 1. The tenant guard runs FIRST, before any row is locked or read: a context in one tenant
-    //    must not lock another tenant's row even briefly, which a caller-owned transaction would
-    //    hold until it ends.
+    // 1. The append-only and tenant guards run FIRST, before any row is locked or read: a context
+    //    in one tenant must not lock another tenant's row even briefly, which a caller-owned
+    //    transaction would hold until it ends — and an edit to a posted row is refused before
+    //    audit reads anything to describe it.
     //
     // 2. Staged before calling base, because base runs the tenant guard again — which is what
     //    stamps the new audit rows with the tenant. Staged after, they would reach the database
@@ -55,6 +56,7 @@ public abstract class AuditedDbContext(
     //    audit row on its own.
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AppendOnlyGuard.Enforce(ChangeTracker);
         TenantGuard.Enforce(ChangeTracker, CurrentTenantId);
         using var owned = NeedsOwnTransaction() ? Database.BeginTransaction() : null;
 
@@ -79,6 +81,7 @@ public abstract class AuditedDbContext(
     public override async Task<int> SaveChangesAsync(
         bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        AppendOnlyGuard.Enforce(ChangeTracker);
         TenantGuard.Enforce(ChangeTracker, CurrentTenantId);
         await using var owned = NeedsOwnTransaction()
             ? await Database.BeginTransactionAsync(cancellationToken)

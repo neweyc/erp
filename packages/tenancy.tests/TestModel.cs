@@ -17,6 +17,14 @@ public class Gadget : ITenantScoped
     public Guid WidgetId { get; set; }
 }
 
+/// <summary>Written once, never changed — stands in for a posted journal line.</summary>
+public class Posting : ITenantScoped, IAppendOnly
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public int TenantId { get; set; }
+    public long AmountMinor { get; set; }
+}
+
 /// <summary>Not tenant-scoped — a host-level table, to prove the filter leaves it alone.</summary>
 public class Region
 {
@@ -30,9 +38,16 @@ public class TestDbContext(DbContextOptions options, ITenantProvider provider)
     public DbSet<Widget> Widgets => Set<Widget>();
     public DbSet<Gadget> Gadgets => Set<Gadget>();
     public DbSet<Region> Regions => Set<Region>();
+    public DbSet<Posting> Postings => Set<Posting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Posting>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.TenantId);
+        });
+
         modelBuilder.Entity<Widget>(e =>
         {
             e.HasKey(x => x.Id);

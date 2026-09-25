@@ -50,6 +50,8 @@ One database, one owner, one runtime role per deployable, one migration role per
 | `ap_platform_rt` | `platform` | `platform` | none |
 | `ap_core_rt` | `core`, `identity`, `core_v1`, **`platform.tenant`** | `core`, `identity`, **INSERT only on `platform.tenant`** | none |
 | `ap_tickets_rt` | `tickets`, `core_v1` | `tickets` | none |
+| `ap_ledger_rt` | `ledger`, `core_v1` | `ledger` — **INSERT only** on `journal_entry` and `journal_line`, which are append-only | none |
+| every `ap_%_rt` | its own `audit_log` | **INSERT only** on it — no UPDATE (table or column), DELETE or TRUNCATE | none |
 | `ap_<schema>_migrate` | its schema | its schema | its schema only |
 
 Rules that follow, and the reason each exists:

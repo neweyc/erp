@@ -11,9 +11,9 @@ public enum AuditAction
 
 /// <summary>
 /// One change to one auditable entity. Append-only: runtime roles hold no UPDATE or DELETE on
-/// the table, and <see cref="AuditTrail"/> refuses to save a modified or deleted entry.
+/// the table, and the append-only guard refuses to save a modified or deleted entry.
 /// </summary>
-public class AuditEntry : ITenantScoped
+public class AuditEntry : ITenantScoped, IAppendOnly
 {
     public long Id { get; set; }
     public int TenantId { get; set; }

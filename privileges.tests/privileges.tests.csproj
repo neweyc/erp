@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../apps/tickets/tickets.api/tickets.api.csproj" />
+    <ProjectReference Include="../apps/ledger/ledger.api/ledger.api.csproj" />
     <ProjectReference Include="../core.api/core.api.csproj" />
     <ProjectReference Include="../platform.api/platform.api.csproj" />
     <ProjectReference Include="../packages/auth/AppPlatform.Auth.csproj" />

@@ -30,55 +30,93 @@ GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA identity TO ap_c
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA tickets  TO ap_tickets_rt;
 GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA tickets  TO ap_tickets_rt;
 
-GRANT SELECT ON ALL TABLES IN SCHEMA core_v1     TO ap_core_rt, ap_tickets_rt;
-GRANT SELECT ON ALL TABLES IN SCHEMA identity_v1 TO ap_core_rt, ap_tickets_rt;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA ledger   TO ap_ledger_rt;
+GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA ledger   TO ap_ledger_rt;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA core_v1     TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
+GRANT SELECT ON ALL TABLES IN SCHEMA identity_v1 TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 
 -- Repairs a database bootstrapped before ap_owner was made a member of the migration
 -- roles. Without it every published view fails on the table behind it.
-GRANT ap_platform_migrate, ap_core_migrate, ap_tickets_migrate TO ap_owner;
+GRANT ap_platform_migrate, ap_core_migrate, ap_tickets_migrate, ap_ledger_migrate TO ap_owner;
 ALTER DEFAULT PRIVILEGES FOR ROLE ap_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 -- ---------------------------------------------------------------------------
--- Audit logs are append-only
+-- Append-only tables
 -- ---------------------------------------------------------------------------
--- Every `audit_log`, in every schema, loses UPDATE, DELETE and TRUNCATE for every runtime
--- role. The default privileges in 01 grant all of these to any new table, and the bulk
--- re-grant above restores them — so this must come AFTER both.
+-- Every `audit_log`, in every schema, plus the tables listed below, lose UPDATE, DELETE and
+-- TRUNCATE for every runtime role. A posted journal is corrected by a reversal, never an edit;
+-- an audit row is never corrected at all. The code refuses both too (IAppendOnly), but only for
+-- code that goes through it — this is the defence that holds against code that is not in this
+-- repo.
 --
--- Found by NAME, tables and roles alike: a new app's log and its `ap_<app>_rt` role are
--- covered with no edit here, once this file runs after that app's first migration, as the
--- runbook in database/README.md already requires.
+-- The default privileges in 01 grant all of these to any new table, and the bulk re-grant above
+-- restores them — so this must come AFTER both.
 --
--- Column-level UPDATE is revoked separately. A table-level REVOKE does not remove a grant
--- made on individual columns, so `GRANT UPDATE (changes)` would otherwise survive this
--- script and leave the history rewritable.
+-- Audit logs are found by NAME, as are the runtime roles (`ap_%_rt`), so a new app's log and role
+-- are covered with no edit here once this file runs after that app's first migration, as the
+-- runbook in database/README.md requires. Other append-only tables are LISTED: BoundaryTests
+-- fails if a table mapped by an IAppendOnly entity is missing from this list, or from the same
+-- list in 99-verify.sql. A table that does not exist yet is skipped, so this runs before a
+-- service's first migration as well as after it.
 --
--- This is the defence that holds against code that is not in this repo. AuditedDbContext
--- also refuses to save a modified or deleted entry, but that only binds code that goes
--- through it. A history that the application could rewrite is not a history.
+-- Column-level UPDATE is revoked separately. A table-level REVOKE does not remove a grant made
+-- on individual columns, so `GRANT UPDATE (changes)` would otherwise survive this script.
 
 DO $$
 DECLARE
-  log     regclass;
-  role    name;
-  columns text;
+  append_only regclass;
+  role        name;
+  columns     text;
 BEGIN
-  FOR log IN
+  FOR append_only IN
     SELECT c.oid::regclass
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relname = 'audit_log' AND c.relkind = 'r'
       AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    UNION
+    SELECT to_regclass(listed)
+    FROM unnest(ARRAY[
+      'ledger.journal_entry',
+      'ledger.journal_line'
+    ]) AS listed
+    WHERE to_regclass(listed) IS NOT NULL
   LOOP
     SELECT string_agg(quote_ident(a.attname), ', ') INTO columns
     FROM pg_attribute a
-    WHERE a.attrelid = log AND a.attnum > 0 AND NOT a.attisdropped;
+    WHERE a.attrelid = append_only AND a.attnum > 0 AND NOT a.attisdropped;
 
     FOR role IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'ap\_%\_rt' LOOP
-      EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON %s FROM %I', log, role);
-      EXECUTE format('REVOKE UPDATE (%s) ON %s FROM %I', columns, log, role);
+      EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON %s FROM %I', append_only, role);
+      EXECUTE format('REVOKE UPDATE (%s) ON %s FROM %I', columns, append_only, role);
     END LOOP;
   END LOOP;
+END
+$$;
+
+-- ---------------------------------------------------------------------------
+-- The ledger's number counter, and its integrity checks
+-- ---------------------------------------------------------------------------
+-- The runtime role advances it (UPDATE) but may never remove it. Deleting or truncating a
+-- series would restart it at 1 and reissue numbers already on posted entries. The unique index
+-- would then refuse those posts, so the books would not be corrupted — but the series would be
+-- stuck, and restarting a legally numbered series is not something an application gets to do.
+
+--
+-- The reversal check is a function its triggers call, and a trigger runs as the role that fired it
+-- — so the ledger's role needs EXECUTE on it. Functions created by ap_owner are not executable by
+-- PUBLIC (01-roles-and-schemas.sql), which is why it is granted here by name. It only reads.
+
+DO $$
+BEGIN
+  IF to_regclass('ledger.entry_sequence') IS NOT NULL THEN
+    REVOKE DELETE, TRUNCATE ON ledger.entry_sequence FROM ap_ledger_rt;
+  END IF;
+
+  IF to_regprocedure('ledger.check_reversal(integer, uuid)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION ledger.check_reversal(integer, uuid) TO ap_ledger_rt;
+  END IF;
 END
 $$;
 
@@ -125,10 +163,10 @@ $$;
 -- would undo the isolation everything else here pays for.
 
 REVOKE EXECUTE ON FUNCTION identity_v1.session_context(uuid) FROM PUBLIC;
-GRANT  EXECUTE ON FUNCTION identity_v1.session_context(uuid) TO ap_core_rt, ap_tickets_rt;
+GRANT  EXECUTE ON FUNCTION identity_v1.session_context(uuid) TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 
 REVOKE EXECUTE ON FUNCTION identity_v1.touch_session(uuid) FROM PUBLIC;
-GRANT  EXECUTE ON FUNCTION identity_v1.touch_session(uuid) TO ap_core_rt, ap_tickets_rt;
+GRANT  EXECUTE ON FUNCTION identity_v1.touch_session(uuid) TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 
 -- ---------------------------------------------------------------------------
 -- Explicit negatives
@@ -137,8 +175,12 @@ GRANT  EXECUTE ON FUNCTION identity_v1.touch_session(uuid) TO ap_core_rt, ap_tic
 -- no-op; writing them down means a future GRANT added elsewhere is contradicted here
 -- rather than quietly taking effect.
 
-REVOKE ALL ON SCHEMA core, identity, tickets, core_v1, identity_v1 FROM ap_platform_rt;
-REVOKE ALL ON SCHEMA platform FROM ap_tickets_rt;
-REVOKE ALL ON SCHEMA core, identity FROM ap_tickets_rt;
+REVOKE ALL ON SCHEMA core, identity, tickets, ledger, core_v1, identity_v1 FROM ap_platform_rt;
+REVOKE ALL ON SCHEMA platform FROM ap_tickets_rt, ap_ledger_rt;
+REVOKE ALL ON SCHEMA core, identity FROM ap_tickets_rt, ap_ledger_rt;
+-- Apps never reach each other. They share nothing but core's published views; app-to-app
+-- workflow, when it exists, goes through events.
+REVOKE ALL ON SCHEMA ledger FROM ap_tickets_rt;
+REVOKE ALL ON SCHEMA tickets FROM ap_ledger_rt;
 
 COMMIT;

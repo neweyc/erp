@@ -78,6 +78,18 @@ remain open; they are not a blanket prohibition on building experiments.
 - Which integration customers actually ask for first. SSO and SCIM are frequently the
   real ask and are worth more per hour than a data API — check before building one.
 
+## Ledger
+
+- **Who may post and reverse.** Today any signed-in user of a tenant that licensed the ledger can.
+  Posting to the books is usually a narrower permission than reading them; the role model for it is
+  undecided. Decide before a real customer's books are in it.
+- **Who may reopen a closed period**, and whether closing is per company or per tenant — needed
+  before period close (the next ledger cycle) can be built.
+- **Fiscal years that are not calendar years.** Entry numbering is per calendar year today.
+- **Supported currencies and their decimal places.** An entry's currency is any three upper-case
+  letters; amounts are in "the minor unit", which is two places for USD but zero for JPY and three
+  for KWD. Nothing yet records which currencies a company uses or how many places each has.
+
 ## Operations
 
 - **Audit retention and erasure.** `audit_log` is append-only and records old and new values, so an

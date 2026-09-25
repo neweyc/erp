@@ -10,6 +10,7 @@ namespace AppPlatform.Entitlements;
 public static class Apps
 {
     public const string Tickets = "tickets";
+    public const string Ledger = "ledger";
 
-    public static readonly string[] All = [Tickets];
+    public static readonly string[] All = [Tickets, Ledger];
 }

@@ -1,13 +1,21 @@
 <Solution>
   <Project Path="apps/tickets/tickets.api/tickets.api.csproj" />
+  <Folder Name="/apps/" />
+  <Folder Name="/apps/ledger/">
+    <Project Path="apps/ledger/ledger.api.tests/ledger.api.tests.csproj" />
+    <Project Path="apps/ledger/ledger.api/ledger.api.csproj" />
+  </Folder>
   <Folder Name="/packages/" />
+  <Folder Name="/packages/api/" />
   <Folder Name="/packages/audit.tests/">
     <Project Path="packages/audit.tests/AppPlatform.Audit.Tests.csproj" />
   </Folder>
   <Folder Name="/packages/audit/">
     <Project Path="packages/audit/AppPlatform.Audit.csproj" />
   </Folder>
+  <Folder Name="/packages/entitlements/" />
   <Folder Name="/packages/ids/" />
+  <Folder Name="/packages/outbox/" />
   <Folder Name="/packages/tenancy/" />
   <Project Path="apps/tickets/tickets.api.tests/tickets.api.tests.csproj" />
   <Project Path="boundary.tests/boundary.tests.csproj" />

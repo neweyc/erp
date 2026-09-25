@@ -38,7 +38,7 @@ public static class BoundaryRegistry
             ProjectDirectory: "core.api",
             OwnSchemas: ["core", "identity", "platform"],
             ReadableViewSchemas: [],
-            ForbiddenAssemblyPrefixes: ["AppPlatform.Platform", "AppPlatform.Tickets"],
+            ForbiddenAssemblyPrefixes: ["AppPlatform.Platform", "AppPlatform.Tickets", "AppPlatform.Ledger"],
             // core legitimately NAMES platform.tenant and platform.tenant_app: the published
             // session function joins both to resolve tenant status and licensed apps, and it
             // runs as ap_owner precisely because core's own role cannot read them. What core
@@ -46,7 +46,7 @@ public static class BoundaryRegistry
             // commercial idempotency record.
             BannedSourceStrings: [
                 "platform.audit_log", "platform.platform_user", "platform.platform_session",
-                "platform.idempotency_record", "tickets."]),
+                "platform.idempotency_record", "tickets.", "ledger."]),
 
         // platform.api sees the commercial record and nothing else. The banned strings are belt
         // to the grants' braces: it can neither NAME the tenant field key nor reach the schemas
@@ -56,8 +56,8 @@ public static class BoundaryRegistry
             ProjectDirectory: "platform.api",
             OwnSchemas: ["platform"],
             ReadableViewSchemas: [],
-            ForbiddenAssemblyPrefixes: ["AppPlatform.Core", "AppPlatform.Tickets"],
-            BannedSourceStrings: ["core.employee", "identity.user", "identity_v1.", "tickets."]),
+            ForbiddenAssemblyPrefixes: ["AppPlatform.Core", "AppPlatform.Tickets", "AppPlatform.Ledger"],
+            BannedSourceStrings: ["core.employee", "identity.user", "identity_v1.", "tickets.", "ledger."]),
 
         // The first licensed app, and the case the published-view design exists for: it reads
         // employees through core_v1 and has no grant on core.employee at all. The banned
@@ -66,7 +66,16 @@ public static class BoundaryRegistry
             ProjectDirectory: "apps/tickets/tickets.api",
             OwnSchemas: ["tickets"],
             ReadableViewSchemas: ["core_v1"],
-            ForbiddenAssemblyPrefixes: ["AppPlatform.Core", "AppPlatform.Platform"],
-            BannedSourceStrings: ["core.employee", "identity.", "platform."]),
+            ForbiddenAssemblyPrefixes: ["AppPlatform.Core", "AppPlatform.Platform", "AppPlatform.Ledger"],
+            BannedSourceStrings: ["core.employee", "identity.", "platform.", "ledger."]),
+
+        // The second app, and the first with money. Reads companies through core_v1; never core's
+        // tables, never another app's schema. Apps depend on core only, never on each other.
+        new(
+            ProjectDirectory: "apps/ledger/ledger.api",
+            OwnSchemas: ["ledger"],
+            ReadableViewSchemas: ["core_v1"],
+            ForbiddenAssemblyPrefixes: ["AppPlatform.Core", "AppPlatform.Platform", "AppPlatform.Tickets"],
+            BannedSourceStrings: ["core.company", "core.employee", "identity.", "platform.", "tickets."]),
     ];
 }

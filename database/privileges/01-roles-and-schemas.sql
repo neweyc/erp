@@ -27,11 +27,13 @@ CREATE ROLE ap_owner NOLOGIN;
 CREATE ROLE ap_platform_rt LOGIN;
 CREATE ROLE ap_core_rt     LOGIN;
 CREATE ROLE ap_tickets_rt  LOGIN;
+CREATE ROLE ap_ledger_rt   LOGIN;
 
 -- Migration roles. DDL within one schema only.
 CREATE ROLE ap_platform_migrate LOGIN;
 CREATE ROLE ap_core_migrate     LOGIN;
 CREATE ROLE ap_tickets_migrate  LOGIN;
+CREATE ROLE ap_ledger_migrate   LOGIN;
 
 -- ap_owner inherits from every migration role, and this is load-bearing rather than
 -- tidiness.
@@ -46,7 +48,7 @@ CREATE ROLE ap_tickets_migrate  LOGIN;
 -- Membership rather than per-table grants because it covers every table a migration
 -- creates later, automatically. Nothing connects as ap_owner, so this concentrates no
 -- access in any role that can log in.
-GRANT ap_platform_migrate, ap_core_migrate, ap_tickets_migrate TO ap_owner;
+GRANT ap_platform_migrate, ap_core_migrate, ap_tickets_migrate, ap_ledger_migrate TO ap_owner;
 
 -- ---------------------------------------------------------------------------
 -- Schemas
@@ -56,6 +58,7 @@ CREATE SCHEMA platform    AUTHORIZATION ap_owner;
 CREATE SCHEMA core        AUTHORIZATION ap_owner;
 CREATE SCHEMA identity    AUTHORIZATION ap_owner;
 CREATE SCHEMA tickets     AUTHORIZATION ap_owner;
+CREATE SCHEMA ledger      AUTHORIZATION ap_owner;
 
 -- Published contracts. Owned by ap_owner because a view executes with its OWNER's
 -- privileges — that is the entire mechanism by which ap_tickets_rt reads
@@ -87,14 +90,16 @@ GRANT USAGE, CREATE ON SCHEMA platform TO ap_platform_migrate;
 GRANT USAGE, CREATE ON SCHEMA core     TO ap_core_migrate;
 GRANT USAGE, CREATE ON SCHEMA identity TO ap_core_migrate;
 GRANT USAGE, CREATE ON SCHEMA tickets  TO ap_tickets_migrate;
+GRANT USAGE, CREATE ON SCHEMA ledger   TO ap_ledger_migrate;
 
 -- Runtime roles may see into their schemas but never create in them.
 GRANT USAGE ON SCHEMA platform    TO ap_platform_rt;
 GRANT USAGE ON SCHEMA core        TO ap_core_rt;
 GRANT USAGE ON SCHEMA identity    TO ap_core_rt;
 GRANT USAGE ON SCHEMA tickets     TO ap_tickets_rt;
-GRANT USAGE ON SCHEMA core_v1     TO ap_core_rt, ap_tickets_rt;
-GRANT USAGE ON SCHEMA identity_v1 TO ap_core_rt, ap_tickets_rt;
+GRANT USAGE ON SCHEMA ledger      TO ap_ledger_rt;
+GRANT USAGE ON SCHEMA core_v1     TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
+GRANT USAGE ON SCHEMA identity_v1 TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 
 -- The provisioning exception needs TWO grants, and the table-level one in 02-grants.sql
 -- is inert without this. A GRANT on platform.tenant does nothing while the role cannot
@@ -138,13 +143,21 @@ ALTER DEFAULT PRIVILEGES FOR ROLE ap_tickets_migrate IN SCHEMA tickets
 ALTER DEFAULT PRIVILEGES FOR ROLE ap_tickets_migrate IN SCHEMA tickets
   GRANT USAGE, SELECT ON SEQUENCES TO ap_tickets_rt;
 
+-- The ledger's journal tables are append-only; 02-grants.sql takes UPDATE and DELETE back from
+-- them by name. The default here stays the ordinary one because the ledger also has mutable
+-- tables (accounts, the number sequence).
+ALTER DEFAULT PRIVILEGES FOR ROLE ap_ledger_migrate IN SCHEMA ledger
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ap_ledger_rt;
+ALTER DEFAULT PRIVILEGES FOR ROLE ap_ledger_migrate IN SCHEMA ledger
+  GRANT USAGE, SELECT ON SEQUENCES TO ap_ledger_rt;
+
 -- Published contracts are created by ap_owner and are READ ONLY to consumers. SELECT
 -- and nothing else: a published view is a contract, not a back door into the owning
 -- schema.
 ALTER DEFAULT PRIVILEGES FOR ROLE ap_owner IN SCHEMA core_v1
-  GRANT SELECT ON TABLES TO ap_core_rt, ap_tickets_rt;
+  GRANT SELECT ON TABLES TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 ALTER DEFAULT PRIVILEGES FOR ROLE ap_owner IN SCHEMA identity_v1
-  GRANT SELECT ON TABLES TO ap_core_rt, ap_tickets_rt;
+  GRANT SELECT ON TABLES TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 
 -- Functions are EXECUTABLE BY PUBLIC on creation. Revoking that default here means a
 -- new SECURITY DEFINER function is not accidentally callable by every role in the

@@ -244,7 +244,7 @@ public class AuditTrailTests
         var row = await db.AuditLog.SingleAsync();
         row.Changes = "{}";
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+        await Assert.ThrowsAsync<AppendOnlyViolationException>(() => db.SaveChangesAsync());
     }
 
     [Fact]
@@ -255,7 +255,7 @@ public class AuditTrailTests
         await using var db = Context();
         db.AuditLog.Remove(await db.AuditLog.SingleAsync());
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+        await Assert.ThrowsAsync<AppendOnlyViolationException>(() => db.SaveChangesAsync());
     }
 
     [Fact]

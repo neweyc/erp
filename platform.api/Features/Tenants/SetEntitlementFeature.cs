@@ -20,7 +20,7 @@ public static class SetEntitlementFeature
     /// Core is deliberately absent. It is always on and has no row — an entitlement table that
     /// could express "core revoked" invites someone to try it.
     /// </summary>
-    public static readonly string[] LicensableApps = ["tickets"];
+    public static readonly string[] LicensableApps = ["tickets", "ledger"];
 
     public record SetEntitlementCommand(string? App, bool? Licensed);
 

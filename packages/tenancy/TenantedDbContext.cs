@@ -5,8 +5,8 @@ namespace AppPlatform.Tenancy;
 
 /// <summary>
 /// Base for every tenant-scoped DbContext. Applies the query filter to each
-/// <see cref="ITenantScoped"/> entity and enforces stamping and the cross-tenant guard on
-/// save, so no derived context has to remember to.
+/// <see cref="ITenantScoped"/> entity and enforces stamping, the cross-tenant guard, and the
+/// append-only guard on save, so no derived context has to remember to.
 /// </summary>
 public abstract class TenantedDbContext(DbContextOptions options, ITenantProvider tenantProvider)
     : DbContext(options)
@@ -60,6 +60,7 @@ public abstract class TenantedDbContext(DbContextOptions options, ITenantProvide
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AppendOnlyGuard.Enforce(ChangeTracker);
         TenantGuard.Enforce(ChangeTracker, CurrentTenantId);
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -67,6 +68,7 @@ public abstract class TenantedDbContext(DbContextOptions options, ITenantProvide
     public override Task<int> SaveChangesAsync(
         bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        AppendOnlyGuard.Enforce(ChangeTracker);
         TenantGuard.Enforce(ChangeTracker, CurrentTenantId);
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }

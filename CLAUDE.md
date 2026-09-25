@@ -17,7 +17,7 @@ and the reason is stated inline. Don't "fix" it back.
    departments, job titles, locations, identity/roles, settings, terminology, audit.
    Owns the published `core_v1` views that every app reads.
 3. **Apps** (`apps/*`) — licensed, optional, one schema each, mounted into one shell.
-   First app: **tickets**.
+   First app: **tickets**. Second: **ledger**, the thin financial slice (`docs/ledger.md`).
 
 **Core is a spine, not a product.** HR features (training, certifications, compliance,
 discipline) are an app like any other — they do NOT belong in core. A customer buying a
@@ -38,6 +38,8 @@ apps/
   tickets/
     tickets.api/             licensed app API                -> schema: tickets
     tickets.ui/              workspace package imported by shell.ui
+  ledger/
+    ledger.api/              licensed app API (no UI yet)    -> schema: ledger
 packages/                    shared libraries, versioned (see Shared code)
 database/                    generated SQL scripts, seed/reference data, ER diagrams
 e2e/                         Playwright smoke of the critical journey
@@ -211,7 +213,7 @@ Each project owns a Postgres **schema** in **one** database. Full rationale and 
 escape hatch: `docs/architecture.md`.
 
 - `platform` — operator tables. `core` — org/people. `identity` — users, sessions,
-  tokens, MFA. `tickets` — the first app. One schema per app thereafter.
+  tokens, MFA. `tickets` — the first app. `ledger` — the second. One schema per app thereafter.
 - **Core publishes versioned read views**: `core_v1.employee`, `core_v1.department`,
   `core_v1.company`, `core_v1.job_title`. Thin, denormalized, display-safe, carrying
   `tenant_id` so a consuming app applies its ordinary `ITenantScoped` filter to them
@@ -389,10 +391,11 @@ code that assumes one of these is available — check first.
   `FileEmailTransport`, a capture-to-disk substitute gated out of Production.
 - `packages/ui-kit` — shadcn components, DataTable, dialogs, form primitives.
 
-**Also not built, and the central ledger invariant:** there is no general append-only mechanism. A
-posted journal must be reversible, never mutable, and `TenantGuard` currently permits an update to
-any tenant-scoped row. Anything financial needs that guard first. `audit_log` is append-only by
-grant and by a check in `AuditTrail` — a pattern to generalise, not the general mechanism.
+**Append-only rows** (`IAppendOnly`, packages/tenancy) — a posted journal line, an audit entry. The
+code refuses to modify or delete one; its table is also listed in `02-grants.sql`, which removes
+UPDATE/DELETE/TRUNCATE from runtime roles, and in `99-verify.sql`. `BoundaryTests` fails if an
+`IAppendOnly` table is missing from either list. Correct a posted record by writing a reversal,
+never by editing it.
 
 - Shared packages are **versioned dependencies, not project references across deploy
   boundaries.** A project reference re-couples the releases this layout exists to

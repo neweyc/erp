@@ -60,7 +60,7 @@ public sealed class PrivilegeFixture : IAsyncLifetime
         // ap_owner is a member of every migration role — set up for exactly this reason — so it
         // can create in `core`/`identity`/`tickets`/`platform` as well as in the published
         // schemas, which no single migration role can do.
-        foreach (var service in new[] { "platform", "core", "tickets" })
+        foreach (var service in new[] { "platform", "core", "tickets", "ledger" })
         {
             await ExecuteFileAsync(
                 Path.Combine(RepositoryPaths.Project($"database/{service}"), "migrations-all.sql"),
@@ -74,7 +74,7 @@ public sealed class PrivilegeFixture : IAsyncLifetime
         // they cannot authenticate in a real deployment until a password is issued out of
         // band — but connecting AS the runtime role is the only way to test that the grants
         // actually constrain it.
-        await ExecuteAsync("ALTER ROLE ap_core_rt PASSWORD 'test'; ALTER ROLE ap_tickets_rt PASSWORD 'test'; ALTER ROLE ap_platform_rt PASSWORD 'test';");
+        await ExecuteAsync("ALTER ROLE ap_core_rt PASSWORD 'test'; ALTER ROLE ap_tickets_rt PASSWORD 'test'; ALTER ROLE ap_platform_rt PASSWORD 'test'; ALTER ROLE ap_ledger_rt PASSWORD 'test';");
     }
 
     public Task DisposeAsync() => _container.DisposeAsync().AsTask();
@@ -106,6 +106,15 @@ public sealed class PrivilegeFixture : IAsyncLifetime
         await using var connection = new NpgsqlConnection(ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Runs <paramref name="sql"/> as <paramref name="role"/>, letting any database error through.</summary>
+    public async Task ExecuteAsAsync(string role, string sql)
+    {
+        await using var connection = new NpgsqlConnection(ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand($"SET ROLE {role}; {sql}", connection);
         await command.ExecuteNonQueryAsync();
     }
 

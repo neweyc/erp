@@ -80,6 +80,27 @@ public class AccessMatrixTests(PrivilegeFixture fixture)
         { "the platform cannot delete from the operator audit log", "ap_platform_rt",
           "DELETE FROM platform.audit_log", false },
 
+        // The ledger: its own schema, core's published company view, and nothing else — and its
+        // journal is append-only even to itself.
+        { "the ledger reads the published company view", "ap_ledger_rt",
+          "SELECT name FROM core_v1.company", true },
+        { "the ledger cannot read core's own company table", "ap_ledger_rt",
+          "SELECT * FROM core.company", false },
+        { "the ledger cannot reach another app", "ap_ledger_rt",
+          "SELECT * FROM tickets.ticket", false },
+        { "another app cannot reach the ledger", "ap_tickets_rt",
+          "SELECT * FROM ledger.journal_entry", false },
+        { "the platform cannot read the ledger", "ap_platform_rt",
+          "SELECT * FROM ledger.journal_line", false },
+        { "the ledger reads its journal", "ap_ledger_rt",
+          "SELECT * FROM ledger.journal_line", true },
+        { "the ledger cannot edit a posted line", "ap_ledger_rt",
+          "UPDATE ledger.journal_line SET amount_minor = 1", false },
+        { "the ledger cannot delete a posted entry", "ap_ledger_rt",
+          "DELETE FROM ledger.journal_entry", false },
+        { "the ledger can advance its number sequence", "ap_ledger_rt",
+          "UPDATE ledger.entry_sequence SET last_number = last_number WHERE false", true },
+
         // No runtime role has DDL. A bug cannot drop a table.
         { "an app cannot create a table", "ap_tickets_rt", "CREATE TABLE tickets.nope (id int)", false },
         { "an app cannot drop its own table", "ap_tickets_rt", "DROP TABLE tickets.ticket", false },

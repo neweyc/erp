@@ -92,7 +92,10 @@ public static class AuditTrail
         return Add(context, Build(pending, stored, actor, now));
     }
 
-    /// <summary>The auditable entries this save will write, after refusing any audit-row edit.</summary>
+    /// <summary>
+    /// The auditable entries this save will write. An edit to an audit row never reaches here:
+    /// <see cref="AuditEntry"/> is <see cref="IAppendOnly"/>, refused by the guard that runs first.
+    /// </summary>
     private static List<EntityEntry> Pending(DbContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -102,15 +105,7 @@ public static class AuditTrail
         context.ChangeTracker.DetectChanges();
 
         // Materialised: rows are added to the tracker later, which would break an open enumeration.
-        var entries = context.ChangeTracker.Entries().ToList();
-
-        if (entries.Any(e => e.Entity is AuditEntry && e.State is EntityState.Modified or EntityState.Deleted))
-        {
-            throw new InvalidOperationException(
-                "Audit entries are append-only: an audit row cannot be modified or deleted.");
-        }
-
-        return [.. entries.Where(e => e.Entity is IAuditable
+        return [.. context.ChangeTracker.Entries().Where(e => e.Entity is IAuditable
             && e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)];
     }
 
