@@ -22,6 +22,7 @@
     <!-- Every service is referenced here as it lands, so its model can be inspected.
          ServiceCoverageTests fails the build if one is added to the solution without
          being registered below. -->
+    <ProjectReference Include="../apps/tickets/tickets.api/tickets.api.csproj" />
     <ProjectReference Include="../core.api/core.api.csproj" />
     <ProjectReference Include="../platform.api/platform.api.csproj" />
     <ProjectReference Include="../packages/boundary/AppPlatform.Boundary.csproj" />

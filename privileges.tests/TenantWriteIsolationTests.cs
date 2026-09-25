@@ -1,3 +1,4 @@
+using AppPlatform.Ids;
 using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -50,7 +51,7 @@ public class TenantWriteIsolationTests(PrivilegeFixture fixture)
         var id = Guid.NewGuid();
         await using (var owner = Open(1))
         {
-            owner.Add(new Ticket { Id = id, PublicId = id.ToString(), Title = "original" });
+            owner.Add(new Ticket { Id = id, PublicId = PublicId.New("tkt").ToString(), Title = "original" });
             await owner.SaveChangesAsync();
         }
         await using (var attacker = Open(2))
@@ -72,7 +73,7 @@ public class TenantWriteIsolationTests(PrivilegeFixture fixture)
     public async Task Legitimate_updates_work_and_tenant_reassignment_is_rejected()
     {
         await using var db = Open(1);
-        var ticket = new Ticket { Id = Guid.NewGuid(), PublicId = Guid.NewGuid().ToString(), Title = "before" };
+        var ticket = new Ticket { Id = Guid.NewGuid(), PublicId = PublicId.New("tkt").ToString(), Title = "before" };
         db.Add(ticket);
         await db.SaveChangesAsync();
         ticket.Title = "after";

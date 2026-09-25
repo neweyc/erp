@@ -110,7 +110,7 @@ public sealed class PrivilegeFixture : IAsyncLifetime
     }
 
     private const string SeedSql = """
-        INSERT INTO platform.tenant (public_id, name, status) VALUES ('ten_a', 'Acme', 'active');
+        INSERT INTO platform.tenant (public_id, name, status) VALUES ('ten_a', 'Acme', 'Active');  -- PascalCase: EF's enum conversion writes the enum NAME
         INSERT INTO platform.tenant_app VALUES (1, 'tickets');
         INSERT INTO core.company (tenant_id, name) VALUES (1, 'Acme Ltd');
         INSERT INTO core.employee

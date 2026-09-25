@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>AppPlatform.Tickets</RootNamespace>
+    <AssemblyName>AppPlatform.Tickets</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AppPlatform.Tickets.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- No reference to core.api. Tickets reads employees through the PUBLISHED VIEW, and the
+         Postgres grants make that true even for code that is not in this repo. -->
+    <ProjectReference Include="../../../packages/api/AppPlatform.Api.csproj" />
+    <ProjectReference Include="../../../packages/entitlements/AppPlatform.Entitlements.csproj" />
+    <ProjectReference Include="../../../packages/ids/AppPlatform.Ids.csproj" />
+    <ProjectReference Include="../../../packages/outbox/AppPlatform.Outbox.csproj" />
+  </ItemGroup>
+</Project>

@@ -28,8 +28,13 @@ RESET ROLE;
 
 SET ROLE ap_tickets_migrate;
 CREATE TABLE tickets.ticket (
-  id uuid PRIMARY KEY, tenant_id int NOT NULL, public_id text NOT NULL, title text NOT NULL,
-  assignee_employee_id uuid, assignee_display_name text);
+  id uuid PRIMARY KEY, tenant_id int NOT NULL, public_id varchar(34) NOT NULL,
+  title varchar(200) NOT NULL, description varchar(4000),
+  status varchar(20) NOT NULL DEFAULT 'Open',
+  assignee_employee_id uuid, assignee_display_name varchar(201),
+  version bigint NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(), closed_at timestamptz);
+CREATE UNIQUE INDEX ix_ticket_public_id ON tickets.ticket (public_id);
 
 -- One outbox per owning schema. A shared table would make every save a cross-schema write,
 -- breaking the boundary with the mechanism meant to respect it.

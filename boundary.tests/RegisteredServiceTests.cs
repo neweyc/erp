@@ -43,8 +43,8 @@ public class RegisteredServiceTests
         var service = Boundary(name);
         if (service.ForbiddenAssemblyPrefixes.Length == 0) return;
 
-        // Loaded by convention from the project directory name, which is also what keeps the
-        // registry entry and the real assembly from drifting apart.
+        // Loaded by convention from the LAST path segment, so a nested app directory
+        // (apps/tickets/tickets.api) resolves the same way a top-level one does.
         var assembly = Assembly.Load($"AppPlatform.{Title(service.ProjectDirectory)}");
 
         Assert.Empty(AssemblyBoundary.FindForbiddenReferences(assembly, service.ForbiddenAssemblyPrefixes));

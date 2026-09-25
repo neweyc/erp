@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>AppPlatform.Entitlements</RootNamespace>
+    <Description>Which apps a tenant has licensed, and the filter that enforces it.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../auth/AppPlatform.Auth.csproj" />
+  </ItemGroup>
+</Project>

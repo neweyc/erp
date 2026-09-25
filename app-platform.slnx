@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="apps/tickets/tickets.api/tickets.api.csproj" />
+  <Project Path="apps/tickets/tickets.api.tests/tickets.api.tests.csproj" />
   <Project Path="boundary.tests/boundary.tests.csproj" />
   <Project Path="core.api/core.api.csproj" />
   <Project Path="core.api.tests/core.api.tests.csproj" />
@@ -6,6 +8,8 @@
   <Project Path="packages/auth.tests/AppPlatform.Auth.Tests.csproj" />
   <Project Path="packages/boundary/AppPlatform.Boundary.csproj" />
   <Project Path="privileges.tests/privileges.tests.csproj" />
+  <Project Path="packages/entitlements/AppPlatform.Entitlements.csproj" />
+  <Project Path="packages/entitlements.tests/AppPlatform.Entitlements.Tests.csproj" />
   <Project Path="packages/ids/AppPlatform.Ids.csproj" />
   <Project Path="packages/ids.tests/AppPlatform.Ids.Tests.csproj" />
   <Project Path="packages/outbox/AppPlatform.Outbox.csproj" />

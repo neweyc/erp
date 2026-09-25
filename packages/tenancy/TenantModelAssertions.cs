@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace AppPlatform.Tenancy;
@@ -13,12 +14,18 @@ public static class TenantModelAssertions
     /// Every tenant-scoped entity must carry an index leading with TenantId. Without one
     /// the query filter is a sequential scan on every read, which looks like a
     /// performance problem and is discovered in production.
+    ///
+    /// View-mapped entities are exempt: a consumer cannot index a published view, and the
+    /// service that owns the underlying table is where that index belongs. Flagging them would
+    /// have made this assertion impossible to satisfy for exactly the entities the published-
+    /// contract design exists to create.
     /// </summary>
     public static IReadOnlyList<string> FindEntitiesMissingTenantIndex(IModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
 
         return [.. TenantScopedEntities(model)
+            .Where(e => e.GetViewName() is null)
             .Where(e => !e.GetIndexes().Any(i => i.Properties[0].Name == nameof(ITenantScoped.TenantId))
                         && (e.FindPrimaryKey()?.Properties[0].Name) != nameof(ITenantScoped.TenantId))
             .Select(e => e.ClrType.Name)
@@ -45,7 +52,7 @@ public static class TenantModelAssertions
 
         var problems = new List<string>();
 
-        foreach (var entity in TenantScopedEntities(model))
+        foreach (var entity in TenantScopedEntities(model).Where(e => e.GetViewName() is null))
         {
             foreach (var fk in entity.GetForeignKeys())
             {

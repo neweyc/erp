@@ -22,3 +22,17 @@ jobs:
       # Without a daemon those tests error rather than skip, which is intended — a
       # privilege suite that quietly does not run is worse than one that fails.
       - run: dotnet test app-platform.slnx --no-build --verbosity normal
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      # `npm run build` runs `tsc -b`, which type-checks the TEST files too. A bare
+      # `vitest run` never type-checks, and `tsc --noEmit` skips them — so a type error in a
+      # test would otherwise reach main and fail the image build there instead.
+      - run: npm run build --workspace @app-platform/shell
+      - run: npm run test --workspace @app-platform/shell

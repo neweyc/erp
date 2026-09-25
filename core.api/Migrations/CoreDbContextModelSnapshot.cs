@@ -150,6 +150,54 @@ namespace AppPlatform.Core.Migrations
                     b.ToTable("employee", "core");
                 });
 
+            modelBuilder.Entity("AppPlatform.Core.Data.Session", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AbsoluteExpiry")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("absolute_expiry");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at");
+
+                    b.Property<bool>("MfaSatisfied")
+                        .HasColumnType("boolean")
+                        .HasColumnName("mfa_satisfied");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<int>("TenantId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_session");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_session_tenant_id");
+
+                    b.HasIndex("TenantId", "UserId")
+                        .HasDatabaseName("ix_session_tenant_id_user_id");
+
+                    b.ToTable("session", "identity");
+                });
+
             modelBuilder.Entity("AppPlatform.Core.Data.Tenant", b =>
                 {
                     b.Property<int>("Id")
@@ -158,6 +206,10 @@ namespace AppPlatform.Core.Migrations
                         .HasColumnName("id");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
 
                     b.Property<int?>("IdleTimeoutMinutes")
                         .HasColumnType("integer")
@@ -168,6 +220,11 @@ namespace AppPlatform.Core.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
+
+                    b.Property<string>("ProvisioningKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("provisioning_key");
 
                     b.Property<string>("PublicId")
                         .IsRequired()
@@ -180,6 +237,10 @@ namespace AppPlatform.Core.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("status");
+
+                    b.Property<DateTimeOffset?>("StatusChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("status_changed_at");
 
                     b.HasKey("Id")
                         .HasName("pk_tenant");
@@ -240,6 +301,9 @@ namespace AppPlatform.Core.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_user");
+
+                    b.HasAlternateKey("TenantId", "Id")
+                        .HasName("ak_user_tenant_id_id");
 
                     b.HasIndex("PublicId")
                         .IsUnique()
@@ -408,6 +472,17 @@ namespace AppPlatform.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_employee_company_tenant_id_company_id");
+                });
+
+            modelBuilder.Entity("AppPlatform.Core.Data.Session", b =>
+                {
+                    b.HasOne("AppPlatform.Core.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "UserId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_session_user_tenant_id_user_id");
                 });
 
             modelBuilder.Entity("AppPlatform.Core.Data.User", b =>

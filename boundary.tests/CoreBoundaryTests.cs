@@ -66,10 +66,16 @@ public class CoreBoundaryTests
     [Fact]
     public void Core_source_never_names_another_services_schema()
     {
-        // The only check that sees raw SQL, which the model checks are blind to.
+        // Driven from the registry rather than a second hardcoded list, so there is one place
+        // where what core may name is decided. Keeping a private copy here is how the two
+        // drifted the first time.
+        var service = BoundaryRegistry.Services.Single(s => s.ProjectDirectory == "core.api");
+
         var hits = SourceScan.FindBannedStrings(
-            RepositoryPaths.Project("core.api"),
-            ["tickets.", "platform.tenant_app", "platform.audit_log"]);
+            RepositoryPaths.Project("core.api"), service.BannedSourceStrings,
+            // Migrations are SQL in C# clothing, so they carry the schema names the model
+            // checks never see — which is exactly where this scan earns its keep.
+            ".cs", ".sql");
 
         Assert.Empty(hits);
     }

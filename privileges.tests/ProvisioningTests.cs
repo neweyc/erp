@@ -1,3 +1,4 @@
+using AppPlatform.Auth;
 using AppPlatform.Boundary;
 using AppPlatform.Core.Data;
 using AppPlatform.Tenancy;
@@ -120,6 +121,98 @@ public class ProvisioningTests : IAsyncLifetime
         var (db, _) = Open();
         await using var _unused = db;
         Assert.Single(await db.Tenants.Where(t => t.ProvisioningKey == key).ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_session_created_against_the_real_schema_resolves_to_an_active_tenant()
+    {
+        // The test whose absence hid a total auth failure. EF's enum conversion writes "Active";
+        // the store matched "active" only, so every valid session fell through to Retired and
+        // was rejected — and the other integration suite passed because its hand-written fixture
+        // seeded lowercase, accommodating the bug rather than mirroring the migrations.
+        await ProvisionAsync("Session Ltd", "a@session.test", Guid.NewGuid().ToString());
+
+        var (db, tenant) = Open();
+        await using var _ = db;
+
+        var row = await db.Tenants.SingleAsync(t => t.Name == "Session Ltd");
+        tenant.UseTenant(row.Id);
+
+        var user = await db.Users.SingleAsync();
+
+        // Accepting the invitation is what makes an account usable. A provisioned admin is
+        // Invited, and the session function reports user_active false for them — correctly: an
+        // invitation that already worked as a login would make the invite meaningless.
+        user.Status = UserStatus.Active;
+
+        var session = new Session
+        {
+            UserId = user.Id,
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastSeenAt = DateTimeOffset.UtcNow,
+            AbsoluteExpiry = DateTimeOffset.UtcNow.AddDays(7),
+        };
+        db.Sessions.Add(session);
+        await db.SaveChangesAsync();
+
+        await using var dataSource = NpgsqlDataSource.Create(_connection);
+        var context = await new NpgsqlSessionStore(dataSource).FindAsync(session.Id);
+
+        Assert.NotNull(context);
+        Assert.Equal(Auth.TenantStatus.Active, context.TenantStatus);
+        Assert.Equal(row.Id, context.TenantId);
+        Assert.Equal("admin", context.Role);
+        Assert.True(context.UserActive);
+
+        // And it must evaluate to a caller, not merely parse.
+        var result = SessionEvaluator.Evaluate(context, "admin", DateTimeOffset.UtcNow);
+        Assert.True(result.Succeeded, $"session rejected: {result.ProblemCode}");
+    }
+
+    [Fact]
+    public async Task A_suspended_tenant_still_authenticates_against_the_real_schema()
+    {
+        await ProvisionAsync("Suspended Ltd", "a@susp.test", Guid.NewGuid().ToString());
+
+        var (db, tenant) = Open();
+        await using var _ = db;
+
+        var row = await db.Tenants.SingleAsync(t => t.Name == "Suspended Ltd");
+        tenant.UseTenant(row.Id);
+
+        // Written as the operator would: the enum name, which is what the platform service
+        // persists.
+        await db.Database.ExecuteSqlAsync(
+            $"UPDATE platform.tenant SET status = 'Suspended' WHERE id = {row.Id}");
+
+        var user = await db.Users.SingleAsync();
+
+        // Accepting the invitation is what makes an account usable. A provisioned admin is
+        // Invited, and the session function reports user_active false for them — correctly: an
+        // invitation that already worked as a login would make the invite meaningless.
+        user.Status = UserStatus.Active;
+
+        db.Sessions.Add(new Session
+        {
+            UserId = user.Id,
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastSeenAt = DateTimeOffset.UtcNow,
+            AbsoluteExpiry = DateTimeOffset.UtcNow.AddDays(7),
+        });
+        await db.SaveChangesAsync();
+
+        var sessionId = (await db.Sessions.SingleAsync()).Id;
+
+        await using var dataSource = NpgsqlDataSource.Create(_connection);
+        var context = await new NpgsqlSessionStore(dataSource).FindAsync(sessionId);
+
+        // Suspended must parse as Suspended, not fall through to Retired — the difference is
+        // whether the customer can still reach their own data export.
+        Assert.Equal(Auth.TenantStatus.Suspended, context!.TenantStatus);
+
+        var result = SessionEvaluator.Evaluate(context, "admin", DateTimeOffset.UtcNow);
+        Assert.True(result.Succeeded);
+        Assert.True(result.Caller!.TenantSuspended);
     }
 
     [Fact]

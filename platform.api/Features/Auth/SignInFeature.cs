@@ -120,6 +120,11 @@ public static class SignInFeature
                 await http.SignInAsync(
                     SessionCookie.Operator.SchemeName, new ClaimsPrincipal(identity));
 
+                // Issued WITH the session, not later. A browser holding a session and no token
+                // has every mutation refused as csrf_failed, which looks like a broken
+                // deployment rather than a missing cookie.
+                CsrfToken.Issue(http);
+
                 return Results.Ok(new { signedIn = true });
             })
             .AllowAnonymous();

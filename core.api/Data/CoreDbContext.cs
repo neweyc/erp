@@ -22,6 +22,7 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options, ITenantProvi
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<Session> Sessions => Set<Session>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -107,6 +108,23 @@ public class CoreDbContext(DbContextOptions<CoreDbContext> options, ITenantProvi
                 .HasForeignKey(x => new { x.TenantId, x.EmployeeId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Session>(e =>
+        {
+            e.ToTable("session", IdentitySchema);
+            e.HasKey(x => x.Id);
+
+            e.HasIndex(x => x.TenantId);
+            // The revalidation lookup is by session id alone (the cookie carries no tenant), so
+            // the primary key already serves it. This index serves revoke-all-for-a-user.
+            e.HasIndex(x => new { x.TenantId, x.UserId });
+
+            e.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.UserId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.AddOutbox(Schema);

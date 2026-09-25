@@ -294,3 +294,141 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    ALTER TABLE identity."user" ADD CONSTRAINT ak_user_tenant_id_id UNIQUE (tenant_id, id);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    CREATE TABLE identity.session (
+        id uuid NOT NULL,
+        tenant_id integer NOT NULL,
+        user_id uuid NOT NULL,
+        mfa_satisfied boolean NOT NULL,
+        created_at timestamp with time zone NOT NULL,
+        last_seen_at timestamp with time zone NOT NULL,
+        absolute_expiry timestamp with time zone NOT NULL,
+        revoked_at timestamp with time zone,
+        CONSTRAINT pk_session PRIMARY KEY (id),
+        CONSTRAINT fk_session_user_tenant_id_user_id FOREIGN KEY (tenant_id, user_id) REFERENCES identity."user" (tenant_id, id) ON DELETE CASCADE
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    CREATE INDEX ix_session_tenant_id ON identity.session (tenant_id);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    CREATE INDEX ix_session_tenant_id_user_id ON identity.session (tenant_id, user_id);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    CREATE SCHEMA IF NOT EXISTS identity_v1;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    CREATE OR REPLACE FUNCTION identity_v1.session_context(p_session_id uuid)
+    RETURNS TABLE (
+      session_id uuid, user_id uuid, tenant_id int, company_id int, tenant_status text,
+      role text, user_active boolean, mfa_satisfied boolean, last_seen_at timestamptz,
+      absolute_expiry timestamptz, revoked_at timestamptz, employee_id uuid,
+      licensed_apps text[], idle_timeout_minutes int)
+    LANGUAGE sql
+    STABLE
+    SECURITY DEFINER
+    SET search_path = pg_catalog, pg_temp
+    AS $fn$
+      SELECT s.id, u.id, u.tenant_id, u.company_id, t.status,
+             u.role, (u.status = 'Active'), s.mfa_satisfied, s.last_seen_at,
+             s.absolute_expiry, s.revoked_at, u.employee_id,
+             coalesce(array_agg(ta.app) FILTER (WHERE ta.app IS NOT NULL), '{}'),
+             t.idle_timeout_minutes
+      FROM identity.session s
+      JOIN identity."user" u ON u.id = s.user_id AND u.tenant_id = s.tenant_id
+      JOIN platform.tenant t ON t.id = u.tenant_id
+      LEFT JOIN platform.tenant_app ta
+        ON ta.tenant_id = u.tenant_id AND ta.revoked_at IS NULL
+      WHERE s.id = p_session_id
+      GROUP BY s.id, u.id, u.tenant_id, u.company_id, t.status, u.role, u.status,
+               s.mfa_satisfied, s.last_seen_at, s.absolute_expiry, s.revoked_at,
+               u.employee_id, t.idle_timeout_minutes;
+    $fn$;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    CREATE OR REPLACE FUNCTION identity_v1.touch_session(p_session_id uuid)
+    RETURNS void
+    LANGUAGE sql
+    SECURITY DEFINER
+    SET search_path = pg_catalog, pg_temp
+    AS $fn$
+      UPDATE identity.session SET last_seen_at = now() WHERE id = p_session_id;
+    $fn$;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    REVOKE EXECUTE ON FUNCTION identity_v1.session_context(uuid) FROM PUBLIC;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    REVOKE EXECUTE ON FUNCTION identity_v1.touch_session(uuid) FROM PUBLIC;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    GRANT USAGE ON SCHEMA identity_v1 TO ap_core_rt;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    GRANT EXECUTE ON FUNCTION identity_v1.session_context(uuid) TO ap_core_rt;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    GRANT EXECUTE ON FUNCTION identity_v1.touch_session(uuid) TO ap_core_rt;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM core.__ef_migrations_history WHERE "migration_id" = '20260925034241_AddSessionsAndIdentityV1') THEN
+    INSERT INTO core.__ef_migrations_history (migration_id, product_version)
+    VALUES ('20260925034241_AddSessionsAndIdentityV1', '10.0.10');
+    END IF;
+END $EF$;
+COMMIT;
+

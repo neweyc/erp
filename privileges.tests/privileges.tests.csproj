@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../apps/tickets/tickets.api/tickets.api.csproj" />
     <ProjectReference Include="../core.api/core.api.csproj" />
     <ProjectReference Include="../packages/auth/AppPlatform.Auth.csproj" />
     <ProjectReference Include="../packages/boundary/AppPlatform.Boundary.csproj" />

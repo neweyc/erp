@@ -22,7 +22,7 @@ public class SchemaBoundaryTests
             Models.Of<BadAppDbContext>(), "tickets", "core_v1");
 
         Assert.Contains(problems, p =>
-            p.Contains("PublishedEmployee", StringComparison.Ordinal)
+            p.Contains("SamplePublishedRow", StringComparison.Ordinal)
             && p.Contains("schema 'core'", StringComparison.Ordinal));
     }
 
@@ -35,7 +35,7 @@ public class SchemaBoundaryTests
             Models.Of<BadAppDbContext>(), "tickets", "core_v1");
 
         Assert.Contains(problems, p =>
-            p.Contains("Ticket", StringComparison.Ordinal)
+            p.Contains("SampleRow", StringComparison.Ordinal)
             && p.Contains("default schema", StringComparison.Ordinal));
     }
 
@@ -46,7 +46,7 @@ public class SchemaBoundaryTests
             Models.Of<WritesPublishedViewDbContext>(), Published);
 
         Assert.Contains(problems, p =>
-            p.Contains("PublishedEmployee", StringComparison.Ordinal)
+            p.Contains("SamplePublishedRow", StringComparison.Ordinal)
             && p.Contains("use ToView", StringComparison.Ordinal));
     }
 }

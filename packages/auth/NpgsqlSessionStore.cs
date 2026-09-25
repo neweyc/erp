@@ -64,14 +64,22 @@ public sealed class NpgsqlSessionStore(NpgsqlDataSource dataSource) : ISessionSt
     }
 
     /// <summary>
-    /// An unrecognised status is treated as RETIRED, not active. If the platform gains a
-    /// lifecycle state this build has never heard of, refusing access is the recoverable
-    /// failure; granting it is not.
+    /// Parsed CASE-INSENSITIVELY, because EF's enum-to-string conversion writes the enum's own
+    /// name — "Active", not "active".
+    ///
+    /// The first version of this matched lowercase only, so every valid session fell through to
+    /// Retired and was rejected. It passed its tests because the integration fixture seeded
+    /// lowercase by hand: the fixture accommodated the bug instead of mirroring what the real
+    /// migrations write. Hence the session-resolution test that runs against the generated
+    /// scripts rather than a hand-written schema.
+    ///
+    /// An unrecognised status is still treated as RETIRED. If the platform gains a lifecycle
+    /// state this build has never heard of, refusing access is the recoverable failure;
+    /// granting it is not.
     /// </summary>
-    private static TenantStatus ParseStatus(string value) => value switch
-    {
-        "active" => TenantStatus.Active,
-        "suspended" => TenantStatus.Suspended,
-        _ => TenantStatus.Retired,
-    };
+    private static TenantStatus ParseStatus(string value)
+        => Enum.TryParse<TenantStatus>(value, ignoreCase: true, out var status)
+           && Enum.IsDefined(status)
+            ? status
+            : TenantStatus.Retired;
 }
