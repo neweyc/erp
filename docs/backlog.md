@@ -45,10 +45,10 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 |---|---|---|
 | A1 | Full journey works **through the browser** against the real stack | **Incomplete** — see journey table |
 | A2 | A second tenant proves isolation | **Incomplete** — proven at handler level, not through the running application |
-| A3 | Unlicensed access rejected by the **API** | **Incomplete** — proven in an isolated pipeline, not against a running service |
+| A3 | Unlicensed access rejected by the **API** | **Verified** — an authenticated tenant admin is refused 403 `app_not_licensed` by the *running* tickets service before the grant, and accepted after, on the same session |
 | A4 | Fresh-database initialization succeeds using the documented scripts | **Partial** — applied to an empty database on a cold stack; skipped on a warm one, and applied as `postgres` rather than the migrate/runtime roles, so the privilege model is not exercised by this path (D7) |
-| A5 | Workflow automated as a CI gate | **Implemented** — `.github/workflows/ci.yml` has an `e2e` job; never observed passing in CI |
-| A6 | No step depends on undocumented manual database edits or fabricated authentication | **Failing** — see D2 |
+| A5 | Workflow automated as a CI gate | **Implemented; not yet observed green** — the `e2e` job exists and has run. Run `36143741902` failed on a harness race (D13, fixed); the next push is the first chance to observe it passing |
+| A6 | No step depends on undocumented manual database edits or fabricated authentication | **Verified for the browser journey** — provisioning, delivery, acceptance, licensing and ticket creation all run through real code paths with real sessions. One fixture shortcut remains inside a handler-level test (D12) |
 
 ---
 
@@ -60,7 +60,7 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 | **Deliver** invitation | n/a | **Yes** | Outbox worker delivers via `FileEmailTransport`; message captured to disk |
 | Accept invitation | **Yes** | Yes | Browser reads the token from the **delivered message**, not the database |
 | Sign in | **Yes** | Yes | Real cookie + CSRF issuance, browser-verified |
-| License tickets | No | **No** | D2: raw `INSERT INTO platform.tenant_app` in the seed |
+| License tickets | Operator API over HTTP | **Yes** | Real operator session + CSRF; 403 before the grant, 200 after, same tenant session |
 | Create ticket | Partly | Yes | Via `page.evaluate(fetch)` — no UI exists |
 | Assign ticket | No | No | Handler + tests only; no UI, not in the journey |
 | Close ticket | No | No | Handler + tests only; no UI, not in the journey |
@@ -158,7 +158,8 @@ to test whether these primitives survive contact with money.
 
 | ID | Sev | Defect | Reproduction | Consequence |
 |---|---|---|---|---|
-| **D2** | High | Licensing in the e2e seed is a raw `INSERT INTO platform.tenant_app`. | `core.api/SeedE2E.cs:85` | Violates A6. The operator path that grants an entitlement is never exercised, so a break in `SetEntitlementFeature` would not be caught. |
+| **D13** | High — **was failing CI on main** | `startDatabase` used `pg_isready -d appplatform` as its readiness check. `pg_isready` only reports that the server accepts connections; the postgres image runs a temporary init server before creating `POSTGRES_DB`, so readiness passed while the database did not exist. **Fixed** — readiness is now a real `SELECT 1` against the target database. | Reproduced: polling a fresh container showed `pg_isready=yes` while `SELECT 1` still failed, a ~0.4s window. CI run `36143741902` failed with `database "appplatform" does not exist` at `applyMigrations`. | The whole e2e job failed. It passed locally because a cached image wins the race, which is why it reached main — a flake class that only appears on a cold runner. |
+| **D12** | Low | `WalkingSkeletonTests` still licenses via raw `INSERT INTO platform.tenant_app`. | `privileges.tests/WalkingSkeletonTests.cs:131` | A handler-level fixture shortcut, not a shipped path. The operator endpoint is covered by the e2e, so this is split coverage rather than a gap — recorded so it is not invisible if the endpoint's behaviour changes. |
 | **D10** | High (blocks financial work) | No append-only mechanism. `TenantGuard` permits `Modified`/`Deleted` on any tenant-scoped row, and nothing marks a table immutable. | Inspection: `grep -riE "immutab\|append.only"` finds only a comment on `OutboxEvent` | A posted journal must be reversible, never mutated. Without a central guard, correctness would depend on every future handler remembering. Cheap now, expensive once financial features exist. |
 | **D11** | High (blocks financial work) | `packages/audit` does not exist; `IAuditable` appears nowhere in code despite being declared in `CLAUDE.md`. | `ls packages/audit` | "Who changed this and when" is baseline for a ledger. Retrofitting means finding every write path. |
 | **D7** | Medium | The e2e applies migrations and connects as the `postgres` superuser, not as the migrate and runtime roles. | `e2e/stack.mjs`, `applyMigrations` | A4's "documented scripts" claim does not exercise the privilege model; a grant regression would pass the browser journey. `AccessMatrixTests` covers grants separately, so this is a gap in what the e2e proves, not an unguarded area. |
@@ -213,67 +214,52 @@ Per `docs/product-and-investment-principles.md`. Kept proportionate.
 
 ---
 
+## Previous cycle
+
+**Cycle 1 — invitation delivery. Accepted.** Outbox worker delivers through a transport; the
+browser accepts from the delivered message. Independent review raised 4 blocking findings, all
+reproduced and resolved; re-review confirmed them and raised 1 further blocking finding (the
+per-message guard's test did not exercise the guard), also resolved. 16 worker cases against real
+PostgreSQL. Committed as `4de42d9`.
+
 ## Current cycle
 
-**Cycle 1 — invitation delivery (D1). Complete; blocking review findings resolved, re-review
-pending.**
+**Cycle 2 — license through the operator API (D2). Complete, pending independent review.**
 
-Objective: an invited admin receives a link through the real outbox path and accepts it in the
-browser.
+Objective: the tickets entitlement is granted by a real operator over HTTP, with a real session
+and CSRF, replacing the raw `INSERT INTO platform.tenant_app` in the seed.
 
-Changed: `OutboxWorker<TContext>` (per-schema, per-message tenant scope, retry/dead-letter);
-`FileEmailTransport`; `AcceptInvite` page and signed-out routing; the e2e seed stops at
-provisioning; a Playwright setup project reads the **delivered** message and accepts in the
-browser. Also fixed a sign-out that reported 204 while revoking nothing.
+Changed: `CreatePlatformUser` command (`dotnet run -- create-platform-user <email>`, password on
+stdin — no API and no self-service, because an operator reaches every tenant); `platform.api`
+added to the e2e stack; the seed provisions **unlicensed**; an ordered Playwright project chain
+(`unit` → `invite` → `license` → `journey`) so the licensing spec can act as an accepted admin.
 
-Evidence — `OutboxWorkerTests`, **16 cases against real PostgreSQL**: delivery; multi-tenant
-sweep; transient retry; backoff honoured; dead-letter after `MaxAttempts`; a throwing transport
-treated as transient without abandoning the batch; a **transport timeout** recorded rather than
-mistaken for shutdown; a **failure after the transport** not abandoning the batch; host survival
-through a failing sweep; missing transport dead-lettered; payload captured verbatim; prune past
-retention; no prune while recent; three schema-identifier rejections.
+Evidence — 12 Playwright specs, all against the real stack:
+- An authenticated tenant admin is refused **403 `app_not_licensed`** by the running tickets
+  service; an operator then grants the entitlement over HTTP; the **same** tenant session is then
+  accepted with 200. Entitlement is therefore read per request, and the API — not the shell — is
+  what enforces it.
+- Granting the same app twice returns 409 rather than creating a second live row.
+- A grant without the CSRF token returns 403 `csrf_failed`; an unauthenticated grant is refused.
+- The operator and tenant use separate request contexts, so a shared cookie jar cannot mask a
+  mistake between two identities that are separate by design.
 
-Counts are stated as measured, not remembered — this paragraph has drifted twice.
+Note: `platform.api` readiness is checked by **port**, not URL. Every route there is a POST behind
+authorization, so a URL probe gets 405, which Playwright rejects as not-ready; inventing a health
+endpoint to satisfy the probe would mean a feature with no handler, which the VSA rules exist to
+prevent.
 
-- Non-vacuity, re-measured after the additions: removing the per-message `UseTenant` fails
-  **12 of 16**, with **zero** `TenantScopeViolationException`. The enforcing mechanism is the
-  **query filter** — with no ambient tenant the re-read matches nothing and the worker returns
-  before any save. `TenantGuard` is the backstop behind it and does not fire on this path.
-- Browser: 8 Playwright specs pass, including the delivered-invitation acceptance and three
-  capture-selection cases.
+Review status: **pending independent review** — touches authorization, identity and entitlements,
+which `docs/product-and-investment-principles.md` requires a separate reviewer for.
 
-**Independent review — 4 blocking findings, all reproduced by the reviewer, all resolved:**
+**CI fix folded into this cycle (D13).** The `e2e` job was failing on `main`. Root cause was the
+harness, not the application: readiness waited on `pg_isready`, which does not check that the named
+database exists. Also hardened: `dotnet build` runs before Playwright so `dotnet run` inside the
+webServer readiness window starts a compiled app rather than restoring three projects, and failing
+runs now upload `e2e/test-results/` so a CI-only failure can be diagnosed without re-running.
 
-| ID | Finding | Resolution |
-|---|---|---|
-| B1 | `TaskCanceledException` derives from `OperationCanceledException`, which is exactly what `HttpClient` throws on its own timeout. The catch filter treated it as shutdown: no attempt recorded, lease never released, never dead-lettered, and the rest of the batch abandoned — head-of-line blocking across tenants. | Cancellation is now only treated as shutdown when *our* token is cancelled. Per-message guard added so nothing escaping `DeliverAsync` can abandon the batch. Regression test demonstrated failing before the fix, passing after. |
-| B2 | The recorded non-vacuity evidence was wrong on both count and mechanism. | Corrected above; the true figures are 10 of 11 and the query filter. Code comments naming `TenantGuard` as the defence corrected to name it as the backstop. |
-| B3 | Invite payloads carry a **plaintext, password-equivalent token** in `core.outbox_message`, and three comments claimed the plaintext existed only in the email. Nothing pruned, so the credential persisted in a readable table and in backups indefinitely. | Comments corrected. Prune implemented on the retention schedule already decided; two tests cover "pruned past retention" and "not pruned while recent". |
-| B4 | A capture surviving an interrupted run poisoned the next one: `resetCapture` ran only on a cold stack and selection took the first match with no freshness check. | Capture cleared in the main process only; freshness floor shared across processes via a marker file; newest capture wins. Three tests over the selection logic. My first fix was wrong — a per-process timestamp is set *after* delivery, so it rejected the run's own message. |
-
-Optional findings also taken: transport required at startup and gated out of Production (O5/O6),
-`e2e/.mail/` gitignored since it holds live tokens (O4), dead DI registration removed (O7), stale
-seed names and a dead call removed (O8), host-survival test added (O3). Schema identifier is now
-validated where it reaches raw SQL.
-
-Deferred to the ledger rather than fixed in-cycle: D7 (e2e runs as superuser), D8 (batch lease),
-D9 (no UI unit tests), plus reviewer notes on container-per-test cost and `GetSessionFeature`
-now throwing rather than 403 on an impossible path.
-
-**Re-review — B1–B4 all confirmed resolved by execution. One new blocking finding, resolved:**
-
-| Finding | Resolution |
-|---|---|
-| The per-message guard added for B1 was **untested**: it could be deleted with all 16 tests still green, because the covering test's throw was caught by the transport's own handler and never reached the outer guard. Its comment also described a scenario the test did not perform. | Rewritten so the transport reports success and corrupts the tracked entity, making `SaveChangesAsync` fail — the only path where the outer guard is what stands between one bad row and the batch. Demonstrated failing with the guard removed, passing with it. |
-
-Optional findings also taken, all defects in this cycle's own diff: a failing prune no longer
-costs the already-claimed batch and its throttle advances only on success; sweep-level shutdown is
-detected from the token rather than the exception type; a capture caught mid-write is skipped
-instead of aborting the wait with a `SyntaxError`; a warm stack with nothing left to deliver now
-rebuilds itself instead of failing with advice pointing at the outbox; the schema-identifier rule
-is one shared `SchemaName` helper rather than two copies of the same regex.
-
-Next action: Cycle 2 — license tickets through the operator API instead of raw SQL (D2).
+Next action: independent review of the Cycle 2 diff; then Cycle 3 — assign and close a ticket
+through the UI (D4), which is the last journey step not exercised through the application.
 
 ---
 

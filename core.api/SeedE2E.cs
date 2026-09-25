@@ -59,12 +59,10 @@ public static class SeedE2E
         // other statement is raw SQL — neither consults the tenant scope.
         var row = await read.Tenants.IgnoreQueryFilters().SingleAsync(t => t.Name == TenantName);
 
-        // Licensed directly: granting an entitlement is the platform's job, and the browser
-        // journey is about the tenant surface rather than the operator console.
-        await read.Database.ExecuteSqlAsync(
-            $"INSERT INTO platform.tenant_app (tenant_id, app, granted_at) VALUES ({row.Id}, 'tickets', now()) ON CONFLICT DO NOTHING");
-
-        Console.WriteLine($"seed-e2e: tenant {row.PublicId} provisioned and licensed; " +
+        // NOT licensed here. Granting an entitlement is an operator action, and the journey
+        // exercises it through the platform API over HTTP — a raw INSERT would leave that path
+        // unproven and depend on a manual database edit.
+        Console.WriteLine($"seed-e2e: tenant {row.PublicId} provisioned, unlicensed; " +
             $"invitation for {AdminEmail} awaits delivery");
         return 0;
     }

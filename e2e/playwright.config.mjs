@@ -19,6 +19,11 @@ const tenantPublicId = ensureStack()
 const apiEnv = {
   ConnectionStrings__Core: CONNECTION,
   ConnectionStrings__Tickets: CONNECTION,
+  ConnectionStrings__Platform: CONNECTION,
+  // platform.api calls core's internal provisioning endpoint, so it needs the shared secret and
+  // core's address even though the journey provisions through the seed.
+  Internal__ApiKey: 'e2e-internal-key',
+  Core__BaseUrl: 'http://localhost:5100',
   // Pins the tenant for anonymous sign-in. On localhost there is no hostname to resolve, and
   // falling back to "the first tenant" would be a cross-tenant login.
   Tenant__PublicId: tenantPublicId,
@@ -43,9 +48,16 @@ export default defineConfig({
   // The invitation must be accepted before anything can sign in, and acceptance is itself part
   // of the journey. A setup project makes that order explicit rather than relying on tests
   // running top to bottom in one file.
+  // A chain, because the journey's steps genuinely depend on each other and each is being proved
+  // rather than faked. Ordering across files is not otherwise guaranteed, and the licensing spec
+  // needs an accepted admin so it can show the tickets API refusing BEFORE the grant and
+  // accepting after.
   projects: [
-    { name: 'setup', testMatch: /.*\.setup\.mjs/ },
-    { name: 'journey', testMatch: /journey\.spec\.mjs/, dependencies: ['setup'] },
+    // Pure logic over the capture helper; no stack, no order.
+    { name: 'unit', testMatch: /.*\.unit\.mjs/ },
+    { name: 'invite', testMatch: /accept-invite\.setup\.mjs/ },
+    { name: 'license', testMatch: /license-tickets\.setup\.mjs/, dependencies: ['invite'] },
+    { name: 'journey', testMatch: /journey\.spec\.mjs/, dependencies: ['license'] },
   ],
   timeout: 30_000,
   use: {
@@ -66,6 +78,19 @@ export default defineConfig({
     {
       command: `dotnet run --project ${join(ROOT, 'apps/tickets/tickets.api')} --no-launch-profile --urls http://localhost:5102`,
       url: 'http://localhost:5102/api/tickets/v1/tickets',
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: apiEnv,
+    },
+    {
+      // The operator surface. Present because granting an entitlement is an operator action, and
+      // the journey performs it over HTTP rather than with a database edit.
+      command: `dotnet run --project ${join(ROOT, 'platform.api')} --no-launch-profile --urls http://localhost:5101`,
+      // Readiness by PORT, not by URL. platform.api exposes no anonymous GET — every route is a
+      // POST behind authorization — so a URL probe gets 405, which Playwright does not accept as
+      // ready. Inventing a health endpoint purely to satisfy the probe would mean a feature with
+      // no handler, which the VSA rules exist to prevent.
+      port: 5101,
       reuseExistingServer: false,
       timeout: 120_000,
       env: apiEnv,

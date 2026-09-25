@@ -49,8 +49,17 @@ jobs:
           node-version: '20'
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # Built ahead of time so the `dotnet run` inside Playwright's webServer starts a compiled
+      # app instead of restoring and building three projects inside a 120s readiness window.
+      - run: dotnet build app-platform.slnx
       # The browser leg. It boots the real services against the GENERATED migration scripts, so
       # it is the only test that crosses the seams a browser owns: whether the auth cookie is
       # accepted across services, whether the CSRF token issued at sign-in is usable, and
       # whether the shell fetches the bundle it was told it may have.
       - run: npm run test --workspace @app-platform/e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: e2e/test-results/
+          retention-days: 7

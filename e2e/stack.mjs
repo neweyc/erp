@@ -37,17 +37,27 @@ export function startDatabase() {
     'postgres:16-alpine',
   ], { stdio: 'ignore' })
 
+  // Readiness is a real QUERY against the target database, not pg_isready.
+  //
+  // pg_isready only reports that the server accepts connections. The postgres image runs a
+  // temporary server for initdb before creating POSTGRES_DB, so pg_isready can succeed while
+  // `appplatform` does not yet exist — measured window around 0.4s. Returning inside it makes the
+  // next statement fail with `database "appplatform" does not exist`, which is how this passed
+  // locally on a cached image and failed in CI.
   for (let i = 0; i < 60; i++) {
     try {
-      execFileSync('docker', ['exec', CONTAINER, 'pg_isready', '-U', 'postgres', '-d', 'appplatform'],
-        { stdio: 'ignore' })
+      execFileSync('docker', [
+        'exec', CONTAINER, 'psql', '-U', 'postgres', '-d', 'appplatform', '-tAc', 'SELECT 1',
+      ], { stdio: 'ignore' })
       return
     } catch {
       execFileSync('sleep', ['1'])
     }
   }
 
-  throw new Error('e2e database did not become ready')
+  throw new Error(
+    `e2e database did not accept a query on ${CONTAINER} within 60s. ` +
+    'Check `docker logs ' + CONTAINER + '`.')
 }
 
 /**
@@ -115,6 +125,7 @@ export function ensureStack() {
     startDatabase()
     applyMigrations()
     seed()
+    seedOperator()
   }
 
   return seededTenantPublicId()
@@ -203,6 +214,21 @@ function captureFloor() {
     // missing bookkeeping file.
     return new Date(0)
   }
+}
+
+/** The operator who grants entitlements in the journey. Created by platform.api's own command. */
+export const OPERATOR_EMAIL = 'operator@e2e.test'
+export const OPERATOR_PASSWORD = 'operator correct horse'
+
+export function seedOperator() {
+  execFileSync('dotnet', [
+    'run', '--project', join(ROOT, 'platform.api'), '--no-launch-profile', '--',
+    'create-platform-user', OPERATOR_EMAIL,
+  ], {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    input: OPERATOR_PASSWORD + '\n',
+    env: { ...process.env, ConnectionStrings__Platform: CONNECTION },
+  })
 }
 
 export function seed() {

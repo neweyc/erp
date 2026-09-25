@@ -12,6 +12,13 @@ var builder = WebApplication.CreateBuilder(args);
 var connection = builder.Configuration.GetConnectionString("Platform")
     ?? throw new InvalidOperationException("ConnectionStrings:Platform is required.");
 
+// A command, not a server. Placed before the service checks below so creating the first operator
+// does not require a configured provisioning endpoint.
+if (args.Contains("create-platform-user"))
+{
+    return await AppPlatform.Platform.CreatePlatformUser.RunAsync(connection, args);
+}
+
 // The platform NEVER receives Encryption:FieldKey. Withholding it protects encrypted columns
 // only — names and emails are plaintext — so the real boundary is that ap_platform_rt holds no
 // grant on core, identity, or any app schema. See docs/database-privileges.md.
@@ -54,3 +61,5 @@ app.UseAuthorization();
 app.MapEndpoints(Assembly.GetExecutingAssembly());
 
 app.Run();
+
+return 0;
