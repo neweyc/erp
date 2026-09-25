@@ -61,10 +61,29 @@ in conversation but not written down will be re-litigated.
 | E2E | Playwright |
 | Hosting | Docker Compose, nginx front door, managed PostgreSQL |
 
+## Human readability and maintainability (required)
+
+Chris requires **simple code, strong useful comments, and easy human maintenance**.
+Read and apply `docs/human-readable-code.md` to implementation and review. This is an
+acceptance requirement alongside correctness and security, not optional polish.
+
+Prefer explicit flow, meaningful names, focused responsibilities, and the fewest justified
+layers. Explain non-obvious business rules, safety constraints, side effects, and failure
+behavior near the code. Keep comments accurate and proportional; avoid cleverness,
+repetitive essays, and speculative abstractions. Simplify without weakening guarantees.
+A passing test suite does not excuse code a human cannot readily understand or update.
+
 ## API architecture (all APIs, no exceptions)
 
-- **One feature per file**: `Features/<Area>/<Verb><Entity>Feature.cs` containing three
-  nested classes:
+**Vertical Slice Architecture is required for human maintainability.** Follow the VSA
+section of `docs/human-readable-code.md`. Keep feature-specific behavior local; avoid thin
+forwarding handlers over chains of workflow services. Share invariants and infrastructure
+without scattering the use case. `VerticalSliceTests` enforces endpoint/slice structure in
+CI; substantive review must enforce behavior locality and justified abstractions.
+
+- **One feature per file**: `Features/<Area>/<Verb><Entity>Feature.cs` containing the relevant
+  nested request type, handler, and endpoint (queries may use QueryHandler; no empty DTO
+  is required for an operation with no body):
   - `<Verb><Entity>Command` — request DTO.
   - `<Verb><Entity>CommandHandler` — primary-constructor DI of **interfaces only**;
     `Handle(Caller caller, cmd)` returns `CommandResult`.
@@ -341,21 +360,36 @@ first commit.
 
 You have now written these twice (redshift -> EMS). A third copy is the bad outcome.
 
-- `packages/tenancy` — `ITenantScoped`, query filters, stamping, cross-tenant guard.
-- `packages/auth` — cookie scheme, session revalidation, MFA, roles, policies.
+**Built today.** These exist and are used; the rules for them are binding now.
+
+- `packages/tenancy` — `ITenantScoped`, query filter, insert stamping, cross-tenant write guard.
+- `packages/auth` — cookie scheme, session revalidation, CSRF, password hashing, `Caller`.
+- `packages/entitlements` — `Apps`, `.RequireApp()`, the 403 filter.
+- `packages/ids` — opaque prefixed public identifiers.
+- `packages/outbox` — event and message tables, claim, worker, retry, prune.
+- `packages/api` — `IEndpoint` discovery, `CommandResult`.
+- `packages/boundary` — the architecture checks.
+
+**Not built.** Declared here because the shape is decided, not because it exists. Do not write
+code that assumes one of these is available — check first.
+
 - `packages/audit` — `IAuditable`; create/update/delete rows written automatically in
-  `SaveChangesAsync`. **Each schema owns its own `audit_log` table.** Entity CRUD
-  handlers never call audit methods; only non-entity events (login, password change) are
-  audited manually.
-- `packages/encryption` — AES-256-GCM field converter. Encrypted columns get no max
-  length and **cannot be searched or filtered in SQL** — keep queryable fields plaintext.
-- `packages/storage` — `IFileStore`; bytes at `tenant-{id}/{app}/{yyyy}/{MM}/{guid}`,
-  metadata in the app's own `stored_file` table. **Never touch the filesystem from
-  feature code.** Downloads always serve `Content-Disposition: attachment` + `nosniff`.
-- `packages/email` — `IEmailService`, transport selected by which credential is present.
-  **Sending is never in the request transaction** — see Reliability below.
-- `packages/outbox` — the transactional outbox table and its worker.
+  `SaveChangesAsync`. Each schema owns its own `audit_log`. Entity CRUD handlers never call
+  audit methods; only non-entity events (login, password change) audit manually.
+  **Needed before any financial feature**: retrofitting audit after write paths exist means
+  finding every one of them.
+- `packages/encryption` — AES-256-GCM field converter. Encrypted columns get no max length and
+  **cannot be searched or filtered in SQL** — keep queryable fields plaintext.
+- `packages/storage` — `IFileStore`; bytes at `tenant-{id}/{app}/{yyyy}/{MM}/{guid}`, metadata in
+  the app's own `stored_file` table. Never touch the filesystem from feature code.
+- `packages/email` — a real `IEmailService` transport. Today `packages/outbox` ships
+  `FileEmailTransport`, a capture-to-disk substitute gated out of Production.
 - `packages/ui-kit` — shadcn components, DataTable, dialogs, form primitives.
+
+**Also not built, and the central ledger invariant:** there is no append-only mechanism. A posted
+journal must be reversible, never mutable, and `TenantGuard` currently permits an update to any
+tenant-scoped row. Anything financial needs that guard first.
+
 - Shared packages are **versioned dependencies, not project references across deploy
   boundaries.** A project reference re-couples the releases this layout exists to
   decouple.
@@ -486,9 +520,18 @@ URL including the cloud metadata address.
 
 ## Working agreements
 
+- Product and investment decisions follow `docs/product-and-investment-principles.md`:
+  treat AI credits as constrained, run bounded useful experiments, accept calculated
+  commercial risk, and control lasting costs. No validated customer demand is established. Product uncertainty
+  does not lower the quality or security bar for real customer use.
+
 - Chris applies SQL to live databases manually — write or generate scripts, never execute
   against a live DB.
 - Commit only when asked.
-- All substantive work gets a codex review, looped to mutual satisfaction, before commit.
+- All substantive work gets correctness and readability review before commit. Apply the
+  credit-conscious process in `docs/product-and-investment-principles.md`: focused
+  self-review and checks for routine changes; independent review for security, data
+  integrity, migrations, concurrency, or major architecture. Review fixes to closure
+  without restarting broad QC unnecessarily. Record review scope and evidence honestly.
 - Keep `docs/backlog.md` and `docs/open-questions.md` current as features ship and
   decisions land.

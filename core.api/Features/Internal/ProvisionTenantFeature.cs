@@ -111,8 +111,12 @@ public static class ProvisionTenantFeature
             };
             db.Users.Add(admin);
 
-            // The invitation itself. Stored as a HASH — the plaintext exists only in the email,
-            // because a token is password-equivalent until used.
+            // The invitation itself. The user_token row stores only a HASH.
+            //
+            // The plaintext lives in two places until the outbox row is pruned: the delivered
+            // email, and this outbox payload. That payload is a password-equivalent credential
+            // in a readable table, which is why OutboxWorker prunes delivered messages on the
+            // retention schedule rather than leaving them forever.
             var (plaintext, hash) = Services.TokenGenerator.Create();
 
             db.UserTokens.Add(new UserToken

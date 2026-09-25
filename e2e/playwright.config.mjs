@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 import { join } from 'node:path'
-import { CONNECTION, ensureStack, ROOT } from './stack.mjs'
+import { CAPTURE_DIR, CONNECTION, ensureStack, ROOT } from './stack.mjs'
 
 /**
  * The database is prepared HERE, at config-module load, rather than in globalSetup.
@@ -25,6 +25,10 @@ const apiEnv = {
   // Shared key ring. Without it the cookie issued by core.api cannot be decrypted by
   // tickets.api, and every app API answers 401 to a user who has just signed in successfully.
   DataProtection__KeyPath: join(ROOT, 'e2e/.keys'),
+  // Turns on the file transport, which is what makes the outbox worker actually deliver. With
+  // no transport configured the worker dead-letters every message, and the journey fails with a
+  // clear reason rather than hanging.
+  Email__CapturePath: CAPTURE_DIR,
   ASPNETCORE_ENVIRONMENT: 'Development',
 }
 
@@ -36,6 +40,13 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   reporter: [['list']],
+  // The invitation must be accepted before anything can sign in, and acceptance is itself part
+  // of the journey. A setup project makes that order explicit rather than relying on tests
+  // running top to bottom in one file.
+  projects: [
+    { name: 'setup', testMatch: /.*\.setup\.mjs/ },
+    { name: 'journey', testMatch: /journey\.spec\.mjs/, dependencies: ['setup'] },
+  ],
   timeout: 30_000,
   use: {
     baseURL: 'http://localhost:5273',

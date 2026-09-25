@@ -55,6 +55,33 @@ builder.Services.AddScoped<IUserService, EFUserService>();
 builder.Services.AddScoped<IOutbox>(sp => new Outbox(
     sp.GetRequiredService<CoreDbContext>(), sp.GetRequiredService<TimeProvider>()));
 
+// Delivery. No real transport exists yet, so capture-to-disk is the only option — and it is
+// gated on a non-production environment, because a stray Email:CapturePath in production would
+// write customer invitations to disk in plaintext and mark them delivered.
+var capturePath = builder.Configuration["Email:CapturePath"];
+
+if (capturePath is { Length: > 0 } && !builder.Environment.IsProduction())
+{
+    builder.Services.AddSingleton<IOutboxTransport>(new FileEmailTransport(capturePath));
+}
+else
+{
+    // Refused at startup rather than at delivery. Without a transport the worker dead-letters
+    // every invitation within seconds of staging, and there is no resend feature — recovery
+    // would be hand-written SQL, which is exactly what the mission forbids.
+    throw new InvalidOperationException(
+        "No email transport is configured. Set Email:CapturePath outside Production, or " +
+        "register a real transport. Starting without one silently destroys every invitation.");
+}
+
+builder.Services.AddOutboxWorker<CoreDbContext>(new OutboxWorkerOptions
+{
+    Schema = CoreDbContext.Schema,
+    // Short, because an invitation the customer is waiting for should not sit for a minute. The
+    // claim is indexed and the table is small.
+    PollInterval = TimeSpan.FromSeconds(2),
+});
+
 var app = builder.Build();
 
 // Never migrate on startup. Schema changes are applied by hand, as the migration role, so a

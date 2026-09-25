@@ -24,6 +24,8 @@ appsettings.*.Local.json
 
 # e2e ephemeral artefacts: data-protection keys and Playwright output
 e2e/.keys/
+# Captured mail holds plaintext invite tokens, which are password-equivalent until used.
+e2e/.mail/
 e2e/test-results/
 e2e/playwright-report/
 

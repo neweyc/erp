@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 
 namespace AppPlatform.Outbox;
@@ -31,7 +30,7 @@ public interface IOutboxClaimStore
 /// mis-crediting: if the safety story were "SKIP LOCKED", someone would eventually move the
 /// locking into application code and keep the keyword.
 /// </summary>
-public sealed partial class OutboxClaimStore : IOutboxClaimStore
+public sealed class OutboxClaimStore : IOutboxClaimStore
 {
     private readonly DbContext _context;
     private readonly string _schema;
@@ -45,15 +44,11 @@ public sealed partial class OutboxClaimStore : IOutboxClaimStore
         // It comes from configuration rather than a request, but validating it here means the
         // day someone wires it to something user-supplied it fails loudly instead of becoming
         // an injection point.
-        if (!SafeIdentifier().IsMatch(schema))
-            throw new ArgumentException($"'{schema}' is not a valid schema identifier.", nameof(schema));
+        SchemaName.Validate(schema, nameof(schema));
 
         _context = context;
         _schema = schema;
     }
-
-    [GeneratedRegex("^[a-z_][a-z0-9_]{0,62}$")]
-    private static partial Regex SafeIdentifier();
 
     /// <summary>
     /// The claim statement, exposed so a test can confirm the schema was interpolated and the

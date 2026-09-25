@@ -5,6 +5,16 @@ experiment, or an explicit deferral — not a default.
 
 ## Product
 
+Investment posture is decided in
+[product and investment principles](product-and-investment-principles.md): take calculated
+risks, use expiring credits productively, and control lasting costs. The questions below
+remain open; they are not a blanket prohibition on building experiments.
+
+- **Who can we reach?** Which businesses or professions can Chris access for candid
+  feedback, and which costly workflows should we investigate first?
+- **Investment limits:** reconcile earlier time budgets with the September 25 agreement;
+  distinguish expiring AI credits from human time and recurring cash obligations.
+
 - **Does anyone pay for this?** The September viability work landed on a bounded
   recovery-check *service*, not a platform, and explicitly found no validated demand for
   a catalog or managed delivery. This repo is a bet placed ahead of that evidence. Worth
