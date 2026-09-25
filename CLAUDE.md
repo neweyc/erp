@@ -39,7 +39,8 @@ apps/
     tickets.api/             licensed app API                -> schema: tickets
     tickets.ui/              workspace package imported by shell.ui
   ledger/
-    ledger.api/              licensed app API (no UI yet)    -> schema: ledger
+    ledger.api/              licensed app API                -> schema: ledger
+    ledger.ui/               workspace package imported by shell.ui
 packages/                    shared libraries, versioned (see Shared code)
 database/                    generated SQL scripts, seed/reference data, ER diagrams
 e2e/                         Playwright smoke of the critical journey

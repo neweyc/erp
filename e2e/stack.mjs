@@ -159,6 +159,7 @@ export function applyMigrations() {
   applyFile(join(ROOT, 'database/platform/migrations-all.sql'))
   applyFile(join(ROOT, 'database/core/migrations-all.sql'))
   applyFile(join(ROOT, 'database/tickets/migrations-all.sql'))
+  applyFile(join(ROOT, 'database/ledger/migrations-all.sql'))
 }
 
 /**

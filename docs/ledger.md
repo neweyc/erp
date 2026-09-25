@@ -73,9 +73,23 @@ closed each period and when; each close also emits `books.period_closed`.
 
 Who may close is checked in the handler (`admin`), because packages/auth has no role model yet.
 
+## The UI (cycle 7)
+
+`apps/ledger/ledger.ui`, one page in the shell: closed periods, chart of accounts, posting, the
+journal with its reversals, and the trial balance. It exists to make the invariants *visible*:
+
+- Amounts are typed in currency units and converted to minor units by **string arithmetic**, never
+  floating point (`12.10 * 100` is 1209.999… in JavaScript). Two decimal places is the UI's one
+  currency assumption, stated in `money.ts`.
+- The post button enables only when the lines balance, and the form says by how much they do not.
+- The idempotency key belongs to the filled-in form: a retry of the same submission sends the same
+  key, so the server returns the entry it already posted.
+- Reverse is offered only where the server would accept it; both directions of a reversal are shown.
+- The browser journey (`e2e/specs/ledger.spec.mjs`) licenses the ledger as an operator, then posts,
+  reverses, closes the books and watches a post into the closed period be refused.
+
 ## Deliberately deferred
 
-- **A UI** and its browser journey. The API and the database are where these invariants can fail.
 - **Fiscal years that are not calendar years.** Numbering is per calendar year of the entry date.
 - **Multi-company consolidation.** Each entry belongs to one company; nothing sums across them.
 

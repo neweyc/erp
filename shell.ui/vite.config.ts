@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       '/api/core': { target: 'http://localhost:5100', changeOrigin: true },
       '/api/tickets': { target: 'http://localhost:5102', changeOrigin: true },
+      '/api/ledger': { target: 'http://localhost:5104', changeOrigin: true },
     },
   },
   test: {

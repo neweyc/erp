@@ -19,6 +19,7 @@ const tenants = ensureStack()
 const apiEnv = {
   ConnectionStrings__Core: CONNECTION,
   ConnectionStrings__Tickets: CONNECTION,
+  ConnectionStrings__Ledger: CONNECTION,
   ConnectionStrings__Platform: CONNECTION,
   // Pins the tenant for anonymous sign-in. On localhost there is no hostname to resolve, and
   // falling back to "the first tenant" would be a cross-tenant login.
@@ -85,6 +86,9 @@ export default defineConfig({
     // A2. Needs tenant A licensed with an accepted admin, which `license` guarantees. Nothing
     // depends on it, for the same reason as `guards`.
     { name: 'isolation', testMatch: /tenant-isolation\.spec\.mjs/, dependencies: ['license'] },
+    // The ledger proof of concept: licenses the ledger for tenant A, then drives it in the browser.
+    // After `license` so the admin has accepted their invitation; nothing depends on it.
+    { name: 'ledger', testMatch: /ledger\.spec\.mjs/, dependencies: ['license'] },
   ],
   timeout: 30_000,
   use: {
@@ -121,6 +125,13 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       env: platformEnv,
+    },
+    {
+      command: `dotnet run --project ${join(ROOT, 'apps/ledger/ledger.api')} --no-launch-profile --no-restore --urls http://localhost:5104`,
+      url: 'http://localhost:5104/api/ledger/v1/accounts',
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: apiEnv,
     },
     {
       command: `dotnet run --project ${join(ROOT, 'core.api')} --no-launch-profile --no-restore --urls http://localhost:5103`,

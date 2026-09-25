@@ -614,7 +614,16 @@ work tonight; the review runs as soon as Codex is back, and its fixes follow as 
 - Evidence: 162 real-PostgreSQL tests pass; removing the lock fails both interleave tests (post
   first, close first); removing each trigger fails its tests.
 
-**Stage B — a UI and a browser journey.** Next.
+**Stage B — a UI and a browser journey. Complete; independent review PENDING** (Codex, as stage A).
+
+- `apps/ledger/ledger.ui`, registered in the shell (its own 11 kB chunk, fetched only when licensed).
+- The browser journey: license → accounts → post → trial balance → reverse → close → a post into the
+  closed period refused, and the page checked at 390px.
+- Found: at 390px the page was 438px wide — the tables widened the document. Each table now scrolls
+  inside its own container; the journey asserts the width.
+- Evidence (measured): 23 ledger-UI tests (money parsing, the line rule, the balance gate, the
+  idempotency key on retry — shown to fail when the key is regenerated per click — reversal
+  offers, closed-period message); 20/20 Playwright.
 
 ---
 

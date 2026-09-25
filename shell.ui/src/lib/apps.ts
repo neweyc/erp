@@ -41,6 +41,13 @@ export const APPS: readonly AppDefinition[] = [
     roles: ['admin', 'manager', 'member'],
     load: () => import('@app-platform/tickets-ui'),
   },
+  {
+    id: 'ledger',
+    name: 'Ledger',
+    path: '/ledger',
+    roles: ['admin', 'manager', 'member'],
+    load: () => import('@app-platform/ledger-ui'),
+  },
 ]
 
 /**
