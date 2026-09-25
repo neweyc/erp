@@ -24,13 +24,10 @@
   <ItemGroup>
     <ProjectReference Include="../apps/tickets/tickets.api/tickets.api.csproj" />
     <ProjectReference Include="../core.api/core.api.csproj" />
+    <ProjectReference Include="../platform.api/platform.api.csproj" />
     <ProjectReference Include="../packages/auth/AppPlatform.Auth.csproj" />
     <ProjectReference Include="../packages/boundary/AppPlatform.Boundary.csproj" />
     <ProjectReference Include="../packages/outbox/AppPlatform.Outbox.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="Fixtures/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

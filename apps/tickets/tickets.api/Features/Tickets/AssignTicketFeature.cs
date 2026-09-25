@@ -3,10 +3,10 @@ using AppPlatform.Auth;
 using AppPlatform.Entitlements;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
+using AppPlatform.Tickets.Data;
 using AppPlatform.Tickets.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AppPlatform.Tickets.Features.Tickets;
 
@@ -29,6 +29,16 @@ public static class AssignTicketFeature
             var ticket = await tickets.FindByPublicIdAsync(ticketPublicId, ct);
             if (ticket is null)
                 return CommandResult.NotFound(TicketProblems.NotFound, "No such ticket.");
+
+            if (ticket.Status == TicketStatus.Closed)
+            {
+                // Enforced here, not only by a disabled control. The UI disables the picker, but a
+                // caller that is not the UI — a script, a stale page, a direct request — would
+                // otherwise silently reassign a closed ticket and emit an event for it.
+                return CommandResult.Conflict(
+                    TicketProblems.AlreadyClosed,
+                    "This ticket is closed. Reopen it before changing the assignee.");
+            }
 
             if (string.IsNullOrWhiteSpace(cmd.EmployeeId))
             {
@@ -57,7 +67,7 @@ public static class AssignTicketFeature
             {
                 await tickets.SaveAsync(ct);
             }
-            catch (Exception ex) when (ConcurrencyConflict.Matches(ex))
+            catch (Exception ex) when (DatabaseConflict.IsLostRace(ex))
             {
                 // Someone else changed this ticket between our read and our write. A stable 409
                 // tells the caller to re-read and retry; without it this escapes as a 500

@@ -7,7 +7,6 @@ using AppPlatform.Tickets.Data;
 using AppPlatform.Tickets.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AppPlatform.Tickets.Features.Tickets;
 
@@ -93,32 +92,6 @@ public static class TicketProblems
 
     /// <summary>Someone else changed this ticket first. The caller should re-read and retry.</summary>
     public const string ConcurrentChange = "concurrent_change";
-}
-
-/// <summary>
-/// Recognises a losing write in a concurrent change.
-///
-/// TWO shapes, and the second is not obvious. The version column is an EF concurrency token, so
-/// a losing UPDATE would normally raise DbUpdateConcurrencyException. But the change and its
-/// outbox event are written in ONE SaveChanges, and EF may execute the event INSERT first —
-/// where the outbox's unique (tenant, aggregate, version) index rejects it before the version
-/// predicate is ever evaluated. Both mean the same thing: somebody else already wrote this
-/// version.
-///
-/// Catching only the first left the real race surfacing as a 500 naming a constraint. The
-/// index is not redundant with the token — it is what makes the version meaningful to a
-/// consumer, and here it is also the backstop.
-/// </summary>
-public static class ConcurrencyConflict
-{
-    private const string UniqueViolation = "23505";
-
-    public static bool Matches(Exception ex) => ex switch
-    {
-        DbUpdateConcurrencyException => true,
-        DbUpdateException { InnerException: PostgresException { SqlState: UniqueViolation } } => true,
-        _ => false,
-    };
 }
 
 /// <summary>

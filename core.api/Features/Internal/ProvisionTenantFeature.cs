@@ -5,7 +5,6 @@ using AppPlatform.Outbox;
 using AppPlatform.Tenancy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AppPlatform.Core.Features.Internal;
 
@@ -73,7 +72,7 @@ public static class ProvisionTenantFeature
             {
                 await db.SaveChangesAsync(ct);
             }
-            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
+            catch (Exception ex) when (DatabaseConflict.IsUniqueViolation(ex))
             {
                 // A concurrent call won. This is the guard doing its job, not an error: roll
                 // back and return the tenant that call created, so both callers see one tenant

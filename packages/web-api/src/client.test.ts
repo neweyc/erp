@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError } from './session'
+import { api, ApiError } from './client'
 
 function respond(status: number, body: unknown) {
   return Promise.resolve({

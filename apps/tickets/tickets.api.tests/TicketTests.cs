@@ -146,6 +146,36 @@ public class TicketTests
     }
 
     [Fact]
+    public async Task A_closed_ticket_cannot_be_reassigned()
+    {
+        var ticket = Existing(TicketStatus.Closed);
+        ticket.AssigneeDisplayName = "Ada Lovelace";
+        var employee = Known();
+
+        var result = await Assign().Handle(Fake.Caller(), ticket.PublicId, new(employee.PublicId));
+
+        // The UI disables the control, but a script or a stale page would otherwise reassign a
+        // closed ticket and emit an event for it.
+        Assert.Equal(TicketProblems.AlreadyClosed, result.ProblemCode);
+        Assert.Equal("Ada Lovelace", ticket.AssigneeDisplayName);
+        Assert.Empty(_outbox.Events);
+    }
+
+    [Fact]
+    public async Task A_closed_ticket_cannot_be_unassigned_either()
+    {
+        var ticket = Existing(TicketStatus.Closed);
+        ticket.AssigneeEmployeeId = Guid.NewGuid();
+        ticket.AssigneeDisplayName = "Ada Lovelace";
+
+        var result = await Assign().Handle(Fake.Caller(), ticket.PublicId, new(null));
+
+        // Clearing an assignee is still a change to a closed record.
+        Assert.Equal(TicketProblems.AlreadyClosed, result.ProblemCode);
+        Assert.Equal("Ada Lovelace", ticket.AssigneeDisplayName);
+    }
+
+    [Fact]
     public async Task Closing_an_already_closed_ticket_is_refused()
     {
         var ticket = Existing(TicketStatus.Closed);

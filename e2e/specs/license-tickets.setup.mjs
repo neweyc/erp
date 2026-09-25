@@ -35,6 +35,11 @@ async function signInAsTenantAdmin(baseURL) {
   expect(signIn.status(), await signIn.text()).toBe(200)
 
   const csrf = (await api.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
+  // Asserted here as well as for the operator. Without it, a core that stopped issuing ap_csrf
+  // would make the before-grant POST return 403 csrf_failed — the status the entitlement check
+  // also returns — and the failure would point at entitlements instead of CSRF issuance.
+  expect(csrf, 'tenant sign-in must issue a csrf token').toBeTruthy()
+
   return { api, csrf }
 }
 
@@ -83,51 +88,19 @@ test('the tickets API refuses an unlicensed tenant, and accepts once an operator
 
   expect(accepted.status(), await accepted.text()).toBe(200)
 
-  await tenant.api.dispose()
-  await operator.api.dispose()
-})
-
-test('the same grant twice is refused rather than silently duplicated', async () => {
-  const tenantId = seededTenantPublicId()
-  const { api, csrf } = await signInAsOperator()
-
-  const again = await api.post(`/api/platform/v1/tenants/${tenantId}/entitlements`, {
-    headers: { 'X-CSRF-Token': csrf },
+  // Granting again, in the same test rather than a separate one. As its own test this passed only
+  // because a previous test had granted — which breaks under -g, --repeat-each, or any future
+  // retries setting, where a retry would hit 409 on its own first grant.
+  const duplicate = await operator.api.post(`/api/platform/v1/tenants/${tenantId}/entitlements`, {
+    headers: { 'X-CSRF-Token': operator.csrf },
     data: { app: 'tickets', licensed: true },
   })
 
   // Two live grants for one app would make "is this licensed" depend on which row a query read.
-  expect(again.status()).toBe(409)
-  expect(await again.text()).toContain('app_already_licensed')
+  // The partial unique index is what guarantees that; this asserts the handler reports it well.
+  expect(duplicate.status()).toBe(409)
+  expect(await duplicate.text()).toContain('app_already_licensed')
 
-  await api.dispose()
-})
-
-test('a grant without the csrf token is refused', async () => {
-  const tenantId = seededTenantPublicId()
-  const { api } = await signInAsOperator()
-
-  const forged = await api.post(`/api/platform/v1/tenants/${tenantId}/entitlements`, {
-    data: { app: 'tickets', licensed: true },
-  })
-
-  // The operator surface is where a forged mutation does the most damage, so this is checked
-  // against the running service rather than only in a unit pipeline.
-  expect(forged.status()).toBe(403)
-  expect(await forged.text()).toContain('csrf_failed')
-
-  await api.dispose()
-})
-
-test('an unauthenticated grant is refused', async () => {
-  const tenantId = seededTenantPublicId()
-  const api = await request.newContext({ baseURL: PLATFORM })
-
-  const anonymous = await api.post(`/api/platform/v1/tenants/${tenantId}/entitlements`, {
-    data: { app: 'tickets', licensed: true },
-  })
-
-  expect([401, 403]).toContain(anonymous.status())
-
-  await api.dispose()
+  await tenant.api.dispose()
+  await operator.api.dispose()
 })

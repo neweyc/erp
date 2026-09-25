@@ -43,11 +43,11 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 
 | # | Criterion | State |
 |---|---|---|
-| A1 | Full journey works **through the browser** against the real stack | **Incomplete** — see journey table |
+| A1 | Full journey works **through the browser** against the real stack | **Verified for every step that has a UI** — accept, sign in, create, assign, close. Provision and license have **no operator UI** (D14) and run over real HTTP and handler paths instead. Delivery is a background worker with no UI by nature. Marking this plainly rather than borrowing A6's standard |
 | A2 | A second tenant proves isolation | **Incomplete** — proven at handler level, not through the running application |
 | A3 | Unlicensed access rejected by the **API** | **Verified** — an authenticated tenant admin is refused 403 `app_not_licensed` by the *running* tickets service before the grant, and accepted after, on the same session |
-| A4 | Fresh-database initialization succeeds using the documented scripts | **Partial** — applied to an empty database on a cold stack; skipped on a warm one, and applied as `postgres` rather than the migrate/runtime roles, so the privilege model is not exercised by this path (D7) |
-| A5 | Workflow automated as a CI gate | **Implemented; not yet observed green** — the `e2e` job exists and has run. Run `36143741902` failed on a harness race (D13, fixed); the next push is the first chance to observe it passing |
+| A4 | Fresh-database initialization succeeds using the documented scripts | **Verified** — `PrivilegeFixture` builds an empty database from `database/privileges/01`, all three `migrations-all.sql`, then `02-grants`, applied **as `ap_owner`**, and `99-verify` reports zero findings. The browser harness does the same as superuser (D7) |
+| A5 | Workflow automated as a CI gate | **Verified** — run `36146705790` passed all three jobs (dotnet, ui, e2e) in 3m24s after the D13 readiness fix |
 | A6 | No step depends on undocumented manual database edits or fabricated authentication | **Verified for the browser journey** — provisioning, delivery, acceptance, licensing and ticket creation all run through real code paths with real sessions. One fixture shortcut remains inside a handler-level test (D12) |
 
 ---
@@ -61,9 +61,9 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 | Accept invitation | **Yes** | Yes | Browser reads the token from the **delivered message**, not the database |
 | Sign in | **Yes** | Yes | Real cookie + CSRF issuance, browser-verified |
 | License tickets | Operator API over HTTP | **Yes** | Real operator session + CSRF; 403 before the grant, 200 after, same tenant session |
-| Create ticket | Partly | Yes | Via `page.evaluate(fetch)` — no UI exists |
-| Assign ticket | No | No | Handler + tests only; no UI, not in the journey |
-| Close ticket | No | No | Handler + tests only; no UI, not in the journey |
+| Create ticket | **Yes** | Yes | Through the form in `@app-platform/tickets-ui` |
+| Assign ticket | **Yes** | Yes | Picked from core's roster; resolved server-side through `core_v1.employee`; snapshot stored |
+| Close ticket | **Yes** | Yes | Closed, disappears from the open list, still named when closed are shown |
 
 ---
 
@@ -160,14 +160,14 @@ to test whether these primitives survive contact with money.
 |---|---|---|---|---|
 | **D13** | High — **was failing CI on main** | `startDatabase` used `pg_isready -d appplatform` as its readiness check. `pg_isready` only reports that the server accepts connections; the postgres image runs a temporary init server before creating `POSTGRES_DB`, so readiness passed while the database did not exist. **Fixed** — readiness is now a real `SELECT 1` against the target database. | Reproduced: polling a fresh container showed `pg_isready=yes` while `SELECT 1` still failed, a ~0.4s window. CI run `36143741902` failed with `database "appplatform" does not exist` at `applyMigrations`. | The whole e2e job failed. It passed locally because a cached image wins the race, which is why it reached main — a flake class that only appears on a cold runner. |
 | **D12** | Low | `WalkingSkeletonTests` still licenses via raw `INSERT INTO platform.tenant_app`. | `privileges.tests/WalkingSkeletonTests.cs:131` | A handler-level fixture shortcut, not a shipped path. The operator endpoint is covered by the e2e, so this is split coverage rather than a gap — recorded so it is not invisible if the endpoint's behaviour changes. |
+| **D14** | Medium | No operator UI. Provisioning a tenant and granting an entitlement are reachable only over HTTP — `platform.console/` exists as an empty directory. | `ls platform.console` | A1 cannot be "the whole journey in a browser" until an operator has one. Deliberate for this milestone: the customer-facing surface was the priority, and the operator paths are exercised over real HTTP with real sessions. |
 | **D10** | High (blocks financial work) | No append-only mechanism. `TenantGuard` permits `Modified`/`Deleted` on any tenant-scoped row, and nothing marks a table immutable. | Inspection: `grep -riE "immutab\|append.only"` finds only a comment on `OutboxEvent` | A posted journal must be reversible, never mutated. Without a central guard, correctness would depend on every future handler remembering. Cheap now, expensive once financial features exist. |
 | **D11** | High (blocks financial work) | `packages/audit` does not exist; `IAuditable` appears nowhere in code despite being declared in `CLAUDE.md`. | `ls packages/audit` | "Who changed this and when" is baseline for a ledger. Retrofitting means finding every write path. |
-| **D7** | Medium | The e2e applies migrations and connects as the `postgres` superuser, not as the migrate and runtime roles. | `e2e/stack.mjs`, `applyMigrations` | A4's "documented scripts" claim does not exercise the privilege model; a grant regression would pass the browser journey. `AccessMatrixTests` covers grants separately, so this is a gap in what the e2e proves, not an unguarded area. |
+| **D7** | Low (was Medium) | The Playwright harness still applies migrations and connects as the `postgres` superuser. | `e2e/stack.mjs`, `applyMigrations` | Narrowed: `PrivilegeFixture` now applies the **shipped** scripts as `ap_owner` and every access test connects as a runtime role, so the privilege model IS exercised — just not by the browser harness. A grant regression fails `AccessMatrixTests` and `VerificationTests`. |
 | **D8** | Low | Outbox lease is taken per batch but sized for a single send. | `packages/outbox/OutboxBackoff.cs` — `LeaseDuration` 2 min vs `BatchSize` 20 | With more than one worker replica and a slow transport, the tail of a batch can outlive its lease and be re-delivered. Cannot bite today: one replica, instant local transport. |
 | **D9** | Low | No unit coverage for `accept-invite.tsx` or the new signed-out routing. | `shell.ui/src` | Four render branches and a problem-code map are exercised only through the browser journey. |
 | **D6** | Low | `EFAuthService.FindTokenAsync` uses `IgnoreQueryFilters`, so a token lookup is tenant-blind before the scope is entered. | Inspection, `core.api/Services/EFAuthService.cs` | Necessary — acceptance precedes any session — but it means token-hash uniqueness is the only thing preventing a cross-tenant match. Mitigated by a unique index on the hash and 256 bits of entropy. Recorded so it is a considered exception, not an oversight. |
 | **D3** | Medium | The shared Data Protection key ring has no automated assertion. | Remove `DataProtection__KeyPath` from `e2e/playwright.config.mjs`; specs fail with 401 but for an unexplained reason | A regression reappears as "signed in but every API call is 401", which took a browser run to diagnose once already. |
-| **D4** | Medium | No ticket UI. Create is exercised via `page.evaluate(fetch)`; assign and close are not exercised through the application at all. | `e2e/specs/journey.spec.mjs:53` | A1 unmet. `fetch` from the page proves the API, not that a user can do it. |
 | **D5** | Low | Host-based tenant resolution is unimplemented; `EFTenantResolver` returns null unless `Tenant:PublicId` is configured. | `core.api/Services/ITenantResolver.cs` | Multi-tenant sign-in on one deployment does not work. Deliberate: returning null is safer than guessing, and single-tenant pinning covers current needs. |
 
 ---
@@ -208,9 +208,11 @@ Per `docs/product-and-investment-principles.md`. Kept proportionate.
    tenant cannot reach the first's data; an unlicensed tenant is refused by the API; a fresh
    database initializes from the documented scripts. All technical. None of it establishes
    commercial demand.
-5. **Result so far.** Provision, deliver, accept, sign in are exercised in the browser. Create is
-   exercised through `fetch`, not UI. Assign and close are not exercised through the
-   application. Licensing still bypasses the operator API (D2).
+5. **Result so far.** Accept, sign in, create, assign and close are exercised in the browser;
+   delivery runs through the real outbox worker. Provisioning and licensing run over real HTTP
+   and handler paths because no operator UI exists (D14). The unlicensed tenant is refused by the
+   running API, and a fresh database initializes from the shipped scripts. Outstanding: a second
+   tenant proving isolation through the running application (A2).
 
 ---
 
@@ -222,44 +224,138 @@ reproduced and resolved; re-review confirmed them and raised 1 further blocking 
 per-message guard's test did not exercise the guard), also resolved. 16 worker cases against real
 PostgreSQL. Committed as `4de42d9`.
 
+## Fixture drift — resolved at the root
+
+`PrivilegeFixture` applied a hand-written `Fixtures/test-migrations.sql` instead of the shipped
+migrations. That schema drifted three separate times, and each time the suite passed while the
+application was broken:
+
+1. Core's tenant twin omitted `created_at`, so provisioning would have failed on its first INSERT.
+2. The fixture seeded a lowercase tenant status while EF writes the enum name, masking a **total
+   auth failure** in which every valid session was rejected as retired.
+3. `platform.tenant` again had no `created_at`, which is what surfaced while adding entitlement
+   race coverage.
+
+A fixture that diverges from the migrations does not merely miss bugs — it certifies them. After
+three occurrences the faulty assumption was the hand-written schema itself, so the fixture now
+applies `database/*/migrations-all.sql` and the file is deleted.
+
+Switching immediately exposed four things the old fixture had been hiding:
+
+- Published views and SECURITY DEFINER functions were owned by `postgres`, so
+  `identity_v1.touch_session` could not UPDATE `identity.session` and `99-verify` reported the
+  views as misowned. Migrations now run **as `ap_owner`**, which is why it is a member of every
+  migration role.
+- `ap_owner` needed `CREATE ON DATABASE`: `CREATE SCHEMA IF NOT EXISTS core_v1` checks
+  database-level privilege before noticing the schema exists. Granted via `current_database()`, so
+  the script works under both psql and Npgsql.
+- `PublishedContractTests` was pinning the fixture's narrower `core_v1.employee` shape, so it
+  pinned nothing about what consumers actually see. It now asserts the real eight columns.
+- Three `tickets.ticket` columns are NOT NULL with no database default — EF emits none — which the
+  hand-written fixture had papered over with `DEFAULT` clauses.
+
+## Previous cycle
+
+**Cycle 2 — license through the operator API. Accepted.** The grant is an operator action over
+HTTP; an authenticated tenant admin is refused 403 before it and accepted after, on the same
+session. Independent review raised 1 blocking and 10 optional findings; all resolved. Also fixed a
+red CI run (D13) and replaced the hand-written test schema with the shipped migrations after it
+drifted for the third time.
+
+**Independent review — 1 blocking finding, 10 optional. All resolved.**
+
+Blocking: a comment in `SeedE2E` justified `IgnoreQueryFilters` by naming raw SQL that this diff had
+deleted. Corrected.
+
+Optional findings taken, in order of what they changed:
+
+| # | Finding | Resolution |
+|---|---|---|
+| O6 | A concurrent duplicate grant returned an unhandled 500 naming a database constraint. The preflight read cannot see an insert that has not happened. | Catches the unique violation and returns the same 409. `DatabaseConflict` in `packages/api` is now the one place that recognises a lost race — three call sites needed it. Covered by `EntitlementConcurrencyTests` against real PostgreSQL. |
+| O7 | `CreatePlatformUser` had no tests; three of four branches were unexercised, including the security property that a re-run must **not** reset an existing password. | Split into a testable `CreateAsync`. 10 cases, including a re-run with a different password leaving the hash untouched and writing no second audit row, and email normalisation so case cannot create a second operator. |
+| O1 | The tenant sign-in helper did not assert its CSRF token, so a core that stopped issuing one would fail the entitlement assertion and blame entitlements. | Asserted, as the operator helper already did. |
+| O2 | The duplicate-grant test passed only because a previous test had granted — broken by `-g`, `--repeat-each`, or any future `retries`. | Folded into the sequence it depends on. |
+| O3 | Security guards sat inside the project the journey depends on, so a guard regression reported the journey as skipped. | Moved to a `guards` project that depends on `license` and that nothing depends on. |
+| O4 | `testMatch` names files individually, so a new spec would match no project and never run — with Playwright reporting success. | `project-coverage.unit.mjs` asserts every spec is claimed by exactly one project. Verified by adding an orphan spec and watching it fail. |
+| O5 | `Internal:ApiKey` was passed to every service, and it is what turns core's anonymous provisioning endpoint from a 404 into a live route. | Split into a `platformEnv` that only platform.api receives. |
+| O8 | The evidence paragraph claimed "12 specs all against the real stack" — wrong on both counts. | Corrected above and labelled as measured. |
+| O9 | `MinimumPasswordLength` duplication unexplained; the stdin claim overstated. | Both narrowed: the duplication is the assembly boundary, and stdin protects the process list but not shell history. |
+| O10 | The CI prebuild was not load-bearing because `dotnet run` could still restore. | `--no-restore` on every `dotnet run` in the harness. |
+
+## Previous cycle
+
+**Cycle 3 — assign and close through the UI (D4). Accepted.**
+
+Objective: a real tickets UI, with create, assign and close driven through the interface rather
+than `page.evaluate(fetch)` — the last journey step not exercised through the application.
+
+Changed:
+
+- **`packages/web-api`** — the browser API client, extracted so two UIs share one copy. Credentials
+  and CSRF attachment are security rules; a second copy would eventually be the one that stops
+  sending the token. Carries the 8 tests that were in the shell.
+- **`apps/tickets/tickets.ui`** — a workspace package the shell imports, as the architecture
+  specifies. One page: list, create, assign, close. Assignment is a pick-list, never free text, so
+  a mistyped name dead-ends instead of being recorded.
+- **`shell.ui`** — registry loads `@app-platform/tickets-ui`; the placeholder is gone.
+- **`SeedE2E`** — creates an employee through the real `CreateEmployeeFeature` handler, because an
+  assignee picker with an empty roster cannot exercise assignment.
+
+Evidence:
+
+- **14 Playwright tests**: 9 touch the real stack (7 in 3 spec files plus 2 guards), 5 are
+  pure logic. Counted, not recalled — this line has been wrong three times.
+  The journey creates through the form, assigns by picking **Ada Lovelace**, then closes, watches
+  the ticket leave the open list, and finds it still naming its assignee once closed tickets are
+  shown. That last assertion is the display snapshot doing its job.
+- **Where the published view is actually read.** The picker is populated from
+  `GET /api/core/v1/employees`, which reads core's **own table** — core owns the roster. The
+  published view `core_v1.employee` is read **server-side** by `tickets.api` when it resolves the
+  assignee. So the cross-service read is still what the assign step proves: a broken or empty view
+  yields `assignee_not_found` and the assertion on the rendered name fails. An earlier version of
+  this entry described the picker itself as reading the view, which was wrong.
+- A second spec asserts a closed ticket's assignee control is **disabled** and its close button
+  absent, rather than offered and then refused.
+- **7 unit tests** in `tickets.ui`. One of them found a real bug: `refresh()` cleared the error that
+  `run()` had just set, so every failed action showed the user **nothing**. The message is now set
+  after the reload.
+- The app still code-splits: `dist/assets/index-DFB0yG3L.js` 3.36 kB, separate from the 269 kB
+  shell bundle, so an unlicensed tenant never fetches it.
+
+**Independent review — 2 blocking findings, 12 optional. All resolved.**
+
+| ID | Finding | Resolution |
+|---|---|---|
+| B1 | `SeedCaller`'s comment claimed handlers need a principal for audit attribution. Nothing reads it — not the handler, not tenancy, not the outbox, not SaveChanges. Worse, the shape was `Kind = User, UserId = Guid.Empty`, which satisfies `RequireUserId()` and any role check, bypassing the exact guard `Caller` exists to provide. Same class as last cycle's blocking finding, in the same file. | Comment says what is true. Principal is now an **API key with a null UserId**, so a future `RequireUserId()` throws in the seed rather than writing a zero-guid actor. `CompanyId` is 0, since the handler resolves the company itself. |
+| B2 | A1 was marked Verified while the journey table twelve lines below said provision is not in the browser and licensing goes over the operator API. It borrowed A6's standard to do it. | A1 now reads "Verified for every step that has a UI", with **D14** recording the absent operator UI as a deliberate deferral. |
+| O3 | **Reproduced**: no request-ordering guard, so ticking "show closed" during a mutation's reload left the checkbox on and the closed tickets absent, with nothing reloading until the next click. | A monotonic request id; a superseded response is discarded. |
+| O4 | **Reproduced**: a refused create cleared the title unconditionally, so the page said "check the details and try again" with the details gone. Sibling of the `refresh`/`run` bug found last cycle — same root cause, the other caller. | `run` returns success; the form clears only on it. Test demonstrated failing with the old line restored. |
+| O5 | CI ran only `vitest` for the new packages, which never type-checks — falsifying the comment explaining why the shell has a build step. | `build` added to both packages and to CI. It immediately caught an unused parameter in a test file that vitest had passed. |
+| O6 | `DatabaseConflict` claimed to be "one place" for three call sites while having one caller, with three inline copies still standing and `IsLostRace` dead. | All four migrated; `grep 23505` now finds only the helper. |
+| O7 | A partial seed could never recover: the guard covered the tenant only, so a failed employee step left every later run reporting success with no roster — failing later at the picker, which reads as a UI bug. | Each step guards on its own existence. |
+| O8 | `AssignTicketFeature` had no closed-ticket check, and the new e2e comment asserted the API refused it. | Server-side check added returning `already_closed`, with two handler tests. The claim is now true. |
+| O9 | Unassign was unreachable: the select is held at `""`, so choosing the placeholder fires no change event. | An explicit Unassign button, shown only when somebody is assigned. |
+| O10 | Every mutation refetched the whole roster and blanked the list. | Roster loads once in its own effect. |
+| O1, O2, O11, O12 | Test count wrong again; the picker's source misdescribed; a redundant workspace glob entry; a stranded duplicate `ToView`, unsorted usings, a tsconfig naming a file that does not exist. | All corrected. |
+
+**Also added** from the review's test-quality note: create and close had no unit coverage at all,
+which is why O3 and O4 shipped. `tickets.ui` now has 13 tests including the refused-create,
+refused-close, unassign-visibility and roster-source cases.
+
+**Not taken, recorded instead:** `GetEmployeesFeature` returns employee email addresses to any
+authenticated user of any role. That is a product decision about who may see a roster, not a defect
+in this cycle — logged in `docs/open-questions.md`.
+
 ## Current cycle
 
-**Cycle 2 — license through the operator API (D2). Complete, pending independent review.**
+**Cycle 4 — a second tenant proves isolation through the running application (A2). In progress.**
 
-Objective: the tickets entitlement is granted by a real operator over HTTP, with a real session
-and CSRF, replacing the raw `INSERT INTO platform.tenant_app` in the seed.
+Objective: tenant isolation is proven at handler level; prove it where it can actually fail — a
+real tenant B session against the running services, unable to read, modify or reference tenant
+A's data.
 
-Changed: `CreatePlatformUser` command (`dotnet run -- create-platform-user <email>`, password on
-stdin — no API and no self-service, because an operator reaches every tenant); `platform.api`
-added to the e2e stack; the seed provisions **unlicensed**; an ordered Playwright project chain
-(`unit` → `invite` → `license` → `journey`) so the licensing spec can act as an accepted admin.
-
-Evidence — 12 Playwright specs, all against the real stack:
-- An authenticated tenant admin is refused **403 `app_not_licensed`** by the running tickets
-  service; an operator then grants the entitlement over HTTP; the **same** tenant session is then
-  accepted with 200. Entitlement is therefore read per request, and the API — not the shell — is
-  what enforces it.
-- Granting the same app twice returns 409 rather than creating a second live row.
-- A grant without the CSRF token returns 403 `csrf_failed`; an unauthenticated grant is refused.
-- The operator and tenant use separate request contexts, so a shared cookie jar cannot mask a
-  mistake between two identities that are separate by design.
-
-Note: `platform.api` readiness is checked by **port**, not URL. Every route there is a POST behind
-authorization, so a URL probe gets 405, which Playwright rejects as not-ready; inventing a health
-endpoint to satisfy the probe would mean a feature with no handler, which the VSA rules exist to
-prevent.
-
-Review status: **pending independent review** — touches authorization, identity and entitlements,
-which `docs/product-and-investment-principles.md` requires a separate reviewer for.
-
-**CI fix folded into this cycle (D13).** The `e2e` job was failing on `main`. Root cause was the
-harness, not the application: readiness waited on `pg_isready`, which does not check that the named
-database exists. Also hardened: `dotnet build` runs before Playwright so `dotnet run` inside the
-webServer readiness window starts a compiled app rather than restoring three projects, and failing
-runs now upload `e2e/test-results/` so a CI-only failure can be diagnosed without re-running.
-
-Next action: independent review of the Cycle 2 diff; then Cycle 3 — assign and close a ticket
-through the UI (D4), which is the last journey step not exercised through the application.
+Next action: build the second-tenant journey, then independent review (tenant isolation is a
+security change).
 
 ---
 

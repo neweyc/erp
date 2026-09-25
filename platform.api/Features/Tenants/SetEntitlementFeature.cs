@@ -86,7 +86,19 @@ public static class SetEntitlementFeature
                 CreatedAt = now,
             });
 
-            await tenants.SaveAsync(ct);
+            try
+            {
+                await tenants.SaveAsync(ct);
+            }
+            catch (Exception ex) when (licensed && DatabaseConflict.IsUniqueViolation(ex))
+            {
+                // Two operators granting the same app concurrently both pass the preflight read
+                // above — it cannot see an insert that has not happened yet. The partial unique
+                // index is what keeps the data correct; without this the loser got an unhandled
+                // 500 naming a constraint, which tells the operator nothing they can act on.
+                return CommandResult.Conflict(
+                    PlatformProblems.AppAlreadyLicensed, $"{app} is already licensed for this tenant.");
+            }
 
             return CommandResult.Ok(new { tenantId = tenant.PublicId, app, licensed });
         }

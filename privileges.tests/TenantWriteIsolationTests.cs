@@ -13,6 +13,17 @@ public class TenantWriteIsolationTests(PrivilegeFixture fixture)
         public int TenantId { get; set; }
         public string PublicId { get; set; } = "";
         public string Title { get; set; } = "";
+
+        /// <summary>
+        /// Status, Version and CreatedAt are mapped because all three are NOT NULL in the real
+        /// schema with no database default — EF does not emit defaults. The old hand-written fixture supplied
+        /// them, which let this minimal entity omit the columns; the shipped schema does not.
+        /// </summary>
+        public string Status { get; set; } = "Open";
+
+        public long Version { get; set; } = 1;
+
+        public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     }
 
     private sealed class TicketContext(DbContextOptions options, ITenantProvider tenant)
@@ -28,6 +39,9 @@ public class TenantWriteIsolationTests(PrivilegeFixture fixture)
                 e.Property(x => x.TenantId).HasColumnName("tenant_id");
                 e.Property(x => x.PublicId).HasColumnName("public_id");
                 e.Property(x => x.Title).HasColumnName("title");
+                e.Property(x => x.Status).HasColumnName("status");
+                e.Property(x => x.Version).HasColumnName("version");
+                e.Property(x => x.CreatedAt).HasColumnName("created_at");
             });
             base.OnModelCreating(model);
         }

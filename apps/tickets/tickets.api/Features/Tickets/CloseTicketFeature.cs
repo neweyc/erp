@@ -7,7 +7,6 @@ using AppPlatform.Tickets.Data;
 using AppPlatform.Tickets.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AppPlatform.Tickets.Features.Tickets;
 
@@ -45,7 +44,7 @@ public static class CloseTicketFeature
             {
                 await tickets.SaveAsync(ct);
             }
-            catch (Exception ex) when (ConcurrencyConflict.Matches(ex))
+            catch (Exception ex) when (DatabaseConflict.IsLostRace(ex))
             {
                 // Someone else changed this ticket between our read and our write. A stable 409
                 // tells the caller to re-read and retry; without it this escapes as a 500

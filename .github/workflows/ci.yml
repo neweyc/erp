@@ -34,7 +34,13 @@ jobs:
       # `npm run build` runs `tsc -b`, which type-checks the TEST files too. A bare
       # `vitest run` never type-checks, and `tsc --noEmit` skips them — so a type error in a
       # test would otherwise reach main and fail the image build there instead.
+      # `build` is `tsc -b` in every workspace, and it is what type-checks the TEST files. vitest
+      # never type-checks, so running only the tests would let a type error in a spec reach main.
+      - run: npm run build --workspace @app-platform/web-api
+      - run: npm run build --workspace @app-platform/tickets-ui
       - run: npm run build --workspace @app-platform/shell
+      - run: npm run test --workspace @app-platform/web-api
+      - run: npm run test --workspace @app-platform/tickets-ui
       - run: npm run test --workspace @app-platform/shell
 
   e2e:

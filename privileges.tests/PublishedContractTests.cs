@@ -37,8 +37,13 @@ public class PublishedContractTests(PrivilegeFixture fixture)
         // Deliberately absent: phone. Encrypted and PII columns never reach a published
         // contract — ciphertext cannot be filtered or sorted, and an app has no business
         // holding it.
+        // The REAL view's shape, as the shipped migration defines it. This previously asserted the
+        // hand-written fixture's narrower shape, so it pinned nothing about what consumers see.
         Assert.Equal(
-            ["id", "tenant_id", "company_id", "public_id", "display_name"],
+            [
+                "id", "tenant_id", "company_id", "public_id",
+                "first_name", "last_name", "display_name", "status",
+            ],
             await ColumnsOfAsync("core_v1", "employee"));
     }
 

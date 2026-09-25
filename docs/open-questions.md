@@ -60,6 +60,13 @@ remain open; they are not a blanket prohibition on building experiments.
 - **Event retention window** — the number the replay promise is made against. 30 days is
   the starting point to validate, not a decision.
 
+## Authorization scope
+
+- **Who may see the employee roster, and with what fields?** `GetEmployeesFeature` returns email
+  addresses to any authenticated user of any role, because the tickets assignee picker needs names.
+  A member-role user arguably needs names without addresses. Raised by review 2026-09-25; a product
+  decision, not a defect.
+
 ## Integration
 
 - **Is API access licensed?** Charging for integration is standard, and it is also

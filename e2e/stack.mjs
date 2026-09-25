@@ -222,7 +222,8 @@ export const OPERATOR_PASSWORD = 'operator correct horse'
 
 export function seedOperator() {
   execFileSync('dotnet', [
-    'run', '--project', join(ROOT, 'platform.api'), '--no-launch-profile', '--',
+    // --no-restore so CI's prebuild is used rather than re-restored inside this call.
+    'run', '--project', join(ROOT, 'platform.api'), '--no-launch-profile', '--no-restore', '--',
     'create-platform-user', OPERATOR_EMAIL,
   ], {
     stdio: ['pipe', 'inherit', 'inherit'],
@@ -233,7 +234,7 @@ export function seedOperator() {
 
 export function seed() {
   execFileSync('dotnet', [
-    'run', '--project', join(ROOT, 'core.api'), '--no-launch-profile', '--', 'seed-e2e',
+    'run', '--project', join(ROOT, 'core.api'), '--no-launch-profile', '--no-restore', '--', 'seed-e2e',
   ], {
     stdio: 'inherit',
     env: { ...process.env, ConnectionStrings__Core: CONNECTION },

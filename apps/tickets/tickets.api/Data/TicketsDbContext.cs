@@ -46,12 +46,11 @@ public class TicketsDbContext(DbContextOptions<TicketsDbContext> options, ITenan
 
         modelBuilder.Entity<PublishedEmployee>(e =>
         {
+            // ToView, never ToTable: this is core's published contract. Mapping it as a table would
+            // hand this app a write path into data it does not own, and EF would try to migrate it —
+            // which would fail anyway, since the migration role has no rights in that schema.
             e.ToView("employee", PublishedSchema);
             e.HasKey(x => x.Id);
-
-            // Excluded from migrations: core owns this object entirely. Tickets reads it and
-            // could not create it if it tried — the migration role has no rights there.
-            e.ToView("employee", PublishedSchema);
         });
 
         modelBuilder.AddOutbox(Schema);

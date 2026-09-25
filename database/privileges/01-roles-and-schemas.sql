@@ -68,6 +68,20 @@ CREATE SCHEMA identity_v1 AUTHORIZATION ap_owner;
 -- silently does not apply to it.
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 
+-- ap_owner may create schemas.
+--
+-- Needed because the published contracts live in their own schemas and their migrations run AS
+-- ap_owner — `CREATE SCHEMA IF NOT EXISTS core_v1` checks database-level CREATE before noticing
+-- the schema already exists, so without this the migration fails with "permission denied for
+-- database". ap_owner is NOLOGIN and no process connects as it, so this widens nothing reachable.
+-- Via current_database() because GRANT needs a literal identifier, and this script is applied
+-- both by psql and by the test harness through Npgsql, which does not expand psql variables.
+DO $$
+BEGIN
+  EXECUTE format('GRANT CREATE ON DATABASE %I TO ap_owner', current_database());
+END
+$$;
+
 -- Migration roles may create within their own schema and nowhere else.
 GRANT USAGE, CREATE ON SCHEMA platform TO ap_platform_migrate;
 GRANT USAGE, CREATE ON SCHEMA core     TO ap_core_migrate;

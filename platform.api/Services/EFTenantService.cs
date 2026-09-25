@@ -1,6 +1,6 @@
+using AppPlatform.Api;
 using AppPlatform.Platform.Data;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AppPlatform.Platform.Services;
 
@@ -54,7 +54,7 @@ public class EFIdempotencyService(PlatformDbContext db) : IIdempotencyService
             await db.SaveChangesAsync(ct);
             return true;
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: "23505" })
+        catch (Exception ex) when (DatabaseConflict.IsUniqueViolation(ex))
         {
             // Unique violation: a concurrent retry got there first. Checking before inserting
             // cannot prevent this — both callers would read nothing and both proceed — so the

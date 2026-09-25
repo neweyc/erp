@@ -39,7 +39,7 @@ export const APPS: readonly AppDefinition[] = [
     name: 'Tickets',
     path: '/tickets',
     roles: ['admin', 'manager', 'member'],
-    load: () => import('../apps/tickets'),
+    load: () => import('@app-platform/tickets-ui'),
   },
 ]
 

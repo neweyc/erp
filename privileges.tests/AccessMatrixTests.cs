@@ -25,7 +25,10 @@ public class AccessMatrixTests(PrivilegeFixture fixture)
         // The provisioning exception, split by operation: core can create a tenant,
         // only the operator can change what it is permitted to do.
         { "core creates a tenant", "ap_core_rt",
-          "INSERT INTO platform.tenant (public_id, name, status) VALUES ('ten_z','Z','active')", true },
+          // created_at is NOT NULL with no default in the shipped schema, so a real INSERT must
+          // supply it. The old hand-written fixture omitted the column entirely.
+          "INSERT INTO platform.tenant (public_id, name, status, created_at) " +
+          "VALUES ('ten_z','Z','Active', now())", true },
         { "core cannot change a tenant's status", "ap_core_rt",
           "UPDATE platform.tenant SET status = 'suspended'", false },
         { "core cannot delete a tenant", "ap_core_rt",
