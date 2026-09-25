@@ -46,6 +46,13 @@ public interface ILedgerService
 
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default);
 
+    /// <summary>A company's books, under the tenant filter; null until its first account exists.</summary>
+    Task<Books?> FindBooksAsync(int companyId, CancellationToken ct = default);
+
+    Task<List<Books>> ListBooksAsync(CancellationToken ct = default);
+
+    void AddBooks(Books books);
+
     void AddAccount(Account account);
     void AddEntry(JournalEntry entry);
     Task SaveAsync(CancellationToken ct = default);
@@ -149,6 +156,14 @@ public class EFLedgerService(LedgerDbContext db, ITenantProvider tenant) : ILedg
 
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default)
         => db.Database.BeginTransactionAsync(ct);
+
+    public Task<Books?> FindBooksAsync(int companyId, CancellationToken ct = default)
+        => db.Books.FirstOrDefaultAsync(b => b.CompanyId == companyId, ct);
+
+    public Task<List<Books>> ListBooksAsync(CancellationToken ct = default)
+        => db.Books.OrderBy(b => b.CompanyId).ToListAsync(ct);
+
+    public void AddBooks(Books books) => db.Books.Add(books);
 
     public void AddAccount(Account account) => db.Accounts.Add(account);
 

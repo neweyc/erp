@@ -57,8 +57,8 @@ public class EntitlementTests
             .OfType<RouteEndpoint>()
             .ToList();
 
-        // Six today. Asserted so that a discovery failure cannot pass this test by finding none.
-        Assert.Equal(6, routes.Count);
+        // Eight today. Asserted so that a discovery failure cannot pass this test by finding none.
+        Assert.Equal(8, routes.Count);
 
         var client = host.GetTestClient();
         foreach (var route in routes)

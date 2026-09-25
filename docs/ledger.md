@@ -53,16 +53,28 @@ bug, raw SQL, or code that is not in this repo:
 | The series is the entry date's year | Check constraint |
 | A reversal exactly mirrors its original, in the same currency, dated no earlier, and is not itself a reversal; at most one per entry | Deferred trigger, queued by the reversal AND by every line inserted into either side, so forcing it early cannot be escaped; unique index |
 | No amount without a negation (`long.MinValue`) | Check constraint |
+| Nothing is posted in a closed period | Trigger on entry insert, holding a share lock on the company's books row; a close updates that row, so a post and a close cannot interleave. Entries key to the books row, so it always exists |
+| A close only moves forward, and cannot be removed | Trigger on the books row; DELETE and TRUNCATE revoked |
 
 **What it does not guarantee.** Tenant isolation between rows is the application's job, as it is
 everywhere in this platform: a process holding the runtime role can read and write any tenant's
 ledger rows. Every *reference* carries the tenant, so it cannot mix two tenants' rows, but it can
 act on either.
 
+## Period close (cycle 7)
+
+A company's books are closed **through a date**. Afterwards nothing can be posted on or before it,
+by any path. An administrator closes; the date must be before today and after the current close.
+
+**There is no reopen.** A closed period stays exactly what was reported for it; a mistake found in it
+is corrected by an entry dated in an open period — typically the reversal of the wrong entry, which
+the rules already date no earlier than its original. The books row is audited, which records who
+closed each period and when; each close also emits `books.period_closed`.
+
+Who may close is checked in the handler (`admin`), because packages/auth has no role model yet.
+
 ## Deliberately deferred
 
-- **Period close** — a closed period that refuses posting. The next cycle; it needs a decision on
-  who may reopen one.
 - **A UI** and its browser journey. The API and the database are where these invariants can fail.
 - **Fiscal years that are not calendar years.** Numbering is per calendar year of the entry date.
 - **Multi-company consolidation.** Each entry belongs to one company; nothing sums across them.

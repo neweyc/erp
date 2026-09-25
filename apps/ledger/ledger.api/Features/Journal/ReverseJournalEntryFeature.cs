@@ -49,6 +49,10 @@ public static class ReverseJournalEntryFeature
                     "A reversal cannot be dated before the entry it reverses.");
             }
 
+            // The reversal is dated in its own period, which must be open — the original's may not be.
+            if (await Posting.PeriodProblemAsync(ledger, original.CompanyId, entryDate, ct) is { } closed)
+                return closed;
+
             var memo = cmd.Memo?.Trim() is { Length: > 0 } given
                 ? given
                 : $"Reversal of {original.FiscalYear}-{original.Number}: {original.Memo}";
@@ -70,6 +74,11 @@ public static class ReverseJournalEntryFeature
                     reversal, reversesEntryId: original.Id, ct);
 
                 return CommandResult.Ok(new { entryId = entry.PublicId, number = entry.Number, fiscalYear = entry.FiscalYear });
+            }
+            catch (Exception ex) when (Posting.IsPeriodClosed(ex))
+            {
+                return CommandResult.Conflict(LedgerProblems.PeriodClosed,
+                    "The books were closed for that date while reversing. Date the reversal after the close.");
             }
             catch (Exception ex) when (DatabaseConflict.IsUniqueViolation(ex))
             {

@@ -171,12 +171,14 @@ mutable_append_only AS (
         END
 ),
 
--- 13. The ledger's number counter can be advanced but never removed (see 02-grants.sql).
+-- 13. The ledger's number counter and its books can be advanced but never removed (see
+--     02-grants.sql): removing either would restart a numbered series or reopen closed periods.
 counter_removable AS (
-  SELECT 'ap_ledger_rt can remove the entry number counter', p.priv
-  FROM (SELECT unnest(ARRAY['DELETE','TRUNCATE']) AS priv) p
-  WHERE to_regclass('ledger.entry_sequence') IS NOT NULL
-    AND has_table_privilege('ap_ledger_rt', 'ledger.entry_sequence', p.priv)
+  SELECT 'ap_ledger_rt can remove a ledger control row', format('%s (%s)', t.name, p.priv)
+  FROM (SELECT unnest(ARRAY['ledger.entry_sequence','ledger.books']) AS name) t
+  CROSS JOIN (SELECT unnest(ARRAY['DELETE','TRUNCATE']) AS priv) p
+  WHERE to_regclass(t.name) IS NOT NULL
+    AND has_table_privilege('ap_ledger_rt', t.name, p.priv)
 )
 
 SELECT * FROM invoker_views

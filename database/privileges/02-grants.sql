@@ -96,7 +96,7 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------
--- The ledger's number counter, and its integrity checks
+-- The ledger's number counter and books, and its integrity checks
 -- ---------------------------------------------------------------------------
 -- The runtime role advances it (UPDATE) but may never remove it. Deleting or truncating a
 -- series would restart it at 1 and reissue numbers already on posted entries. The unique index
@@ -112,6 +112,11 @@ DO $$
 BEGIN
   IF to_regclass('ledger.entry_sequence') IS NOT NULL THEN
     REVOKE DELETE, TRUNCATE ON ledger.entry_sequence FROM ap_ledger_rt;
+  END IF;
+
+  -- The books row holds how far a company is closed. Deleting it would reopen every period.
+  IF to_regclass('ledger.books') IS NOT NULL THEN
+    REVOKE DELETE, TRUNCATE ON ledger.books FROM ap_ledger_rt;
   END IF;
 
   IF to_regprocedure('ledger.check_reversal(integer, uuid)') IS NOT NULL THEN

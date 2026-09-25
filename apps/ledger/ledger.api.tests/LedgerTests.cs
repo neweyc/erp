@@ -312,4 +312,88 @@ public class LedgerTests
 
         Assert.Equal(LedgerProblems.CompanyRequired, (await CreateAccount("1000", "asset")).ProblemCode);
     }
+
+    // --- periods ----------------------------------------------------------------------------------
+
+    private Books ClosedThrough(DateOnly? date)
+    {
+        var books = new Books { PublicId = Ids.PublicId.New("bk").ToString(), CompanyId = 1, ClosedThrough = date };
+        _ledger.Setup(l => l.FindBooksAsync(1, default)).ReturnsAsync(books);
+        return books;
+    }
+
+    private Task<Api.CommandResult> Close(DateOnly? through, string role = "admin")
+        => new Features.Periods.ClosePeriodFeature.ClosePeriodCommandHandler(_ledger.Object, _outbox, _clock)
+            .Handle(Fake.Caller() with { Role = role }, new(through, null));
+
+    [Fact]
+    public async Task Only_an_administrator_can_close_the_books()
+    {
+        ClosedThrough(null);
+
+        var result = await Close(Fake.Today.AddDays(-1), role: "member");
+
+        Assert.Equal(LedgerProblems.NotPermitted, result.ProblemCode);
+        Assert.Equal(Api.CommandOutcome.Forbidden, result.Outcome);
+    }
+
+    [Theory]
+    [InlineData(0)]  // today is still being posted to
+    [InlineData(5)]  // the future
+    public async Task Only_a_day_before_today_can_be_closed(int daysFromToday)
+    {
+        ClosedThrough(null);
+
+        Assert.Equal(LedgerProblems.ValidationFailed, (await Close(Fake.Today.AddDays(daysFromToday))).ProblemCode);
+    }
+
+    [Fact]
+    public async Task A_close_only_moves_forward()
+    {
+        ClosedThrough(Fake.Today.AddDays(-10));
+
+        Assert.Equal(LedgerProblems.PeriodClosed, (await Close(Fake.Today.AddDays(-20))).ProblemCode);
+        Assert.Equal(LedgerProblems.PeriodClosed, (await Close(Fake.Today.AddDays(-10))).ProblemCode);
+    }
+
+    [Fact]
+    public async Task Closing_records_the_date_and_raises_an_event()
+    {
+        var books = ClosedThrough(Fake.Today.AddDays(-30));
+
+        var result = await Close(Fake.Today.AddDays(-1));
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Equal(Fake.Today.AddDays(-1), books.ClosedThrough);
+        var e = Assert.Single(_outbox.Events);
+        Assert.Equal("books.period_closed", e.EventType);
+        Assert.Equal(books.Version, e.AggregateVersion);
+    }
+
+    [Fact]
+    public async Task An_entry_dated_in_a_closed_period_is_refused_before_it_is_numbered()
+    {
+        var cash = Fake.Account("1000");
+        var sales = Fake.Account("4000", AccountType.Revenue);
+        Known(cash, sales);
+        ClosedThrough(Fake.Today);
+
+        var result = await Post((cash, 100), (sales, -100));
+
+        Assert.Equal(LedgerProblems.PeriodClosed, result.ProblemCode);
+        _ledger.Verify(l => l.NextEntryNumberAsync(It.IsAny<int>(), It.IsAny<int>(), default), Times.Never);
+    }
+
+    [Fact]
+    public async Task A_reversal_is_dated_in_an_open_period_even_when_its_original_is_closed()
+    {
+        var original = Original();                       // dated five days ago
+        ClosedThrough(original.EntryDate);                // …and now closed
+
+        Assert.True((await Reverse(original)).Succeeded);  // dated today: open
+
+        _posted.Clear();
+        var intoClosed = await Reverse(Original(), original.EntryDate);
+        Assert.Equal(LedgerProblems.PeriodClosed, intoClosed.ProblemCode);
+    }
 }

@@ -181,7 +181,7 @@ delivery; session revalidation, CSRF, and a cookie shared across services.
 | Monetary invariants | Tickets have no amounts, currency, rounding, or reversal. Balanced double-entry is the central ERP constraint and nothing here touches it. | **Proved.** Integer minor units; balance enforced by handler and by a deferred trigger that refuses raw SQL too |
 | Correction semantics | A ticket is edited freely; a posted journal is reversed, never mutated. Different persistence discipline entirely. | **Proved.** `IAppendOnly` in code and by grant; reversal at most once, under a race |
 | Gapless document numbering | Legally required per company per year in many jurisdictions, and contentious under concurrency. Public ids here are deliberately random — the opposite property. | **Proved.** 20 concurrent posts, 5 failing after numbering, yield exactly 1–15 |
-| Period close and immutability | No concept of a closed period that rejects writes. | Not yet — next ledger cycle |
+| Period close and immutability | No concept of a closed period that rejects writes. | **Proved (cycle 7).** Enforced by a trigger under a row lock, so a close and a post cannot interleave; forward only |
 | Aggregate reporting | Trial balance, aging, valuation — read patterns tickets does not have. | **Trial balance only**, summed in SQL, per currency. No performance data |
 | Multi-company posting | The `company_id` column exists; nothing writes or reads across entities. | **Partly.** Every account and entry carries a company resolved through `core_v1.company`; an entry cannot span two. Tested with one company per tenant |
 
@@ -598,7 +598,23 @@ Decisions taken without asking, each reversible:
 **Fourth review (Codex): the fix confirmed; CTEs, INSERT … SELECT, multi-row VALUES, COPY and
 ON CONFLICT checked for further bypasses — none. NO BLOCKING FINDINGS.**
 
-Next action: the next ledger cycle (period close and a UI) or Milestone 2.
+## Current cycle
+
+**Cycle 7 — the ledger as a proof of concept.** Chris: "use the ledger as a proof of concept", and
+pull the latest tonight — so the cycle ships in stages, each reviewed, committed and pushed on its own.
+
+**Stage A — period close. Complete and committed; independent review PENDING.** Codex hit its usage
+limit (available again 18:04 MDT, 2026-09-25). Committed ahead of review so `main` carries the latest
+work tonight; the review runs as soon as Codex is back, and its fixes follow as their own commit.
+
+- `ledger.books`, one row per company, created with its first account; journal entries key to it.
+- `POST /periods/close` (admin, date before today, forward only) and `GET /periods`.
+- Database: entries dated on or before the close are refused by a trigger holding a share lock on
+  the books row; closing cannot move back or be deleted.
+- Evidence: 162 real-PostgreSQL tests pass; removing the lock fails both interleave tests (post
+  first, close first); removing each trigger fails its tests.
+
+**Stage B — a UI and a browser journey.** Next.
 
 ---
 

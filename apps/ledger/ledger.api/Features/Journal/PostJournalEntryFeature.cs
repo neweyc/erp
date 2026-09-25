@@ -93,6 +93,11 @@ public static partial class PostJournalEntryFeature
             if (await ledger.FindEntryByIdempotencyKeyAsync(idempotencyKey, ct) is { } earlier)
                 return Replay(earlier, fingerprint);
 
+            // After the replay check: a retry of a post that succeeded before the period closed
+            // still gets its original answer rather than a refusal.
+            if (await Posting.PeriodProblemAsync(ledger, companies[0], entryDate, ct) is { } closed)
+                return closed;
+
             try
             {
                 var entry = await Posting.PostAsync(
@@ -101,6 +106,12 @@ public static partial class PostJournalEntryFeature
                     reversesEntryId: null, ct, idempotencyKey, fingerprint);
 
                 return Posted(entry, replayed: false);
+            }
+            catch (Exception ex) when (Posting.IsPeriodClosed(ex))
+            {
+                // A close committed between the check above and this post; the database refused it.
+                return CommandResult.Conflict(LedgerProblems.PeriodClosed,
+                    "The books were closed for that date while posting. Date the entry after the close.");
             }
             catch (Exception ex) when (DatabaseConflict.IsUniqueViolation(ex))
             {

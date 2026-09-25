@@ -20,7 +20,11 @@ namespace AppPlatform.PrivilegeTests;
 public class LedgerTests(PrivilegeFixture fixture)
 {
     private static readonly Guid Ada = Guid.CreateVersion7();
-    private static readonly DateOnly Day = new(2026, 9, 25);
+    /// <summary>
+    /// A fixed date in the past, so it can be closed — a close refuses today and later, which are
+    /// still being posted to. Every entry in these tests is dated this day.
+    /// </summary>
+    private static readonly DateOnly Day = new(2026, 9, 1);
 
     private sealed record Books(int TenantId, int CompanyId);
 
@@ -308,7 +312,7 @@ public class LedgerTests(PrivilegeFixture fixture)
             INSERT INTO ledger.journal_entry (id, tenant_id, company_id, public_id, number, fiscal_year,
               entry_date, memo, currency, posted_at, reverses_entry_id, line_count)
             VALUES ('{entry}', {books.TenantId}, {books.CompanyId}, 'je_raw{Guid.NewGuid().ToString("N")[..8]}',
-              {number}, {fiscalYear ?? 2026}, '2026-09-25', 'raw', 'USD', now(), {(reverses is null ? "NULL" : $"'{reverses}'")},
+              {number}, {fiscalYear ?? 2026}, '{Day:yyyy-MM-dd}', 'raw', 'USD', now(), {(reverses is null ? "NULL" : $"'{reverses}'")},
               {lineCount});
             INSERT INTO ledger.journal_line (id, tenant_id, company_id, entry_id, account_id, line_number, amount_minor)
             VALUES ('{Guid.NewGuid()}', {books.TenantId}, {books.CompanyId}, '{entry}', '{line1.Account}', 1, {line1.Amount}),
@@ -390,7 +394,7 @@ public class LedgerTests(PrivilegeFixture fixture)
             INSERT INTO ledger.journal_entry (id, tenant_id, company_id, public_id, number, fiscal_year,
               entry_date, memo, currency, posted_at, line_count)
             SELECT '{entry}', {books.TenantId}, {books.CompanyId}, 'je_cte{Guid.NewGuid().ToString("N")[..8]}',
-              1, 2026, '2026-09-25', 'cte', 'USD', now(), count(*) FROM lines;
+              1, 2026, '{Day:yyyy-MM-dd}', 'cte', 'USD', now(), count(*) FROM lines;
             COMMIT;
             """));
 
@@ -623,5 +627,101 @@ public class LedgerTests(PrivilegeFixture fixture)
         Assert.Equal(AuditAction.Created, row.Action);
         Assert.Equal(Ada, row.ActorId);
         Assert.Equal("journal_entry", row.EntityType);
+    }
+
+    // --- periods ----------------------------------------------------------------------------------
+
+    private async Task<CommandResult> CloseAsync(Books books, DateOnly through)
+    {
+        await using var db = Open(books);
+        return await new Ledger.Features.Periods.ClosePeriodFeature.ClosePeriodCommandHandler(
+            Service(books, db), new Outbox.Outbox(db, TimeProvider.System), TimeProvider.System)
+            .Handle(Caller(books), new(through, null));
+    }
+
+    [Fact]
+    public async Task After_a_close_nothing_can_be_posted_in_the_closed_period_by_any_path()
+    {
+        var (books, cash, sales) = await BooksWithAccountsAsync();
+        Assert.True((await CloseAsync(books, Day)).Succeeded);
+
+        // The handler (Day is the closed date itself)…
+        var posted = await PostAsync(books, (await PublicIdOf(books, cash), 100), (await PublicIdOf(books, sales), -100));
+        Assert.Equal(LedgerProblems.PeriodClosed, posted.ProblemCode);
+
+        // …and raw SQL as the ledger's role, correct in every other respect.
+        var ex = await Assert.ThrowsAsync<PostgresException>(() => fixture.ExecuteAsAsync("ap_ledger_rt",
+            RawEntry(books, 1, (cash, 100), (sales, -100))));
+        Assert.Equal("ledger_period_closed", ex.ConstraintName);
+    }
+
+    [Fact]
+    public async Task A_close_cannot_be_moved_back_or_removed_at_the_database()
+    {
+        var (books, _, _) = await BooksWithAccountsAsync();
+        Assert.True((await CloseAsync(books, Day)).Succeeded);
+
+        var back = await Assert.ThrowsAsync<PostgresException>(() => fixture.ExecuteAsAsync("ap_ledger_rt",
+            $"UPDATE ledger.books SET closed_through = '2026-01-01' WHERE tenant_id = {books.TenantId}"));
+        Assert.Contains("cannot move back", back.MessageText);
+
+        var cleared = await Assert.ThrowsAsync<PostgresException>(() => fixture.ExecuteAsAsync("ap_ledger_rt",
+            $"UPDATE ledger.books SET closed_through = NULL WHERE tenant_id = {books.TenantId}"));
+        Assert.Contains("cannot move back", cleared.MessageText);
+
+        Assert.Equal("42501", await fixture.TryAsAsync("ap_ledger_rt",
+            $"DELETE FROM ledger.books WHERE tenant_id = {books.TenantId}"));
+    }
+
+    [Theory]
+    [InlineData(true)]  // a post in flight holds off a close
+    [InlineData(false)] // a close in flight holds off a post
+    public async Task A_post_and_a_close_cannot_interleave(bool postFirst)
+    {
+        var (books, cash, sales) = await BooksWithAccountsAsync();
+        var close = $"UPDATE ledger.books SET closed_through = '{Day:yyyy-MM-dd}' WHERE tenant_id = {books.TenantId};";
+        var post = RawEntry(books, 1, (cash, 100), (sales, -100)).Replace("BEGIN;", "").Replace("COMMIT;", "");
+
+        // First transaction: open, does its write, and stays open.
+        await using var holder = new NpgsqlConnection(fixture.ConnectionString);
+        await holder.OpenAsync();
+        await using (var begin = new NpgsqlCommand($"SET ROLE ap_ledger_rt; BEGIN; {(postFirst ? post : close)}", holder))
+            await begin.ExecuteNonQueryAsync();
+
+        // Second: must wait for the first rather than slip past it.
+        var waited = await fixture.TryAsAsync("ap_ledger_rt",
+            $"SET lock_timeout = '500ms'; BEGIN; {(postFirst ? close : post)} COMMIT;");
+
+        await using (var end = new NpgsqlCommand("ROLLBACK;", holder))
+            await end.ExecuteNonQueryAsync();
+
+        Assert.Equal("55P03", waited);
+    }
+
+    [Fact]
+    public async Task An_entry_in_a_closed_period_is_corrected_by_a_reversal_dated_after_the_close()
+    {
+        var (books, cash, sales) = await BooksWithAccountsAsync();
+        var original = EntryId(await PostAsync(books, (await PublicIdOf(books, cash), 100), (await PublicIdOf(books, sales), -100)));
+        Assert.True((await CloseAsync(books, Day)).Succeeded);
+
+        await using var db = Open(books);
+        var reversed = await new ReverseJournalEntryFeature.ReverseJournalEntryCommandHandler(
+            Service(books, db), new Outbox.Outbox(db, TimeProvider.System), TimeProvider.System)
+            .Handle(Caller(books), original, new(Day.AddDays(1), null));
+
+        Assert.True(reversed.Succeeded, reversed.Message);
+    }
+
+    [Fact]
+    public async Task Closing_is_audited_against_the_administrator()
+    {
+        var (books, _, _) = await BooksWithAccountsAsync();
+        Assert.True((await CloseAsync(books, Day)).Succeeded);
+
+        await using var db = Open(books);
+        var close = await db.AuditLog.SingleAsync(r => r.EntityType == "books" && r.Action == AuditAction.Updated);
+        Assert.Equal(Ada, close.ActorId);
+        Assert.Contains("closed_through", close.Changes);
     }
 }

@@ -83,8 +83,9 @@ remain open; they are not a blanket prohibition on building experiments.
 - **Who may post and reverse.** Today any signed-in user of a tenant that licensed the ledger can.
   Posting to the books is usually a narrower permission than reading them; the role model for it is
   undecided. Decide before a real customer's books are in it.
-- **Who may reopen a closed period**, and whether closing is per company or per tenant — needed
-  before period close (the next ledger cycle) can be built.
+- ~~Who may reopen a closed period.~~ **Decided (cycle 7): nobody.** Closing only moves forward;
+  corrections go into an open period. Closing is per company. Revisit only if a customer's
+  auditors require a controlled reopen — it would need its own audit story.
 - **Fiscal years that are not calendar years.** Entry numbering is per calendar year today.
 - **Supported currencies and their decimal places.** An entry's currency is any three upper-case
   letters; amounts are in "the minor unit", which is two places for USD but zero for JPY and three

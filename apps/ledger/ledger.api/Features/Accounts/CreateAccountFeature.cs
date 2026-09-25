@@ -60,6 +60,11 @@ public static partial class CreateAccountFeature
                 CreatedAt = clock.GetUtcNow(),
             };
 
+            // The company's first account opens its books, so they exist before anything is posted —
+            // every journal entry keys to them, and the period check locks them.
+            if (await ledger.FindBooksAsync(account.CompanyId, ct) is null)
+                ledger.AddBooks(new Books { PublicId = PublicId.New("bk").ToString(), CompanyId = account.CompanyId });
+
             ledger.AddAccount(account);
             outbox.AddEvent("account", account.PublicId, 1, "account.created",
                 $$"""{"accountId":"{{account.PublicId}}"}""");
@@ -71,8 +76,12 @@ public static partial class CreateAccountFeature
             catch (Exception ex) when (DatabaseConflict.IsUniqueViolation(ex))
             {
                 // The unique index is the guard; a preflight read could not see a concurrent insert.
-                return CommandResult.Conflict(LedgerProblems.DuplicateAccountCode,
-                    $"This company already has an account {code}.");
+                // Two first accounts created at once can also both try to open the books — the loser
+                // is told to retry, and finds them open.
+                return ex.InnerException is Npgsql.PostgresException { ConstraintName: { } constraint }
+                       && constraint.StartsWith("ak_books", StringComparison.Ordinal)
+                    ? CommandResult.Conflict(LedgerProblems.ConcurrentChange, "The books were being opened at the same moment. Try again.")
+                    : CommandResult.Conflict(LedgerProblems.DuplicateAccountCode, $"This company already has an account {code}.");
             }
 
             return CommandResult.Ok(new { accountId = account.PublicId });

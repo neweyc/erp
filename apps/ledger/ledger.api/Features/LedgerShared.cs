@@ -18,6 +18,9 @@ public static class LedgerProblems
     public const string Unbalanced = "unbalanced";
     public const string AlreadyReversed = "already_reversed";
     public const string IdempotencyKeyReused = "idempotency_key_reused";
+    public const string PeriodClosed = "period_closed";
+    public const string NotPermitted = "not_permitted";
+    public const string ConcurrentChange = "concurrent_change";
     public const string CannotReverseAReversal = "cannot_reverse_a_reversal";
 }
 
@@ -86,6 +89,34 @@ public static class Posting
 
         return sum == 0 ? null : "Debits and credits must be equal: the lines must sum to zero.";
     }
+
+    /// <summary>
+    /// Null when the date is in an open period; otherwise the refusal. Checked before posting so the
+    /// caller gets a clear answer — the database refuses it too, under a lock, which is what holds when
+    /// a close commits between this check and the post (see <see cref="IsPeriodClosed"/>).
+    /// </summary>
+    public static async Task<CommandResult?> PeriodProblemAsync(
+        ILedgerService ledger, int companyId, DateOnly entryDate, CancellationToken ct)
+    {
+        var books = await ledger.FindBooksAsync(companyId, ct);
+
+        return books?.ClosedThrough is { } closed && entryDate <= closed
+            ? PeriodClosed(closed)
+            : null;
+    }
+
+    public static CommandResult PeriodClosed(DateOnly closedThrough)
+        => CommandResult.Conflict(LedgerProblems.PeriodClosed,
+            $"The books are closed through {closedThrough:yyyy-MM-dd}. Date the entry after that.");
+
+    /// <summary>
+    /// The database's refusal of an entry dated in a closed period — raised by the
+    /// journal_entry_in_open_period trigger, which names its constraint so it can be told apart
+    /// from every other check violation.
+    /// </summary>
+    public static bool IsPeriodClosed(Exception ex)
+        => (ex as Npgsql.PostgresException ?? ex.InnerException as Npgsql.PostgresException)
+            is { ConstraintName: "ledger_period_closed" };
 
     /// <summary>
     /// Numbers, writes and commits one entry in a single transaction. The caller has already

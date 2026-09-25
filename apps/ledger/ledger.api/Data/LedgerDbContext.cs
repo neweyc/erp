@@ -19,6 +19,7 @@ public class LedgerDbContext(
     public DbSet<JournalEntry> Entries => Set<JournalEntry>();
     public DbSet<JournalLine> Lines => Set<JournalLine>();
     public DbSet<EntrySequence> Sequences => Set<EntrySequence>();
+    public DbSet<Books> Books => Set<Books>();
     public DbSet<PublishedCompany> Companies => Set<PublishedCompany>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -89,6 +90,14 @@ public class LedgerDbContext(
                 .IsUnique()
                 .HasFilter("reverses_entry_id IS NOT NULL");
 
+            // Every entry belongs to a company's books, so the books row — and the lock the period
+            // check takes on it — always exists before anything is posted.
+            e.HasOne<Books>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.CompanyId })
+                .HasPrincipalKey(x => new { x.TenantId, x.CompanyId })
+                .OnDelete(DeleteBehavior.Restrict);
+
             e.HasMany(x => x.Lines)
                 .WithOne()
                 .HasForeignKey(x => new { x.TenantId, x.CompanyId, x.EntryId })
@@ -122,6 +131,18 @@ public class LedgerDbContext(
 
             // The trial balance reads every line of an account.
             e.HasIndex(x => new { x.TenantId, x.AccountId });
+        });
+
+        modelBuilder.Entity<Books>(e =>
+        {
+            e.ToTable("books", Schema);
+            e.HasKey(x => x.Id);
+            e.HasPublicId("bk");
+            e.Property(x => x.Version).IsConcurrencyToken();
+
+            e.HasIndex(x => x.TenantId);
+            // One set of books per company; also what journal entries key to.
+            e.HasAlternateKey(x => new { x.TenantId, x.CompanyId });
         });
 
         modelBuilder.Entity<EntrySequence>(e =>
