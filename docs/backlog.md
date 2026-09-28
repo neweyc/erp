@@ -212,6 +212,7 @@ ERP will need again.
 
 | ID | Sev | Defect | Reproduction | Consequence |
 |---|---|---|---|---|
+| **D16** | Low | The `AddPeriodClose` backfill mints `books.public_id` as `bk_` + 25 hex characters of md5, not the pinned format (25 Crockford base32 characters carrying 125 random bits, `docs/integration.md` §2.1). | `database/ledger/20260925211934_AddPeriodClose.sql`, the backfill `INSERT … SELECT` | Hex is a subset of the Crockford alphabet, so the ids parse, but they carry about 100 bits and use only 16 of 32 symbols. Reaches only databases that already posted entries before the migration, and none is deployed. Fix before the first deployment (generate the body properly in SQL) or accept it in writing. |
 | **D15** | High — **fixed** | The session endpoint showed every tenant the name of whichever tenant was provisioned first. `TenantNameAsync` read `db.Tenants.FirstAsync()` with no id, and the tenant table has no query filter — it is what tenants are scoped *by*. | Tenant B's session on a core.api reports "E2E Ltd". Invisible with one tenant, which is why nothing caught it. | A cross-tenant disclosure on every dashboard load. Now takes the caller's tenant id explicitly; `AuthTests.The_session_names_the_callers_tenant_not_the_first_tenant` and the e2e cover it. `Tenant` is the only entity without the filter, and its other two reads are keyed. |
 | **D13** | High — **was failing CI on main** | `startDatabase` used `pg_isready -d appplatform` as its readiness check. `pg_isready` only reports that the server accepts connections; the postgres image runs a temporary init server before creating `POSTGRES_DB`, so readiness passed while the database did not exist. **Fixed** — readiness is now a real `SELECT 1` against the target database. | Reproduced: polling a fresh container showed `pg_isready=yes` while `SELECT 1` still failed, a ~0.4s window. CI run `36143741902` failed with `database "appplatform" does not exist` at `applyMigrations`. | The whole e2e job failed. It passed locally because a cached image wins the race, which is why it reached main — a flake class that only appears on a cold runner. |
 | **D12** | Low | `WalkingSkeletonTests` still licenses via raw `INSERT INTO platform.tenant_app`. | `privileges.tests/WalkingSkeletonTests.cs:131` | A handler-level fixture shortcut, not a shipped path. The operator endpoint is covered by the e2e, so this is split coverage rather than a gap — recorded so it is not invisible if the endpoint's behaviour changes. |
@@ -603,9 +604,9 @@ ON CONFLICT checked for further bypasses — none. NO BLOCKING FINDINGS.**
 **Cycle 7 — the ledger as a proof of concept.** Chris: "use the ledger as a proof of concept", and
 pull the latest tonight — so the cycle ships in stages, each reviewed, committed and pushed on its own.
 
-**Stage A — period close. Complete and committed; independent review PENDING.** Codex hit its usage
-limit (available again 18:04 MDT, 2026-09-25). Committed ahead of review so `main` carries the latest
-work tonight; the review runs as soon as Codex is back, and its fixes follow as their own commit.
+**Stage A — period close. Complete, committed (`b193664`), independent review CLOSED.** Committed
+ahead of review while Codex was at its usage limit; the review then ran and its fixes landed in
+`399dc46` (see *Review closure* below).
 
 - `ledger.books`, one row per company, created with its first account; journal entries key to it.
 - `POST /periods/close` (admin, date before today, forward only) and `GET /periods`.
@@ -614,7 +615,7 @@ work tonight; the review runs as soon as Codex is back, and its fixes follow as 
 - Evidence: 162 real-PostgreSQL tests pass; removing the lock fails both interleave tests (post
   first, close first); removing each trigger fails its tests.
 
-**Stage B — a UI and a browser journey. Complete; independent review PENDING** (Codex, as stage A).
+**Stage B — a UI and a browser journey. Complete, committed (`ecbd6e6`), independent review CLOSED.**
 
 - `apps/ledger/ledger.ui`, registered in the shell (its own 11 kB chunk, fetched only when licensed).
 - The browser journey: license → accounts → post → trial balance → reverse → close → a post into the
@@ -624,6 +625,20 @@ work tonight; the review runs as soon as Codex is back, and its fixes follow as 
 - Evidence (measured): 23 ledger-UI tests (money parsing, the line rule, the balance gate, the
   idempotency key on retry — shown to fail when the key is regenerated per click — reversal
   offers, closed-period message); 20/20 Playwright.
+
+**Review closure (`399dc46`, 2026-09-28).** Chris confirmed both stage reviews closed. Fixes:
+
+- `AddPeriodClose` backfills one `ledger.books` row per `(tenant_id, company_id)` that already has
+  journal entries, before adding the foreign key, which would otherwise fail on any database where
+  Cycle 6 posting had run. **The migration was edited in place.** That is safe only because no
+  database SQL has been deployed anywhere yet. Once a script reaches a live database, fixes go in a
+  new migration.
+- `toMinor` parses through BigInt and refuses amounts above `Number.MAX_SAFE_INTEGER` minor units
+  rather than silently rounding them by a cent (test: *refuses an amount too large to represent
+  exactly*).
+- `database/init-local.sh` added for local database initialisation.
+
+Open from the closure: D16.
 
 ---
 
