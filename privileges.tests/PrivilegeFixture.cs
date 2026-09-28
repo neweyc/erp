@@ -47,7 +47,8 @@ public sealed class PrivilegeFixture : IAsyncLifetime
 
         var privileges = RepositoryPaths.Project("database/privileges");
 
-        await ExecuteFileAsync(Path.Combine(privileges, "01-roles-and-schemas.sql"));
+        await ExecuteFileAsync(Path.Combine(privileges, "00-roles.sql"));
+        await ExecuteFileAsync(Path.Combine(privileges, "01-schemas.sql"));
 
         // Applied AS ap_owner, not as the superuser.
         //

@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 import { join } from 'node:path'
-import { CAPTURE_DIR, CONNECTION, ensureStack, ROOT } from './stack.mjs'
+import { apiEnvironment, CAPTURE_DIR, CONNECTION, ensureStack, ROOT } from './stack.mjs'
 
 /**
  * The database is prepared HERE, at config-module load, rather than in globalSetup.
@@ -16,23 +16,9 @@ import { CAPTURE_DIR, CONNECTION, ensureStack, ROOT } from './stack.mjs'
  */
 const tenants = ensureStack()
 
-const apiEnv = {
-  ConnectionStrings__Core: CONNECTION,
-  ConnectionStrings__Tickets: CONNECTION,
-  ConnectionStrings__Ledger: CONNECTION,
-  ConnectionStrings__Platform: CONNECTION,
-  // Pins the tenant for anonymous sign-in. On localhost there is no hostname to resolve, and
-  // falling back to "the first tenant" would be a cross-tenant login.
-  Tenant__PublicId: tenants.tenant,
-  // Shared key ring. Without it the cookie issued by core.api cannot be decrypted by
-  // tickets.api, and every app API answers 401 to a user who has just signed in successfully.
-  DataProtection__KeyPath: join(ROOT, 'e2e/.keys'),
-  // Turns on the file transport, which is what makes the outbox worker actually deliver. With
-  // no transport configured the worker dead-letters every message, and the journey fails with a
-  // clear reason rather than hanging.
-  Email__CapturePath: CAPTURE_DIR,
-  ASPNETCORE_ENVIRONMENT: 'Development',
-}
+const apiEnv = apiEnvironment({
+  connection: CONNECTION, tenantPublicId: tenants.tenant, capturePath: CAPTURE_DIR,
+})
 
 /**
  * Only platform.api needs these, and giving them to core.api has a side effect worth avoiding:
@@ -89,6 +75,8 @@ export default defineConfig({
     // The ledger proof of concept: licenses the ledger for tenant A, then drives it in the browser.
     // After `license` so the admin has accepted their invitation; nothing depends on it.
     { name: 'ledger', testMatch: /ledger\.spec\.mjs/, dependencies: ['license'] },
+    // The restore drill backs up everything the projects above wrote, so it runs after all of them.
+    { name: 'restore', testMatch: /restore\.spec\.mjs/, dependencies: ['journey', 'guards', 'isolation', 'ledger'] },
   ],
   timeout: 30_000,
   use: {

@@ -74,15 +74,31 @@ else
         "register a real transport. Starting without one silently destroys every invitation.");
 }
 
-builder.Services.AddOutboxWorker<CoreDbContext>(new OutboxWorkerOptions
+// Delivery can be held back, for the first start after a restore (ops/README.md). A restored
+// outbox still holds messages that the live system sent after the backup was taken, and the
+// worker would send every one of them again the moment the service started. Paused, messages are
+// still staged and kept Pending; nothing is lost, and delivery resumes on a restart without it.
+var deliveryPaused = builder.Configuration.GetValue<bool>("Outbox:DeliveryPaused");
+
+if (!deliveryPaused)
 {
-    Schema = CoreDbContext.Schema,
-    // Short, because an invitation the customer is waiting for should not sit for a minute. The
-    // claim is indexed and the table is small.
-    PollInterval = TimeSpan.FromSeconds(2),
-});
+    builder.Services.AddOutboxWorker<CoreDbContext>(new OutboxWorkerOptions
+    {
+        Schema = CoreDbContext.Schema,
+        // Short, because an invitation the customer is waiting for should not sit for a minute. The
+        // claim is indexed and the table is small.
+        PollInterval = TimeSpan.FromSeconds(2),
+    });
+}
 
 var app = builder.Build();
+
+if (deliveryPaused)
+{
+    app.Logger.LogWarning(
+        "Outbox delivery is PAUSED (Outbox:DeliveryPaused). Invitations are staged but not sent " +
+        "until the service restarts without it.");
+}
 
 // Never migrate on startup. Schema changes are applied by hand, as the migration role, so a
 // deploy cannot silently alter a shared database — and so the runtime role can keep having no

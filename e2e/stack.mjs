@@ -5,6 +5,9 @@ import { join, resolve } from 'node:path'
 export const ROOT = resolve(import.meta.dirname, '..')
 export const CONTAINER = 'ap-e2e-db'
 export const DB_PORT = 55433
+/** The restore drill's target: an empty database the backup of the journey's one is restored into. */
+export const RESTORE_CONTAINER = 'ap-e2e-restore'
+export const RESTORE_DB_PORT = 55434
 /** Where the file transport drops delivered email. The journey reads invitations from here. */
 export const CAPTURE_DIR = resolve(import.meta.dirname, '.mail')
 
@@ -19,22 +22,40 @@ export const CAPTURE_DIR = resolve(import.meta.dirname, '.mail')
  */
 const RESET_MARKER = join(CAPTURE_DIR, '.reset-at')
 
-export const CONNECTION =
-  `Host=localhost;Port=${DB_PORT};Database=appplatform;Username=postgres;Password=e2e`
+/** A connection string for an e2e database on the given local port, as the superuser (D7). */
+export function connectionString(port) {
+  return `Host=localhost;Port=${port};Database=appplatform;Username=postgres;Password=e2e`
+}
+
+export const CONNECTION = connectionString(DB_PORT)
+
+/**
+ * The image every e2e database runs: PostgreSQL plus the backup tools (ops/Dockerfile). Using it
+ * for the journey's own database is what lets the restore drill run ops/backup.sh inside it, with
+ * the same pg_dump version as the server. Built once; later builds are a cache hit.
+ */
+export const OPS_IMAGE = 'app-platform-ops'
+
+export function buildOpsImage() {
+  execFileSync('docker', ['build', '-q', '-t', OPS_IMAGE, join(ROOT, 'ops')], { stdio: 'ignore' })
+}
 
 /**
  * An ephemeral database on its own port, so the normal dev stack can keep running. The port is
  * deliberately not 5432: a test suite that silently targets a developer's real database is a
  * data-loss bug waiting for the first person who assumes otherwise.
+ *
+ * The restore drill starts a second one, under another name and port, to restore into.
  */
-export function startDatabase() {
-  execFileSync('docker', ['rm', '-f', CONTAINER], { stdio: 'ignore' })
+export function startDatabase({ container = CONTAINER, port = DB_PORT } = {}) {
+  buildOpsImage()
+  execFileSync('docker', ['rm', '-f', container], { stdio: 'ignore' })
   execFileSync('docker', [
-    'run', '-d', '--name', CONTAINER,
+    'run', '-d', '--name', container,
     '-e', 'POSTGRES_PASSWORD=e2e',
     '-e', 'POSTGRES_DB=appplatform',
-    '-p', `${DB_PORT}:5432`,
-    'postgres:16-alpine',
+    '-p', `${port}:5432`,
+    OPS_IMAGE,
   ], { stdio: 'ignore' })
 
   // Readiness is a real QUERY against the target database, not pg_isready.
@@ -47,7 +68,7 @@ export function startDatabase() {
   for (let i = 0; i < 60; i++) {
     try {
       execFileSync('docker', [
-        'exec', CONTAINER, 'psql', '-U', 'postgres', '-d', 'appplatform', '-tAc', 'SELECT 1',
+        'exec', container, 'psql', '-U', 'postgres', '-d', 'appplatform', '-tAc', 'SELECT 1',
       ], { stdio: 'ignore' })
       return
     } catch {
@@ -56,8 +77,8 @@ export function startDatabase() {
   }
 
   throw new Error(
-    `e2e database did not accept a query on ${CONTAINER} within 60s. ` +
-    'Check `docker logs ' + CONTAINER + '`.')
+    `e2e database did not accept a query on ${container} within 60s. ` +
+    'Check `docker logs ' + container + '`.')
 }
 
 /**
@@ -137,29 +158,36 @@ export function ensureStack() {
   return { tenant: seededTenantPublicId(), otherTenant: otherTenantPublicId() }
 }
 
-export function stopDatabase() {
-  execFileSync('docker', ['rm', '-f', CONTAINER], { stdio: 'ignore' })
+export function stopDatabase(container = CONTAINER) {
+  execFileSync('docker', ['rm', '-f', container], { stdio: 'ignore' })
 }
 
-function applyFile(path) {
-  execFileSync('docker', ['cp', path, `${CONTAINER}:/tmp/apply.sql`], { stdio: 'ignore' })
-  execFileSync('docker', [
-    'exec', CONTAINER, 'psql', '-v', 'ON_ERROR_STOP=1',
-    '-U', 'postgres', '-d', 'appplatform', '-q', '-f', '/tmp/apply.sql',
-  ], { stdio: 'inherit' })
+/** Copies a directory of this repository into a container at the same relative path under /repo. */
+export function copyIntoContainer(container, repoRelativeDirectory) {
+  const target = `/repo/${repoRelativeDirectory}`
+  execFileSync('docker', ['exec', container, 'mkdir', '-p', target], { stdio: 'ignore' })
+  execFileSync('docker', ['cp', `${join(ROOT, repoRelativeDirectory)}/.`, `${container}:${target}`],
+    { stdio: 'ignore' })
 }
 
 /**
- * The GENERATED scripts, in the runbook's order — not a hand-written schema. Every schema bug
- * this project has hit came from a fixture that had drifted from the migrations, so the browser
- * journey runs against exactly what a deployment would apply.
+ * The GENERATED scripts, applied by database/init-local.sh — the documented way to initialize a
+ * fresh database, not a hand-written schema. Every schema bug this project has hit came from a
+ * fixture that had drifted from the migrations, so the browser journey runs against exactly what
+ * a deployment would apply: roles, schemas, migrations AS ap_owner, grants.
+ *
+ * As ap_owner matters for the restore drill: it restores this database and then runs
+ * 99-verify.sql, which rejects a published view owned by anything else.
+ *
+ * Its standard output (progress, and the password advice for a human) is discarded; errors still
+ * reach the terminal, and a failure stops the run.
  */
 export function applyMigrations() {
-  applyFile(join(ROOT, 'database/privileges/01-roles-and-schemas.sql'))
-  applyFile(join(ROOT, 'database/platform/migrations-all.sql'))
-  applyFile(join(ROOT, 'database/core/migrations-all.sql'))
-  applyFile(join(ROOT, 'database/tickets/migrations-all.sql'))
-  applyFile(join(ROOT, 'database/ledger/migrations-all.sql'))
+  copyIntoContainer(CONTAINER, 'database')
+  execFileSync('docker', [
+    'exec', '-e', 'PGUSER=postgres', '-e', 'PGDATABASE=appplatform',
+    CONTAINER, 'bash', '/repo/database/init-local.sh',
+  ], { stdio: ['ignore', 'ignore', 'inherit'] })
 }
 
 /**
@@ -220,6 +248,31 @@ function captureFloor() {
     // No marker means nothing was cleared, so accept anything rather than blocking a run on a
     // missing bookkeeping file.
     return new Date(0)
+  }
+}
+
+/**
+ * The environment every API process is started with, for a database and the tenant that
+ * anonymous sign-in resolves to. Shared by the Playwright config and the restore drill, which
+ * starts a second set of APIs against the restored copy.
+ */
+export function apiEnvironment({ connection, tenantPublicId, capturePath }) {
+  return {
+    ConnectionStrings__Core: connection,
+    ConnectionStrings__Tickets: connection,
+    ConnectionStrings__Ledger: connection,
+    ConnectionStrings__Platform: connection,
+    // Pins the tenant for anonymous sign-in. On localhost there is no hostname to resolve, and
+    // falling back to "the first tenant" would be a cross-tenant login.
+    Tenant__PublicId: tenantPublicId,
+    // Shared key ring. Without it the cookie issued by core.api cannot be decrypted by
+    // tickets.api, and every app API answers 401 to a user who has just signed in successfully.
+    DataProtection__KeyPath: join(ROOT, 'e2e/.keys'),
+    // Turns on the file transport, which is what makes the outbox worker actually deliver. With
+    // no transport configured the worker dead-letters every message, and the journey fails with a
+    // clear reason rather than hanging.
+    Email__CapturePath: capturePath,
+    ASPNETCORE_ENVIRONMENT: 'Development',
   }
 }
 

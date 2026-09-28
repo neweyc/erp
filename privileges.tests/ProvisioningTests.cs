@@ -30,7 +30,8 @@ public class ProvisioningTests : IAsyncLifetime
         _connection = _container.GetConnectionString();
 
         var privileges = RepositoryPaths.Project("database/privileges");
-        await RunAsync(Path.Combine(privileges, "01-roles-and-schemas.sql"));
+        await RunAsync(Path.Combine(privileges, "00-roles.sql"));
+        await RunAsync(Path.Combine(privileges, "01-schemas.sql"));
 
         // Both services' generated scripts, exactly as the runbook applies them.
         await RunAsync(Path.Combine(RepositoryPaths.Project("database/platform"), "migrations-all.sql"));

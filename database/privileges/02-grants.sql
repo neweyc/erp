@@ -1,7 +1,7 @@
 -- App Platform — grants over EXISTING objects
 -- Run AFTER migrations, as a superuser. Idempotent: safe to re-run at any time.
 --
--- 01-roles-and-schemas.sql sets default privileges so that objects created later are
+-- 01-schemas.sql sets default privileges so that objects created later are
 -- granted automatically. This file exists for the cases where that is not enough:
 -- a database migrated before the defaults were set, an object created by the wrong
 -- role, or the narrow exceptions below that no default privilege can express.
@@ -106,7 +106,7 @@ $$;
 --
 -- The reversal check is a function its triggers call, and a trigger runs as the role that fired it
 -- — so the ledger's role needs EXECUTE on it. Functions created by ap_owner are not executable by
--- PUBLIC (01-roles-and-schemas.sql), which is why it is granted here by name. It only reads.
+-- PUBLIC (01-schemas.sql), which is why it is granted here by name. It only reads.
 
 DO $$
 BEGIN

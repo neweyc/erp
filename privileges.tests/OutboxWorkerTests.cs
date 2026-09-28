@@ -34,7 +34,8 @@ public class OutboxWorkerTests : IAsyncLifetime
 
         foreach (var script in new[]
         {
-            "database/privileges/01-roles-and-schemas.sql",
+            "database/privileges/00-roles.sql",
+            "database/privileges/01-schemas.sql",
             "database/platform/migrations-all.sql",
             "database/core/migrations-all.sql",
         })

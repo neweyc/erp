@@ -7,10 +7,12 @@ migrations in each service, not the SQL here** — with one exception, below.
 
 ```
 privileges/
-  01-roles-and-schemas.sql   run ONCE, as superuser, BEFORE the first migration
-  02-grants.sql              run AFTER migrations, as superuser, idempotent
-  99-verify.sql              run anytime; ZERO ROWS means the boundary holds
-<schema>/                    per-migration and bootstrap scripts, generated
+  00-roles.sql      run FIRST, as superuser, idempotent; also before restoring a backup
+  01-schemas.sql    run ONCE, as superuser, BEFORE the first migration
+  02-grants.sql     run AFTER migrations, as superuser, idempotent
+  99-verify.sql     run anytime; ZERO ROWS means the boundary holds
+<schema>/           per-migration and bootstrap scripts, generated
+init-local.sh       all of the above, in order, against a fresh database
 ```
 
 ## The privilege scripts are hand-written, and that is deliberate
@@ -24,7 +26,7 @@ meant to constrain.
 ## Order matters, and getting it wrong fails silently
 
 `ALTER DEFAULT PRIVILEGES` applies only to objects created **after** it runs. Run
-`01-roles-and-schemas.sql` after the first migration and every table that migration
+`01-schemas.sql` after the first migration and every table that migration
 created is missing its grants — the application then fails with permission errors that
 look like a misconfigured connection string. `02-grants.sql` repairs exactly that case,
 which is why it exists at all.
@@ -32,12 +34,17 @@ which is why it exists at all.
 New database:
 
 ```
-psql -v ON_ERROR_STOP=1 -f privileges/01-roles-and-schemas.sql
+psql -v ON_ERROR_STOP=1 -f privileges/00-roles.sql
+psql -v ON_ERROR_STOP=1 -f privileges/01-schemas.sql
 # ... apply each service's migrations as its ap_<schema>_migrate role ...
 # ... apply published views and SECURITY DEFINER functions as ap_owner ...
 psql -v ON_ERROR_STOP=1 -f privileges/02-grants.sql
 psql -f privileges/99-verify.sql        # expect zero rows
 ```
+
+Roles are cluster-wide and live in their own script because a restore needs them without
+the schemas: the dump creates the schemas itself, and assigns every object to a role that must
+already exist. Restoring a backup is `ops/restore.sh`, not this sequence — see `ops/README.md`.
 
 Passwords are never in these files. Roles are created able to log in with no password
 set, so they cannot authenticate until one is issued out of band.

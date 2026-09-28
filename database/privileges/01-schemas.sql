@@ -1,54 +1,12 @@
--- App Platform — roles, schemas, and default privileges
--- Run ONCE against a new database, as a superuser, BEFORE any migration.
+-- App Platform — schemas and default privileges
+-- Run ONCE against a new database, as a superuser, AFTER 00-roles.sql and BEFORE any migration.
 --
 -- Ordering is not a style choice. Default privileges apply only to objects created
 -- AFTER they are set, so this must precede the first migration or every table it
 -- creates will be missing its grants. 02-grants.sql repairs an existing database;
 -- this file is what makes the repair unnecessary.
---
--- No passwords appear here and none ever should. Roles are created able to log in but
--- with no password set, which means they cannot authenticate at all until one is
--- issued out of band. A checked-in file with a password in it is a credential leak
--- with a git history.
 
 \set ON_ERROR_STOP on
-
--- ---------------------------------------------------------------------------
--- Roles
--- ---------------------------------------------------------------------------
-
--- Owns every object. No process ever connects as this role: it exists so that
--- published views and SECURITY DEFINER functions have an owner whose privileges
--- they execute with, and which no runtime role can impersonate.
-CREATE ROLE ap_owner NOLOGIN;
-
--- Runtime roles. One per deployable. None has DDL; an application bug cannot drop a
--- table and a compromised process cannot rewrite the schema.
-CREATE ROLE ap_platform_rt LOGIN;
-CREATE ROLE ap_core_rt     LOGIN;
-CREATE ROLE ap_tickets_rt  LOGIN;
-CREATE ROLE ap_ledger_rt   LOGIN;
-
--- Migration roles. DDL within one schema only.
-CREATE ROLE ap_platform_migrate LOGIN;
-CREATE ROLE ap_core_migrate     LOGIN;
-CREATE ROLE ap_tickets_migrate  LOGIN;
-CREATE ROLE ap_ledger_migrate   LOGIN;
-
--- ap_owner inherits from every migration role, and this is load-bearing rather than
--- tidiness.
---
--- A view executes with its OWNER's privileges — but a table is owned by whoever CREATED
--- it, which is the migration role, not ap_owner. Without this, core_v1.employee is owned
--- by ap_owner, granted to ap_tickets_rt, and still fails: the consumer's grant on the
--- view is fine, and the view's owner cannot read core.employee. The error names the
--- underlying table, so it reads as a missing grant on a table the consumer is not
--- supposed to have one on, and sends you looking in the wrong place entirely.
---
--- Membership rather than per-table grants because it covers every table a migration
--- creates later, automatically. Nothing connects as ap_owner, so this concentrates no
--- access in any role that can log in.
-GRANT ap_platform_migrate, ap_core_migrate, ap_tickets_migrate, ap_ledger_migrate TO ap_owner;
 
 -- ---------------------------------------------------------------------------
 -- Schemas

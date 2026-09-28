@@ -212,6 +212,7 @@ ERP will need again.
 
 | ID | Sev | Defect | Reproduction | Consequence |
 |---|---|---|---|---|
+| **D17** | Medium | An employee invitation can never be accepted. `InviteEmployeeFeature` creates an Invited user and stages an email whose payload has no token, and creates no `identity.user_token` row; `AcceptInviteFeature` accepts only a token. Only provisioning's tenant-admin invitation issues one. | `core.api/Features/Employees/InviteEmployeeFeature.cs`, the `AddMessage` payload `{"kind":"invite","userId":...}`; compare `ProvisionTenantFeature.cs` | Every invited employee is stuck as Invited, and re-inviting is refused (`EmployeeHasAccount`). Not caught because the e2e journey only accepts the tenant admin's invitation. Found in the Cycle 8 review. |
 | **D16** | Low | The `AddPeriodClose` backfill mints `books.public_id` as `bk_` + 25 hex characters of md5, not the pinned format (25 Crockford base32 characters carrying 125 random bits, `docs/integration.md` §2.1). | `database/ledger/20260925211934_AddPeriodClose.sql`, the backfill `INSERT … SELECT` | Hex is a subset of the Crockford alphabet, so the ids parse, but they carry about 100 bits and use only 16 of 32 symbols. Reaches only databases that already posted entries before the migration, and none is deployed. Fix before the first deployment (generate the body properly in SQL) or accept it in writing. |
 | **D15** | High — **fixed** | The session endpoint showed every tenant the name of whichever tenant was provisioned first. `TenantNameAsync` read `db.Tenants.FirstAsync()` with no id, and the tenant table has no query filter — it is what tenants are scoped *by*. | Tenant B's session on a core.api reports "E2E Ltd". Invisible with one tenant, which is why nothing caught it. | A cross-tenant disclosure on every dashboard load. Now takes the caller's tenant id explicitly; `AuthTests.The_session_names_the_callers_tenant_not_the_first_tenant` and the e2e cover it. `Tenant` is the only entity without the filter, and its other two reads are keyed. |
 | **D13** | High — **was failing CI on main** | `startDatabase` used `pg_isready -d appplatform` as its readiness check. `pg_isready` only reports that the server accepts connections; the postgres image runs a temporary init server before creating `POSTGRES_DB`, so readiness passed while the database did not exist. **Fixed** — readiness is now a real `SELECT 1` against the target database. | Reproduced: polling a fresh container showed `pg_isready=yes` while `SELECT 1` still failed, a ~0.4s window. CI run `36143741902` failed with `database "appplatform" does not exist` at `applyMigrations`. | The whole e2e job failed. It passed locally because a cached image wins the race, which is why it reached main — a flake class that only appears on a cold runner. |
@@ -219,7 +220,7 @@ ERP will need again.
 | **D14** | Medium | No operator UI. Provisioning a tenant and granting an entitlement are reachable only over HTTP — `platform.console/` exists as an empty directory. | `ls platform.console` | A1 cannot be "the whole journey in a browser" until an operator has one. Deliberate for this milestone: the customer-facing surface was the priority, and the operator paths are exercised over real HTTP with real sessions. |
 | **D10** | High — **fixed** (Cycle 6) | There was no append-only mechanism. | — | Built: `IAppendOnly`, refused in code and by grant, the two kept in step by `BoundaryTests`. See `docs/ledger.md`. |
 | **D11** | High — **fixed** (Cycle 5) | `packages/audit` did not exist. | — | Built: see Cycle 5 and `docs/audit.md`. Sign-in events are not audited (security log, not data history). |
-| **D7** | Low (was Medium) | The Playwright harness still applies migrations and connects as the `postgres` superuser. | `e2e/stack.mjs`, `applyMigrations` | Narrowed: `PrivilegeFixture` now applies the **shipped** scripts as `ap_owner` and every access test connects as a runtime role, so the privilege model IS exercised — just not by the browser harness. A grant regression fails `AccessMatrixTests` and `VerificationTests`. |
+| **D7** | Low (was Medium) | The Playwright harness's APIs connect as the `postgres` superuser. | `e2e/stack.mjs`, `connectionString` | Narrowed twice. `PrivilegeFixture` applies the **shipped** scripts as `ap_owner` and every access test connects as a runtime role. Since Cycle 8 the harness also builds its database with `database/init-local.sh` (roles, schemas, migrations as `ap_owner`, grants), so its ownership and grants match a deployment and the restore drill's `99-verify` is meaningful. What remains: the running APIs bypass grants, so a grant regression is caught by `AccessMatrixTests` and `VerificationTests`, not the browser. |
 | **D8** | Low | Outbox lease is taken per batch but sized for a single send. | `packages/outbox/OutboxBackoff.cs` — `LeaseDuration` 2 min vs `BatchSize` 20 | With more than one worker replica and a slow transport, the tail of a batch can outlive its lease and be re-delivered. Cannot bite today: one replica, instant local transport. |
 | **D9** | Low | No unit coverage for `accept-invite.tsx` or the new signed-out routing. | `shell.ui/src` | Four render branches and a problem-code map are exercised only through the browser journey. |
 | **D6** | Low | `EFAuthService.FindTokenAsync` uses `IgnoreQueryFilters`, so a token lookup is tenant-blind before the scope is entered. | Inspection, `core.api/Services/EFAuthService.cs` | Necessary — acceptance precedes any session — but it means token-hash uniqueness is the only thing preventing a cross-tenant match. Mitigated by a unique index on the hash and 256 bits of entropy. Recorded so it is a considered exception, not an oversight. |
@@ -237,7 +238,9 @@ ERP will need again.
   transport (SMTP/HTTP API) does not exist.
 - **Resend invitation.** If delivery dead-letters there is no way to reissue without SQL.
 - **MFA enforcement** for operators. Schema and evaluator gate exist; enrolment does not. M2.
-- **Backup, restore, key recovery.** M2, and gates the first real customer data.
+- **Backup and restore, Stage 2; key recovery.** Stage 1 (scripts and an automated drill) is
+  Cycle 8. What needs a hosting provider, and key custody (item 14), remain. Gates the first real
+  customer data.
 - **Multi-company** features. Column ships; no UI, no consolidation.
 - **Webhooks, public API, API keys.** Designed in `docs/integration.md`; the three irreversible
   decisions are built, the surface is not.
@@ -514,7 +517,7 @@ Decisions taken without asking, each reversible:
 
 **Fourth review (Codex): all three third-round fixes confirmed, no new findings. NO BLOCKING FINDINGS.**
 
-## Current cycle
+## Previous cycle
 
 **Cycle 6 — the thin financial slice (D10 and the ledger app). Accepted** — four Codex review rounds,
 the last with no blocking findings.
@@ -599,7 +602,7 @@ Decisions taken without asking, each reversible:
 **Fourth review (Codex): the fix confirmed; CTEs, INSERT … SELECT, multi-row VALUES, COPY and
 ON CONFLICT checked for further bypasses — none. NO BLOCKING FINDINGS.**
 
-## Current cycle
+## Previous cycle
 
 **Cycle 7 — the ledger as a proof of concept.** Chris: "use the ledger as a proof of concept", and
 pull the latest tonight — so the cycle ships in stages, each reviewed, committed and pushed on its own.
@@ -640,6 +643,87 @@ ahead of review while Codex was at its usage limit; the review then ran and its 
 
 Open from the closure: D16.
 
+## Current cycle
+
+**Cycle 8 — backup and restore, Stage 1 (M2 items 13 and 15).** Chris: build Stage 1 now; it does
+not depend on a hosting provider. **Complete. Independent review (Codex, three rounds) CLOSED: no
+blocking findings.** See *Review* below.
+
+Built:
+
+- `ops/backup.sh`: one `.tar.age` file holding a `pg_dump` (owners and grants kept), a per-table
+  row-count manifest, and `about.txt`. The dump and the manifest import **one exported snapshot**,
+  so the counts describe exactly the dumped data while the application keeps writing. Encrypted
+  with age to a public key, so the backup host cannot read its own backups. Leaves no file that
+  looks like a backup if it fails.
+- `ops/restore.sh`: refuses a non-empty target, decrypts, creates the roles, restores in one
+  transaction, revokes every session, compares row counts against the manifest, and runs
+  `99-verify.sql`. Any failure exits non-zero with "Do not use this database".
+- `ops/after-restore.sql`: revokes every user and operator session, inside the restore's own
+  transaction, so no committed copy ever has working restored sessions. Without it, a session
+  revoked after the backup point is live again on the restored copy.
+- `Outbox:DeliveryPaused` in core.api: the worker is not registered, and messages stay Pending.
+  Without it, the restored outbox re-sends everything already sent after the backup point.
+- `database/privileges/00-roles.sql` (idempotent), split out of `01-roles-and-schemas.sql`, which is
+  renamed to `01-schemas.sql`. A restore needs the roles without the schemas. Every consumer
+  (init-local, e2e, four test fixtures, README) runs 00 first.
+- `ops/Dockerfile` (postgres:16-alpine + age). The e2e databases run from it.
+- `ops/README.md`: usage, what a backup covers, the steps after the script, what is undecided.
+
+Evidence (measured):
+
+- `e2e/specs/restore.spec.mjs`, the last project in the Playwright run. It backs up the journey's
+  database while its APIs run, signs a session out AFTER the backup, restores into a second
+  container, and starts core, tickets and ledger against the copy. Checks: the signed-out
+  session is refused `session_revoked`; a fresh sign-in reads identical employees, tickets, accounts,
+  entries, trial balance and periods; an invitation staged with delivery paused is still
+  `Pending` after three poll intervals with nothing captured; a second restore over the now
+  populated database is refused. **21/21 Playwright pass.**
+- Each safeguard was broken on purpose, and the drill failed each time:
+  - revocation skipped → the old session comes back;
+  - delivery not paused → the message is `Succeeded`;
+  - `pg_restore --no-owner` → 99-verify reports `core_v1.company` and `core_v1.employee` owned by
+    `postgres`;
+  - a row deleted after the restore → the manifest diff names `core.outbox_message 2 → 1`.
+- By hand: restore into a second database on the SAME server (roles already present) passes;
+  database-level `CREATE` for `ap_owner` and the `public` schema's permissions match the source.
+- .NET: 554 tests pass, including 162 privilege tests, which now apply `00-roles.sql`.
+
+Not covered, deliberately: passwords, deactivations, role changes, accepted invitations, operator
+accounts and provisioning after the backup point return to their old state. No script can know
+them; `ops/README.md` gives the reconciliation steps. Large objects are refused by both scripts
+(the application has none). D16's backfill ids are unaffected.
+
+**Review.** Round 1: 1 blocking, 5 should-fix. Round 2: no blocking, 2 should-fix. Round 3: no
+blocking, 3 should-fix, fixed and checked by hand, not re-reviewed (small, local, verified).
+
+- *Blocking, disputed and accepted by the reviewer:* a restore makes a used invitation link valid
+  again until its original expiry. It was NOT fixed by expiring tokens. The restore also returns
+  the account to Invited with no password, and nothing can reissue an invitation, so expiring
+  them would lock the admin out with SQL as the only recovery. Documented in `after-restore.sql`
+  and the README, with the hand fix for a known-leaked link. Codex: accepted "for the current
+  issuers"; **revisit when password reset or reissue exists.**
+- *Fixed:*
+  - restore and session revocation in one transaction, with COMMIT sent only if pg_restore
+    succeeded, and a `DID NOT FINISH` warning if a changed target fails its checks;
+  - a stricter emptiness check (functions, types, extensions, large objects);
+  - backup names that cannot collide (per-run partial, hard-link publish);
+  - large objects refused at backup, inside the snapshot, and at restore, before the target is
+    touched (pg_restore would COMMIT them early);
+  - README reconciliation for operators and provisioning;
+  - the drill now proves a message restored as Pending is not sent.
+- *Checked by breaking each one:* pg_restore cut mid-stream, or failing after full output, leaves
+  0 app schemas; a function in `public` is refused; a taken name is refused with no partial file
+  left; a large object is refused by both scripts; unpaused delivery fails the new drill assertion
+  (`Succeeded`).
+- *Found on the way:* D17, employee invitations cannot be accepted (pre-existing).
+
+Final evidence: 21/21 Playwright, 554 .NET tests, shellcheck clean.
+
+Next: commit. Stage 2 needs a hosting provider: recovery targets,
+schedule, off-site copies, who holds the age identity (with item 14), and a timed drill against
+the managed database, including whether its admin role can assign ownership to `ap_owner`.
+
 ---
 
 ## Forward plan
@@ -658,7 +742,8 @@ against the upgraded schema are required here, even with coordinated releases.
     permanently. Where the key lives, who can retrieve it, and how recovery is rehearsed
     must be written down and tested before the key protects anything real. Key
     *rotation* can wait; key *recovery* cannot.
-15. Restore drill script and runbook.
+15. Restore drill script and runbook. *Stage 1 built in Cycle 8: scripts, an automated drill on
+    every CI run, and `ops/README.md`. Stage 2 (provider, timed real drill) outstanding.*
 16. **Mandatory operator MFA, enforced.** An operator reaches the control plane for every
     tenant, so an unprotected operator account is a larger exposure than most of this
     milestone. Enforcement belongs to the gate; enrolment polish and the recovery UX can
