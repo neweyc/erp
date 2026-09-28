@@ -57,6 +57,12 @@ describe('money', () => {
     expect(toMinor(text)).toBeNull()
   })
 
+  it('refuses an amount too large to represent exactly, rather than round it', () => {
+    // 15 whole digits + 2 decimal places is 17 significant digits, past Number.MAX_SAFE_INTEGER
+    // (16 digits) — Number('123456789012345.67') would silently return one cent off.
+    expect(toMinor('123456789012345.67')).toBeNull()
+  })
+
   it.each([[1250, '12.50'], [-1250, '-12.50'], [5, '0.05'], [1234567, '12,345.67'], [0, '0.00']])(
     'shows %i minor units as %s', (minor, text) => expect(fromMinor(minor)).toBe(text))
 })

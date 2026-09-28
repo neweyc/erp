@@ -615,6 +615,17 @@ END $EF$;
 DO $EF$
 BEGIN
     IF NOT EXISTS(SELECT 1 FROM ledger.__ef_migrations_history WHERE "migration_id" = '20260925211934_AddPeriodClose') THEN
+    INSERT INTO ledger.books (id, tenant_id, company_id, public_id, closed_through, version)
+    SELECT gen_random_uuid(), je.tenant_id, je.company_id,
+           'bk_' || substr(md5(gen_random_uuid()::text || je.tenant_id || '_' || je.company_id), 1, 25),
+           NULL, 1
+    FROM (SELECT DISTINCT tenant_id, company_id FROM ledger.journal_entry) je;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM ledger.__ef_migrations_history WHERE "migration_id" = '20260925211934_AddPeriodClose') THEN
     ALTER TABLE ledger.journal_entry ADD CONSTRAINT fk_journal_entry_books_tenant_id_company_id FOREIGN KEY (tenant_id, company_id) REFERENCES ledger.books (tenant_id, company_id) ON DELETE RESTRICT;
     END IF;
 END $EF$;

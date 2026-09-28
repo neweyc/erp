@@ -23,9 +23,14 @@ export function toMinor(text: string): number | null {
 
   const whole = match[1]!
   const fraction = (match[2] ?? '').padEnd(DECIMAL_PLACES, '0')
-  const minor = Number(whole + fraction)
+  // BigInt keeps every digit exact; only the final range check below touches Number, so a value
+  // too large to represent exactly is refused rather than silently rounded (12345678901234567 would
+  // otherwise become 12345678901234568 with no error, one cent wrong).
+  const minor = BigInt(whole + fraction)
 
-  return minor > 0 ? minor : null
+  if (minor <= 0n || minor > BigInt(Number.MAX_SAFE_INTEGER)) return null
+
+  return Number(minor)
 }
 
 /** 1250 → "12.50", -1250 → "-12.50", 1234567 → "12,345.67". */

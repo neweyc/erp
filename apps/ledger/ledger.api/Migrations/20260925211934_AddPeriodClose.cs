@@ -42,6 +42,18 @@ namespace AppPlatform.Ledger.Migrations
                 table: "books",
                 column: "tenant_id");
 
+            // Backfill: books did not exist before this migration, but journal_entry did (Cycle 6
+            // shipped posting first). The FK below validates against every existing row, so a
+            // (tenant_id, company_id) that already posted needs a books row before the FK is added,
+            // or this migration fails the moment it meets a database that isn't freshly created.
+            migrationBuilder.Sql("""
+                INSERT INTO ledger.books (id, tenant_id, company_id, public_id, closed_through, version)
+                SELECT gen_random_uuid(), je.tenant_id, je.company_id,
+                       'bk_' || substr(md5(gen_random_uuid()::text || je.tenant_id || '_' || je.company_id), 1, 25),
+                       NULL, 1
+                FROM (SELECT DISTINCT tenant_id, company_id FROM ledger.journal_entry) je;
+                """);
+
             migrationBuilder.AddForeignKey(
                 name: "fk_journal_entry_books_tenant_id_company_id",
                 schema: "ledger",
