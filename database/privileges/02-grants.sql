@@ -176,6 +176,27 @@ REVOKE EXECUTE ON FUNCTION identity_v1.touch_session(uuid) FROM PUBLIC;
 GRANT  EXECUTE ON FUNCTION identity_v1.touch_session(uuid) TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 
 -- ---------------------------------------------------------------------------
+-- The operator error feed
+-- ---------------------------------------------------------------------------
+-- Every service reports its errors through platform_v1.record_error, which checks each value's
+-- shape and stores metadata only. EXECUTE on the function is ALL a customer role gets: no grant on
+-- platform.error_occurrence, so it can add to the feed but never read it. The feed shows which
+-- tenants are failing, which is not one tenant's services' business. Skipped if the platform's
+-- migration has not created the function yet.
+
+GRANT USAGE ON SCHEMA platform_v1 TO ap_platform_rt, ap_core_rt, ap_tickets_rt, ap_ledger_rt;
+
+DO $$
+BEGIN
+  IF to_regprocedure('platform_v1.record_error(text, text, text, integer, integer, timestamp with time zone)') IS NOT NULL THEN
+    REVOKE EXECUTE ON FUNCTION platform_v1.record_error(text, text, text, int, int, timestamptz) FROM PUBLIC;
+    GRANT  EXECUTE ON FUNCTION platform_v1.record_error(text, text, text, int, int, timestamptz)
+      TO ap_platform_rt, ap_core_rt, ap_tickets_rt, ap_ledger_rt;
+  END IF;
+END
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Explicit negatives
 -- ---------------------------------------------------------------------------
 -- Stated rather than assumed. A REVOKE of a privilege that was never granted is a

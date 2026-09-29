@@ -28,6 +28,14 @@ public class VerificationTests(PrivilegeFixture fixture)
     [InlineData("CREATE FUNCTION core_v1.bad_fn() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'",
                 "DROP FUNCTION core_v1.bad_fn()")]
     [InlineData("CREATE VIEW core_v1.misowned AS SELECT 1 AS x", "DROP VIEW core_v1.misowned")]
+    // A published FUNCTION owned by anyone but ap_owner (here the superuser running this test). Not
+    // SECURITY DEFINER and with a pinned search_path, so ownership is the only rule it breaks.
+    [InlineData("CREATE FUNCTION core_v1.misowned_fn() RETURNS int LANGUAGE sql SET search_path = pg_catalog AS 'SELECT 1'",
+                "DROP FUNCTION core_v1.misowned_fn()")]
+    [InlineData("CREATE FUNCTION identity_v1.misowned_fn() RETURNS int LANGUAGE sql SET search_path = pg_catalog AS 'SELECT 1'",
+                "DROP FUNCTION identity_v1.misowned_fn()")]
+    [InlineData("CREATE FUNCTION platform_v1.misowned_fn() RETURNS int LANGUAGE sql SET search_path = pg_catalog AS 'SELECT 1'",
+                "DROP FUNCTION platform_v1.misowned_fn()")]
     [InlineData("GRANT EXECUTE ON FUNCTION identity_v1.session_context(uuid) TO ap_platform_rt",
                 "REVOKE EXECUTE ON FUNCTION identity_v1.session_context(uuid) FROM ap_platform_rt")]
     [InlineData("ALTER ROLE ap_tickets_rt SUPERUSER", "ALTER ROLE ap_tickets_rt NOSUPERUSER")]

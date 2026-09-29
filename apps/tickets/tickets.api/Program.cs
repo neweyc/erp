@@ -2,6 +2,7 @@ using System.Reflection;
 using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Entitlements;
+using AppPlatform.ErrorFeed;
 using AppPlatform.Outbox;
 using AppPlatform.Tickets.Data;
 using AppPlatform.Tickets.Services;
@@ -26,6 +27,9 @@ builder.Services.AddSingleton(NpgsqlDataSource.Create(connection));
 builder.Services.AddAppPlatformAuth(
     SessionCookie.Tenant, builder.Configuration["DataProtection:KeyPath"]);
 builder.Services.AddAuthorization();
+
+// Error-level occurrences go to the operator feed as metadata only; see packages/errorfeed.
+builder.Services.AddErrorFeed(app: "tickets", connection);
 builder.Services.AddScoped<ISessionStore, NpgsqlSessionStore>();
 
 builder.Services.AddScoped<ITicketService, EFTicketService>();
@@ -34,6 +38,9 @@ builder.Services.AddScoped<IOutbox>(sp => new Outbox(
     sp.GetRequiredService<TicketsDbContext>(), sp.GetRequiredService<TimeProvider>()));
 
 var app = builder.Build();
+
+// First, so an unhandled exception anywhere below becomes a 500 with a reference, not a raw page.
+app.UseErrorFeed();
 
 app.UseAppPlatformAuth();
 // After authentication, so there is a caller whose licensed apps can be read; before

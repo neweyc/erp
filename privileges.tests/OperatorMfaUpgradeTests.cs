@@ -20,6 +20,7 @@ namespace AppPlatform.PrivilegeTests;
 public sealed class OperatorMfaUpgradeTests : IAsyncLifetime
 {
     private const string BeforeMfa = "20260925015103_AddTenantProvisioningKey";
+    private const string MandatoryMfa = "20260929182954_AddDataKeysAndOperatorTotp";
 
     private readonly Testcontainers.PostgreSql.PostgreSqlContainer _container =
         new Testcontainers.PostgreSql.PostgreSqlBuilder("postgres:16-alpine").WithDatabase("appplatform").Build();
@@ -55,7 +56,9 @@ public sealed class OperatorMfaUpgradeTests : IAsyncLifetime
             await command.ExecuteNonQueryAsync();
         }
 
-        await migrator.MigrateAsync();
+        // To THIS migration, not the latest: later ones grant to runtime roles, which this bare
+        // container (no privilege scripts) does not have, and they are not what is under test.
+        await migrator.MigrateAsync(MandatoryMfa);
 
         var session = await db.PlatformSessions.AsNoTracking().SingleAsync(s => s.Id == sessionId);
         Assert.NotNull(session.RevokedAt);

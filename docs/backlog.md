@@ -647,6 +647,49 @@ Open from the closure: D16.
 
 ## Current cycle
 
+**Cycle 11 — the operator error feed (M2 item 17).** Chris: "build the operator feed". Shape as
+`platform.api/CLAUDE.md` fixed it: metadata only, bounded, rate-limited per fingerprint, never
+blocking, throwing or recursing. **Complete. Independent review (Codex, two rounds) CLOSED: no
+blocking findings.**
+
+- `packages/errorfeed`: a logger provider forwarding Error+ entries from anywhere in the process
+  (requests, the outbox worker); a fingerprint of the exception's type and top frames, or the
+  message TEMPLATE, never the message; a bounded queue (1000, drop when full) with a
+  per-fingerprint budget (10/min, the rest counted into the next row); a writer calling the
+  platform. A middleware, first in every pipeline, turns an unhandled exception into 500
+  `internal_error` with an `err_…` reference, logging the detail locally under it.
+- `platform.error_occurrence` (migration `AddErrorFeed`, for the migration role) and
+  `platform_v1.record_error` (`AddErrorFeedPublishedFunction`, applied as `ap_owner`; per-migration
+  and full SQL scripts): SECURITY DEFINER, every column allowlisted by shape, no foreign key to
+  tenant. Customer roles get EXECUTE only;
+  no grant on the table, so they can add but not read. Recorded in
+  `docs/database-privileges.md` as the second deliberate crossing of the boundary.
+- `99-verify.sql` now also reports a published FUNCTION not owned by `ap_owner` (a SECURITY
+  DEFINER function owned by a superuser runs as one).
+- platform.api: `GET /api/platform/v1/errors` (operators; limit clamped 1–500), hourly pruning after
+  30 days. core, tickets, ledger and platform all report.
+- Evidence: 15 package tests (fingerprints ignore messages, the budget folds suppressed counts,
+  the queue drops rather than blocks, the logger never reads the rendered message or its own
+  writer, the middleware returns no exception text); real-Postgres tests (every role can call the
+  function, no customer role can read or insert the table, malformed values refused, and the whole
+  path from a throwing endpoint in a host connected as `ap_tickets_rt` to a feed row under the
+  customer's reference); e2e `error-feed.spec.mjs` (operator reads it, anonymous refused). With the
+  function's checks disabled, all five refusal tests fail. 662 .NET tests, 29/29 Playwright.
+- **Review.** Round 1: 1 blocking. The migration mixed the table (the migration role's) with the
+  published function (`ap_owner`'s), so the documented runbook would have failed: split in two,
+  and `database/README.md` now lists every migration applied as `ap_owner`; a runbook test applies
+  them with those roles on a fresh database. Should-fix, all done: a reference generated for a
+  background error is written to the local log too (a correlation warning); held-back counts are
+  kept per tenant; counts saturate at the function's maximum instead of being refused; a full
+  budget table evicts finished budgets rather than resetting live ones; the tenant foreign key is
+  gone (it let a service probe which tenant ids exist); the new ownership check has isolated tests.
+  Round 2: no blocking findings.
+- Final: 21 package tests, 673 .NET tests, 29/29 Playwright (the e2e seeds a known occurrence and
+  checks that exact row).
+- Not done: a console UI (D14); searching by reference is by listing, not a lookup route.
+
+## Previous cycle
+
 **Cycle 10 — envelope encryption and mandatory operator MFA (M2 items 14 and 16).** Chris decided
 envelope encryption with a data key per tenant, and deferred where production keys live.
 **Complete. Independent review (Codex, three rounds) CLOSED: no blocking findings.**
@@ -828,7 +871,8 @@ against the upgraded schema are required here, even with coordinated releases.
     tenant, so an unprotected operator account is a larger exposure than most of this
     milestone. Enforcement belongs to the gate; enrolment polish and the recovery UX can
     wait for M3. *Enforced: Cycle 10.*
-17. Per-project audit logging and the operator error feed (metadata only).
+17. Per-project audit logging and the operator error feed (metadata only). *Audit: Cycle 5. Error
+    feed: Cycle 11.*
 18. Rate limiting on anonymous auth endpoints and uploads. *Anonymous endpoints: built (see
     Cycle 9 below and `docs/auth-and-access.md` §3a). Per-account limiting and uploads (not
     built) remain.*

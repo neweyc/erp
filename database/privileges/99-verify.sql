@@ -8,7 +8,7 @@
 \set ON_ERROR_STOP on
 
 WITH
-published_schemas AS (SELECT unnest(ARRAY['core_v1','identity_v1']) AS nspname),
+published_schemas AS (SELECT unnest(ARRAY['core_v1','identity_v1','platform_v1']) AS nspname),
 owned_schemas     AS (SELECT unnest(ARRAY['platform','core','identity','tickets','ledger']) AS nspname),
 runtime_roles     AS (SELECT unnest(ARRAY['ap_platform_rt','ap_core_rt','ap_tickets_rt','ap_ledger_rt']) AS rolname),
 
@@ -45,6 +45,17 @@ misowned_views AS (
   JOIN pg_namespace n ON n.oid = c.relnamespace
   JOIN published_schemas p ON p.nspname = n.nspname
   WHERE c.relkind = 'v' AND pg_get_userbyid(c.relowner) <> 'ap_owner'
+),
+
+-- 3a. The same for published FUNCTIONS, and more so: a SECURITY DEFINER function runs as its owner,
+--     so one owned by a superuser (migrations applied as postgres) runs everything it does as one.
+misowned_functions AS (
+  SELECT 'published function not owned by ap_owner',
+         format('%s.%s owned by %s', n.nspname, p.proname, pg_get_userbyid(p.proowner))
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  JOIN published_schemas ps ON ps.nspname = n.nspname
+  WHERE pg_get_userbyid(p.proowner) <> 'ap_owner'
 ),
 
 -- 4. A SECURITY DEFINER function without a pinned search_path lets a caller who can
@@ -185,6 +196,7 @@ counter_removable AS (
 SELECT * FROM invoker_views
 UNION ALL SELECT * FROM tables_in_published
 UNION ALL SELECT * FROM misowned_views
+UNION ALL SELECT * FROM misowned_functions
 UNION ALL SELECT * FROM unpinned_definers
 UNION ALL SELECT * FROM superuser_roles
 UNION ALL SELECT * FROM runtime_with_create

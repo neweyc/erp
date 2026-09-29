@@ -23,6 +23,9 @@ CREATE SCHEMA ledger      AUTHORIZATION ap_owner;
 -- core_v1.employee while holding no grant whatsoever on core.employee.
 CREATE SCHEMA core_v1     AUTHORIZATION ap_owner;
 CREATE SCHEMA identity_v1 AUTHORIZATION ap_owner;
+-- The platform's published contract: one function, platform_v1.record_error, through which every
+-- service adds to the operator error feed without being able to read it.
+CREATE SCHEMA platform_v1 AUTHORIZATION ap_owner;
 
 -- PostgreSQL grants CREATE on `public` to PUBLIC in older versions and USAGE in all of
 -- them. A table that lands there sits outside every grant below, so the boundary
@@ -58,6 +61,7 @@ GRANT USAGE ON SCHEMA tickets     TO ap_tickets_rt;
 GRANT USAGE ON SCHEMA ledger      TO ap_ledger_rt;
 GRANT USAGE ON SCHEMA core_v1     TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 GRANT USAGE ON SCHEMA identity_v1 TO ap_core_rt, ap_tickets_rt, ap_ledger_rt;
+GRANT USAGE ON SCHEMA platform_v1 TO ap_platform_rt, ap_core_rt, ap_tickets_rt, ap_ledger_rt;
 
 -- The provisioning exception needs TWO grants, and the table-level one in 02-grants.sql
 -- is inert without this. A GRANT on platform.tenant does nothing while the role cannot

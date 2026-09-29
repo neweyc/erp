@@ -73,3 +73,20 @@ public class PlatformAuditLog
     public string? Detail { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
+
+/// <summary>
+/// One row of the operator error feed: metadata about an Error-level occurrence in any service,
+/// and deliberately nothing else (packages/errorfeed's ErrorOccurrence says why there is no message
+/// or stack trace). Written only through platform_v1.record_error, which checks every value's shape;
+/// read only by operators. Pruned after <see cref="Services.ErrorFeedPruner.Retention"/>.
+/// </summary>
+public class ErrorFeedEntry
+{
+    public long Id { get; set; }
+    public required string Reference { get; set; }
+    public required string Fingerprint { get; set; }
+    public required string App { get; set; }
+    public int? TenantId { get; set; }
+    public int Count { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}

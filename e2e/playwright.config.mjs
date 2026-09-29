@@ -84,6 +84,9 @@ export default defineConfig({
     // M2 item 16: operator sign-in needs a current authenticator code. After `license`, whose
     // saved operator session the other specs reuse, so its own sign-ins cannot use their codes up.
     { name: 'operator-mfa', testMatch: /operator-mfa\.spec\.mjs/, dependencies: ['license'] },
+    // M2 item 17: the operator error feed, served to operators only. Reuses the saved operator
+    // session, so after `license`.
+    { name: 'error-feed', testMatch: /error-feed\.spec\.mjs/, dependencies: ['license'] },
     // Exhausts the anonymous rate limit on the tenant-B sign-in core (5103), so it runs after
     // the only spec that signs in there. Nothing depends on it.
     { name: 'rate-limit', testMatch: /rate-limit\.spec\.mjs/, dependencies: ['isolation'] },

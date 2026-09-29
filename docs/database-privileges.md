@@ -86,6 +86,31 @@ It is split by **operation**, and the split carries a meaning worth keeping:
 - The grant is on `platform.tenant` **only**, never `platform`. No entitlement row,
   billing record, operator account, or audit entry is reachable from core.
 
+### The error feed: write-only, through one function
+
+The second deliberate crossing, in the other direction (Cycle 11). Every service reports its
+Error-level occurrences to the operator feed in `platform.error_occurrence`, so each customer
+runtime role must be able to add to a platform table. It is given the narrowest form of that:
+
+- **EXECUTE on `platform_v1.record_error(...)`, and nothing else.** No grant on the table: a
+  customer service can add to the feed and can **not read it**. The feed shows which tenants are
+  failing, which is not one tenant's services' business.
+- The function is `SECURITY DEFINER`, owned by `ap_owner`, with a pinned `search_path` (the
+  hygiene below), and it **allowlists every column by shape**: a reference `err_` + 25 characters,
+  a 16-hex fingerprint, an app name of 2–20 lowercase characters, a count from 1 to 100000, a time
+  within a day. Anything else is refused, not stored. Free text is where customer data would get
+  in, and the feed is metadata only.
+- The tenant id is what the reporting service said: untrusted metadata. There is deliberately **no
+  foreign key** to `platform.tenant`, because a key would let any service learn which tenant ids
+  exist by watching which reports fail. A service can therefore attribute an occurrence to any id,
+  or add noise to the feed: operator inconvenience, not disclosure. The per-fingerprint rate limit
+  in `packages/errorfeed` bounds an honest service; a compromised one is bounded by the table's
+  pruning.
+- Two migrations, applied by different roles: `AddErrorFeed` (the table) as `ap_platform_migrate`,
+  `AddErrorFeedPublishedFunction` as `ap_owner` (database/README.md lists every such migration).
+- Proved in `privileges.tests/ErrorFeedTests.cs`: each role can call it; no customer role can
+  SELECT or INSERT the table; malformed values are refused.
+
 ## Keyed lookups use functions, not views
 
 Views are right where a consumer needs to **join, filter, and page** — that is why

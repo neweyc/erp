@@ -3,6 +3,7 @@ using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
 using AppPlatform.Core.Services;
+using AppPlatform.ErrorFeed;
 using AppPlatform.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -40,6 +41,9 @@ builder.Services.AddDbContext<CoreDbContext>(options => options
 builder.Services.AddAppPlatformAuth(
     SessionCookie.Tenant, builder.Configuration["DataProtection:KeyPath"]);
 builder.Services.AddAuthorization();
+
+// Error-level occurrences go to the operator feed as metadata only; see packages/errorfeed.
+builder.Services.AddErrorFeed(app: "core", connection);
 
 // Sign-in and invitation acceptance are callable without an account, so they are where guessing
 // happens. Limited per client address; see AnonymousRateLimiting for why the proxy list matters.
@@ -96,6 +100,9 @@ if (!deliveryPaused)
 }
 
 var app = builder.Build();
+
+// First, so an unhandled exception anywhere below becomes a 500 with a reference, not a raw page.
+app.UseErrorFeed();
 
 if (deliveryPaused)
 {

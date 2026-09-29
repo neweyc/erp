@@ -17,6 +17,7 @@
   <ItemGroup>
     <!-- No reference to core.api. The ledger reads companies through the PUBLISHED VIEW, and
          the Postgres grants make that true even for code that is not in this repo. -->
+    <ProjectReference Include="../../../packages/errorfeed/AppPlatform.ErrorFeed.csproj" />
     <ProjectReference Include="../../../packages/api/AppPlatform.Api.csproj" />
     <ProjectReference Include="../../../packages/audit/AppPlatform.Audit.csproj" />
     <ProjectReference Include="../../../packages/entitlements/AppPlatform.Entitlements.csproj" />

@@ -42,6 +42,21 @@ psql -v ON_ERROR_STOP=1 -f privileges/02-grants.sql
 psql -f privileges/99-verify.sql        # expect zero rows
 ```
 
+**Which migrations are applied as `ap_owner`.** Those that create a published object (a view or
+function in a `*_v1` schema) or a SECURITY DEFINER function, because such an object runs with its
+owner's rights and 99-verify reports it if that owner is not `ap_owner`:
+
+| Service | Migration | Why |
+|---|---|---|
+| core | `AddCoreV1Views` | the `core_v1` views |
+| core | `AddSessionsAndIdentityV1` | `identity_v1` functions (it also creates the session table, so the whole migration runs as `ap_owner`) |
+| platform | `AddErrorFeedPublishedFunction` | `platform_v1.record_error`; kept separate from `AddErrorFeed`, the table |
+
+Every other migration is applied as its service's `ap_<schema>_migrate` role. A new migration that
+creates a published object belongs in this table and, preferably, in a migration of its own.
+`init-local.sh` and the test fixtures apply everything as `ap_owner`, which is why only this runbook
+can go wrong here: follow the table.
+
 Roles are cluster-wide and live in their own script because a restore needs them without
 the schemas: the dump creates the schemas itself, and assigns every object to a role that must
 already exist. Restoring a backup is `ops/restore.sh`, not this sequence — see `ops/README.md`.

@@ -42,7 +42,9 @@ Widening any of this is a design decision with a written record, never a conveni
   timestamp, fingerprint, app, tenant, count, a server-generated reference. There is no
   message or stack-trace column **by design**; do not add one without a new decision
   record. The sink is bounded, allowlisted per column, rate-limited per fingerprint, and
-  never blocks, throws, or recurses.
+  never blocks, throws, or recurses. Built in Cycle 11: `packages/errorfeed` in every service,
+  `platform_v1.record_error` as the only way in, `GET /api/platform/v1/errors` for operators, and
+  pruning after 30 days.
 - **Operator audit**: every operator action, in `platform.audit_log`, separate from
   tenant audit. Mutations audit explicitly and usually **staged**, so the action and its
   trail commit together. Post-commit audits are best-effort — a committed change is never

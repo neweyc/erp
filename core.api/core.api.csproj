@@ -15,6 +15,7 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../packages/errorfeed/AppPlatform.ErrorFeed.csproj" />
     <ProjectReference Include="../packages/api/AppPlatform.Api.csproj" />
     <ProjectReference Include="../packages/audit/AppPlatform.Audit.csproj" />
     <ProjectReference Include="../packages/ids/AppPlatform.Ids.csproj" />

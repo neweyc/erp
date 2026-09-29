@@ -2,6 +2,7 @@ using System.Reflection;
 using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Encryption;
+using AppPlatform.ErrorFeed;
 using AppPlatform.Platform.Auth;
 using AppPlatform.Platform.Data;
 using AppPlatform.Platform.Features.Auth;
@@ -60,6 +61,11 @@ builder.Services.AddScoped<IOperatorSessionStore, EFOperatorSessionStore>();
 builder.Services.AddScoped<ITenantAuditWriter, EFTenantAuditWriter>();
 builder.Services.AddScoped<ITenantService, EFTenantService>();
 builder.Services.AddScoped<IIdempotencyService, EFIdempotencyService>();
+builder.Services.AddScoped<IErrorFeedService, EFErrorFeedService>();
+
+// The platform reports into its own feed like every other service, and keeps it bounded.
+builder.Services.AddErrorFeed(app: "platform", connection);
+builder.Services.AddHostedService<ErrorFeedPruner>();
 
 var internalKey = builder.Configuration["Internal:ApiKey"]
     ?? throw new InvalidOperationException(
@@ -72,6 +78,8 @@ builder.Services.AddHttpClient<IProvisioningClient, HttpProvisioningClient>(clie
 
 var app = builder.Build();
 
+// First, so an unhandled exception anywhere below becomes a 500 with a reference, not a raw page.
+app.UseErrorFeed();
 app.UseAnonymousRateLimiting();
 app.UseAuthentication();
 // The operator middleware, not the tenant one: operators have their own tables, cookie and

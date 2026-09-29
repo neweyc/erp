@@ -34,6 +34,7 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
     public DbSet<PlatformUser> PlatformUsers => Set<PlatformUser>();
     public DbSet<PlatformSession> PlatformSessions => Set<PlatformSession>();
     public DbSet<PlatformAuditLog> AuditLogs => Set<PlatformAuditLog>();
+    public DbSet<ErrorFeedEntry> ErrorFeed => Set<ErrorFeedEntry>();
 
     /// <summary>
     /// Refuses to modify or delete an append-only row (a data key), in code as well as by grant.
@@ -134,6 +135,24 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
             e.Property(x => x.TenantPublicId).HasMaxLength(40);
             e.Property(x => x.Detail).HasMaxLength(1000);
             e.HasIndex(x => x.CreatedAt);
+        });
+
+        modelBuilder.Entity<ErrorFeedEntry>(e =>
+        {
+            e.ToTable("error_occurrence", Schema);
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Reference).HasMaxLength(40);
+            e.Property(x => x.Fingerprint).HasMaxLength(16);
+            e.Property(x => x.App).HasMaxLength(20);
+
+            // The feed is read newest first, and pruned by age.
+            e.HasIndex(x => x.OccurredAt);
+            // A customer quotes a reference; support looks it up.
+            e.HasIndex(x => x.Reference).IsUnique();
+            // Deliberately NOT a foreign key to tenant. The tenant here is what the reporting service
+            // said, untrusted metadata; and a key would let any service probe which tenant ids exist
+            // by watching which reports fail.
+            e.HasIndex(x => x.TenantId);
         });
 
         base.OnModelCreating(modelBuilder);

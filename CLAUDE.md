@@ -393,6 +393,13 @@ You have now written these twice (redshift -> EMS). A third copy is the bad outc
   queryable fields plaintext. Where production KEKs live and how they are recovered is deferred
   (`docs/open-questions.md`) and gates the first customer deployment.
 
+- `packages/errorfeed` — every service's Error-level log entries and unhandled request exceptions
+  go to the operator feed as **metadata only** (reference, fingerprint, app, tenant, count, time),
+  through `platform_v1.record_error`, the one function customer roles may EXECUTE on the platform
+  schema (`docs/database-privileges.md`). An unhandled exception becomes a 500 `internal_error` with
+  a reference the customer can quote; the detail stays in that service's own log. Bounded,
+  rate-limited per fingerprint, never blocks or throws. `app.UseErrorFeed()` goes FIRST.
+
 **Not built.** Declared here because the shape is decided, not because it exists. Do not write
 code that assumes one of these is available — check first.
 

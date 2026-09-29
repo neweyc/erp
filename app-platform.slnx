@@ -27,6 +27,8 @@
   <Project Path="privileges.tests/privileges.tests.csproj" />
   <Project Path="packages/encryption/AppPlatform.Encryption.csproj" />
   <Project Path="packages/encryption.tests/AppPlatform.Encryption.Tests.csproj" />
+  <Project Path="packages/errorfeed/AppPlatform.ErrorFeed.csproj" />
+  <Project Path="packages/errorfeed.tests/AppPlatform.ErrorFeed.Tests.csproj" />
   <Project Path="packages/entitlements/AppPlatform.Entitlements.csproj" />
   <Project Path="packages/entitlements.tests/AppPlatform.Entitlements.Tests.csproj" />
   <Project Path="packages/ids/AppPlatform.Ids.csproj" />

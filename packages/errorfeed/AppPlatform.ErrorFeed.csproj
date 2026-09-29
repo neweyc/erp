@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AppPlatform.ErrorFeed</RootNamespace>
+    <Description>Mirrors Error-level occurrences to the operator error feed as metadata only.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ids/AppPlatform.Ids.csproj" />
+    <ProjectReference Include="../tenancy/AppPlatform.Tenancy.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AppPlatform.ErrorFeed.Tests" />
+  </ItemGroup>
+
+</Project>

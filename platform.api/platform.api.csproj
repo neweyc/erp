@@ -21,5 +21,6 @@
     <ProjectReference Include="../packages/api/AppPlatform.Api.csproj" />
     <ProjectReference Include="../packages/ids/AppPlatform.Ids.csproj" />
     <ProjectReference Include="../packages/encryption/AppPlatform.Encryption.csproj" />
+    <ProjectReference Include="../packages/errorfeed/AppPlatform.ErrorFeed.csproj" />
   </ItemGroup>
 </Project>
