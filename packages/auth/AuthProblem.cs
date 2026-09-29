@@ -26,4 +26,7 @@ public static class AuthProblem
 
     /// <summary>403. Missing or mismatched CSRF token on an unsafe method.</summary>
     public const string CsrfFailed = "csrf_failed";
+
+    /// <summary>429. Too many requests to anonymous endpoints from one address; see Retry-After.</summary>
+    public const string RateLimited = "rate_limited";
 }

@@ -41,6 +41,10 @@ builder.Services.AddAppPlatformAuth(
     SessionCookie.Tenant, builder.Configuration["DataProtection:KeyPath"]);
 builder.Services.AddAuthorization();
 
+// Sign-in and invitation acceptance are callable without an account, so they are where guessing
+// happens. Limited per client address; see AnonymousRateLimiting for why the proxy list matters.
+builder.Services.AddAnonymousRateLimiting(builder.Configuration, builder.Environment);
+
 // Registered, not newed up per scope: a data source owns a connection pool, and creating one
 // per request leaks pools until the process dies. DI also disposes it on shutdown.
 // A singleton the container OWNS, so it is disposed on shutdown. A data source holds a
@@ -103,6 +107,7 @@ if (deliveryPaused)
 // Never migrate on startup. Schema changes are applied by hand, as the migration role, so a
 // deploy cannot silently alter a shared database — and so the runtime role can keep having no
 // DDL at all.
+app.UseAnonymousRateLimiting();
 app.UseAppPlatformAuth();
 app.UseAuthorization();
 app.MapEndpoints(Assembly.GetExecutingAssembly());

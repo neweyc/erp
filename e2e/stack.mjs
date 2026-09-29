@@ -185,7 +185,9 @@ export function copyIntoContainer(container, repoRelativeDirectory) {
 export function applyMigrations() {
   copyIntoContainer(CONTAINER, 'database')
   execFileSync('docker', [
+    // Notices silenced: re-granted memberships each print one, which reads as a problem.
     'exec', '-e', 'PGUSER=postgres', '-e', 'PGDATABASE=appplatform',
+    '-e', 'PGOPTIONS=-c client_min_messages=warning',
     CONTAINER, 'bash', '/repo/database/init-local.sh',
   ], { stdio: ['ignore', 'ignore', 'inherit'] })
 }
@@ -273,6 +275,10 @@ export function apiEnvironment({ connection, tenantPublicId, capturePath }) {
     // no transport configured the worker dead-letters every message, and the journey fails with a
     // clear reason rather than hanging.
     Email__CapturePath: capturePath,
+    // Every request in this suite comes from one local address, so the production default (10 a
+    // minute per address, on anonymous endpoints) would refuse the suite's own sign-ins. The
+    // limit itself is proved by rate-limit.spec.mjs against a core.api that keeps a real one.
+    RateLimits__AnonymousPerMinute: '1000',
     ASPNETCORE_ENVIRONMENT: 'Development',
   }
 }

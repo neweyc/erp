@@ -646,6 +646,32 @@ Open from the closure: D16.
 
 ## Current cycle
 
+**Cycle 9 — rate limiting anonymous endpoints (M2 item 18).** Chosen as the one unblocked M2 item.
+Operator MFA (16) needs `packages/encryption` and the key-custody decision (14) first. **Complete.
+Independent review (Codex, two rounds) CLOSED: no blocking findings.**
+
+- `packages/auth/AnonymousRateLimiting.cs`: a global limiter that applies to any endpoint with
+  `IAllowAnonymous` metadata. Fixed window per client address, default 10/min, refused with 429
+  `rate_limited` and `Retry-After`. IPv6 is grouped by /64 and IPv4-mapped addresses as IPv4.
+  `X-Forwarded-For` is believed only from `ForwardedHeaders:TrustedProxies`, one hop deep; with
+  none configured it is not processed at all. Production refuses to start without a trusted
+  proxy; a limit below 1 is refused at startup.
+- Wired into core.api and platform.api ahead of authentication.
+- Evidence: 15 host-level tests in `AnonymousRateLimitingTests`. `e2e/specs/rate-limit.spec.mjs`
+  runs against a running core.api with a real limit: 7+ ordinary `invalid_credentials` failures,
+  then 429. The other e2e servers run at 1000/min, because the suite is one address.
+  Broken on purpose, each caught: limiter removed from core.api's pipeline (e2e: 15× 403, no 429);
+  loopback trust not cleared; forwarded headers processed with an empty trust list; IPv6 keyed per
+  full address. 573 .NET tests, 23/23 Playwright.
+- Review round 1 found the blocking case: the framework reads an EMPTY trust list as "trust
+  everyone", so outside Production a rotated `X-Forwarded-For` bought unlimited fresh buckets.
+  Also the IPv6 /64 grouping, the startup check on the limit, and an e2e assertion that could
+  pass vacuously. All fixed; round 2 confirmed.
+- Not done: a limit per account (credential stuffing across addresses); uploads (not built yet);
+  platform.api's wiring is covered by the shared tests but by no running-server check.
+
+## Previous cycle
+
 **Cycle 8 — backup and restore, Stage 1 (M2 items 13 and 15).** Chris: build Stage 1 now; it does
 not depend on a hosting provider. **Complete. Independent review (Codex, three rounds) CLOSED: no
 blocking findings.** See *Review* below.
@@ -750,7 +776,9 @@ against the upgraded schema are required here, even with coordinated releases.
     milestone. Enforcement belongs to the gate; enrolment polish and the recovery UX can
     wait for M3.
 17. Per-project audit logging and the operator error feed (metadata only).
-18. Rate limiting on anonymous auth endpoints and uploads.
+18. Rate limiting on anonymous auth endpoints and uploads. *Anonymous endpoints: built (see
+    Cycle 9 below and `docs/auth-and-access.md` §3a). Per-account limiting and uploads (not
+    built) remain.*
 
 There is an uncomfortable symmetry worth noticing: the September work concluded the
 sellable service was a recovery check. Being unable to restore this platform would be

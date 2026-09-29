@@ -43,6 +43,10 @@ const platformEnv = {
 const otherCoreEnv = {
   ...apiEnv,
   Tenant__PublicId: tenants.otherTenant,
+  // The one server here with a REAL anonymous rate limit, which rate-limit.spec.mjs exhausts. It
+  // is this one because only the isolation spec signs in through it, a handful of times, and the
+  // rate-limit spec runs after that.
+  RateLimits__AnonymousPerMinute: '10',
 }
 
 export default defineConfig({
@@ -75,6 +79,9 @@ export default defineConfig({
     // The ledger proof of concept: licenses the ledger for tenant A, then drives it in the browser.
     // After `license` so the admin has accepted their invitation; nothing depends on it.
     { name: 'ledger', testMatch: /ledger\.spec\.mjs/, dependencies: ['license'] },
+    // Exhausts the anonymous rate limit on the tenant-B sign-in core (5103), so it runs after
+    // the only spec that signs in there. Nothing depends on it.
+    { name: 'rate-limit', testMatch: /rate-limit\.spec\.mjs/, dependencies: ['isolation'] },
     // D17: an employee invited by the admin accepts and signs in. Needs the admin accepted.
     { name: 'employee-invite', testMatch: /employee-invite\.spec\.mjs/, dependencies: ['license'] },
     // The restore drill backs up everything the projects above wrote, so it runs after all of them.

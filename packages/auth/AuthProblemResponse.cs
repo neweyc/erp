@@ -18,6 +18,7 @@ public static class AuthProblemResponse
     {
         AuthProblem.TenantSuspended or AuthProblem.AppNotLicensed or AuthProblem.CsrfFailed
             => StatusCodes.Status403Forbidden,
+        AuthProblem.RateLimited => StatusCodes.Status429TooManyRequests,
         _ => StatusCodes.Status401Unauthorized,
     };
 

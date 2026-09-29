@@ -31,6 +31,10 @@ builder.Services.AddAppPlatformAuth(
     SessionCookie.Operator, builder.Configuration["DataProtection:KeyPath"]);
 builder.Services.AddAuthorization();
 
+// Operator sign-in is callable without an account, so it is where guessing
+// happens. Limited per client address; see AnonymousRateLimiting for why the proxy list matters.
+builder.Services.AddAnonymousRateLimiting(builder.Configuration, builder.Environment);
+
 builder.Services.AddScoped<OperatorContext>();
 builder.Services.AddScoped<IOperatorContext>(sp => sp.GetRequiredService<OperatorContext>());
 builder.Services.AddScoped<ICookieAuthenticationState>(sp => sp.GetRequiredService<OperatorContext>());
@@ -50,6 +54,7 @@ builder.Services.AddHttpClient<IProvisioningClient, HttpProvisioningClient>(clie
 
 var app = builder.Build();
 
+app.UseAnonymousRateLimiting();
 app.UseAuthentication();
 // The operator middleware, not the tenant one: operators have their own tables, cookie and
 // lifetime, and no tenant at all.

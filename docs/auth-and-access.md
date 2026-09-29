@@ -88,6 +88,7 @@ the tenant is suspended. Route authorization then decides what that principal ma
 | `mfa_required` | authentication | 401 | enrolment or challenge outstanding |
 | `tenant_suspended` | **authorization** | **403** | principal preserved; only the allowlist is reachable |
 | `app_not_licensed` | authorization | 403 | tenant has not licensed this app |
+| `rate_limited` | before authentication | **429** | too many anonymous requests from one address; `Retry-After` says when |
 
 **Suspended and retired are different states and must not share a path.**
 
@@ -101,6 +102,24 @@ the tenant is suspended. Route authorization then decides what that principal ma
 A generic logout for all of these is a support burden — the user cannot tell "your admin
 changed your role" from "your session expired" from "your organisation's account is on
 hold".
+
+## 3a. Rate limiting anonymous endpoints
+
+Every endpoint marked `.AllowAnonymous()` (sign-in, invitation acceptance, operator sign-in,
+provisioning) is limited per client address: 10 a minute by default
+(`RateLimits:AnonymousPerMinute`), refused with 429 `rate_limited`. It is found by endpoint
+metadata, so a new anonymous endpoint is covered without opting in. IPv6 is grouped by /64,
+because one subscriber commonly holds a whole /64. Code: `packages/auth/AnonymousRateLimiting.cs`.
+
+**Deployment requirement.** Behind nginx, every request arrives from nginx's address, and one
+shared bucket would throttle the whole platform. Set `ForwardedHeaders:TrustedProxies` to
+nginx's address, and have nginx set `X-Forwarded-For` (`proxy_add_x_forwarded_for`). The header
+is believed only from a listed proxy, and one hop deep. Production refuses to start without the
+setting.
+
+**Not built: a limit per account.** Guessing one account's password from many addresses
+(credential stuffing) passes a per-address limit. That needs failed-attempt tracking per account,
+designed so it cannot be used to lock a victim out.
 
 ## 4. Cookie isolation
 
