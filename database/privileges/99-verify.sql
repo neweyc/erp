@@ -159,7 +159,8 @@ mutable_append_only AS (
     SELECT to_regclass(listed)::oid
     FROM unnest(ARRAY[
       'ledger.journal_entry',
-      'ledger.journal_line'
+      'ledger.journal_line',
+      'platform.data_key'
     ]) AS listed
     WHERE to_regclass(listed) IS NOT NULL
   ) t

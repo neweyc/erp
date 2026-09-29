@@ -1,26 +1,13 @@
 import { expect, request, test } from '@playwright/test'
-import { OPERATOR_EMAIL, OPERATOR_PASSWORD, seededTenantPublicId } from '../stack.mjs'
+import { operatorSignIn, seededTenantPublicId } from '../stack.mjs'
 
-const PLATFORM = 'http://localhost:5101'
 const CORE = 'http://localhost:5100'
 const TICKETS = 'http://localhost:5102'
 const ADMIN_EMAIL = 'admin@e2e.test'
 const ADMIN_PASSWORD = 'correct horse battery'
 
-/** An operator context with a session and its CSRF token. */
-async function signInAsOperator() {
-  const api = await request.newContext({ baseURL: PLATFORM })
-
-  const signIn = await api.post('/api/platform/v1/auth/sign-in', {
-    data: { email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD },
-  })
-  expect(signIn.status(), await signIn.text()).toBe(200)
-
-  const csrf = (await api.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
-  expect(csrf, 'sign-in must issue a csrf token').toBeTruthy()
-
-  return { api, csrf }
-}
+/** An operator context with a session and its CSRF token (password and authenticator code). */
+const signInAsOperator = operatorSignIn
 
 /**
  * A tenant-admin context. Separate from the operator's on purpose: they are different identities

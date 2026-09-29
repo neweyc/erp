@@ -1,6 +1,6 @@
 import { expect, request, test } from '@playwright/test'
 import {
-  OPERATOR_EMAIL, OPERATOR_PASSWORD, OTHER_TENANT_NAME, otherTenantPublicId, waitForInvitation,
+  operatorSignIn, OTHER_TENANT_NAME, otherTenantPublicId, waitForInvitation,
 } from '../stack.mjs'
 
 /**
@@ -252,13 +252,7 @@ test.describe('a second tenant', () => {
 
 /** An operator licenses tickets for tenant B over HTTP. A repeat grant (409) is already done. */
 async function licenseTicketsForTenantB() {
-  const operator = await request.newContext({ baseURL: PLATFORM })
-
-  const signedIn = await operator.post('/api/platform/v1/auth/sign-in', {
-    data: { email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD },
-  })
-  expect(signedIn.status(), await signedIn.text()).toBe(200)
-  const csrf = (await operator.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
+  const { api: operator, csrf } = await operatorSignIn()
 
   const granted = await operator.post(
     `/api/platform/v1/tenants/${otherTenantPublicId()}/entitlements`, {

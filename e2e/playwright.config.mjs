@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 import { join } from 'node:path'
-import { apiEnvironment, CAPTURE_DIR, CONNECTION, ensureStack, ROOT } from './stack.mjs'
+import { apiEnvironment, CAPTURE_DIR, CONNECTION, ensureStack, PLATFORM_KEK_FOR_TESTS_ONLY, ROOT } from './stack.mjs'
 
 /**
  * The database is prepared HERE, at config-module load, rather than in globalSetup.
@@ -27,6 +27,8 @@ const apiEnv = apiEnvironment({
  */
 const platformEnv = {
   ...apiEnv,
+  // Only the platform receives its key-encryption key, as in a deployment.
+  Encryption__PlatformKeyEncryptionKey: PLATFORM_KEK_FOR_TESTS_ONLY,
   Internal__ApiKey: 'e2e-internal-key',
   Core__BaseUrl: 'http://localhost:5100',
 }
@@ -79,6 +81,9 @@ export default defineConfig({
     // The ledger proof of concept: licenses the ledger for tenant A, then drives it in the browser.
     // After `license` so the admin has accepted their invitation; nothing depends on it.
     { name: 'ledger', testMatch: /ledger\.spec\.mjs/, dependencies: ['license'] },
+    // M2 item 16: operator sign-in needs a current authenticator code. After `license`, whose
+    // saved operator session the other specs reuse, so its own sign-ins cannot use their codes up.
+    { name: 'operator-mfa', testMatch: /operator-mfa\.spec\.mjs/, dependencies: ['license'] },
     // Exhausts the anonymous rate limit on the tenant-B sign-in core (5103), so it runs after
     // the only spec that signs in there. Nothing depends on it.
     { name: 'rate-limit', testMatch: /rate-limit\.spec\.mjs/, dependencies: ['isolation'] },

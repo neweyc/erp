@@ -25,6 +25,8 @@
   <Project Path="packages/auth.tests/AppPlatform.Auth.Tests.csproj" />
   <Project Path="packages/boundary/AppPlatform.Boundary.csproj" />
   <Project Path="privileges.tests/privileges.tests.csproj" />
+  <Project Path="packages/encryption/AppPlatform.Encryption.csproj" />
+  <Project Path="packages/encryption.tests/AppPlatform.Encryption.Tests.csproj" />
   <Project Path="packages/entitlements/AppPlatform.Entitlements.csproj" />
   <Project Path="packages/entitlements.tests/AppPlatform.Entitlements.Tests.csproj" />
   <Project Path="packages/ids/AppPlatform.Ids.csproj" />

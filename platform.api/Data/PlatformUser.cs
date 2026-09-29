@@ -8,8 +8,8 @@ namespace AppPlatform.Platform.Data;
 /// a tenant API, or the reverse.
 ///
 /// MFA is mandatory for operators — an operator reaches the control plane for every tenant, so
-/// an unprotected operator account is a larger exposure than most of what M2 gates. Enforcement
-/// lands in M2; the column exists now so enrolment is not a schema change later.
+/// an unprotected operator account is a larger exposure than most of what M2 gates. Sign-in
+/// requires a current authenticator code; see <see cref="Auth.OperatorMfa"/>.
 /// </summary>
 public class PlatformUser : IPublicIdentified
 {
@@ -20,10 +20,11 @@ public class PlatformUser : IPublicIdentified
     public bool Active { get; set; } = true;
 
     /// <summary>
-    /// Encrypted at rest with the PLATFORM's own key — never the tenant field key, which this
-    /// process does not receive and could not use.
+    /// The authenticator secret, ENCRYPTED (<c>enc:v1:…</c>) under the platform's own data key —
+    /// never the tenant key-encryption key, which this process does not receive. Read and written
+    /// only through <see cref="Auth.OperatorMfa"/>. Null until the operator is enrolled.
     /// </summary>
-    public string? TotpSecret { get; set; }
+    public string? TotpSecretEncrypted { get; set; }
 
     /// <summary>
     /// A concurrency token that works on an encrypted column. AES-GCM re-encrypts fresh every
@@ -31,7 +32,13 @@ public class PlatformUser : IPublicIdentified
     /// </summary>
     public int TotpSecretVersion { get; set; }
 
-    public bool MfaEnabled => TotpSecret is not null;
+    /// <summary>
+    /// The 30-second step of the last code accepted. A code is accepted once: only a later step
+    /// passes (RFC 6238 §5.2). Advanced atomically with the session it admits; see IOperatorSessionStore.CreateSessionWithCodeAsync.
+    /// </summary>
+    public long? TotpLastUsedStep { get; set; }
+
+    public bool MfaEnabled => TotpSecretEncrypted is not null;
     public DateTimeOffset CreatedAt { get; set; }
 }
 
@@ -41,11 +48,10 @@ public class PlatformSession
     public Guid PlatformUserId { get; set; }
 
     /// <summary>
-    /// Whether this session has cleared the MFA gate.
-    ///
-    /// A real column, not a computed placeholder. Today sign-in sets it true because no
-    /// challenge exists yet; in M2 sign-in sets it FALSE and the challenge sets it true, and
-    /// nothing else has to change — the evaluator already refuses a session without it.
+    /// Whether this session has cleared the MFA gate. Always true today: sign-in takes the
+    /// password and the authenticator code together and creates no session until both pass, so a
+    /// half-authenticated session never exists. The evaluator still refuses one without it, as a
+    /// second line should a later change create sessions another way.
     /// </summary>
     public bool MfaSatisfied { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }

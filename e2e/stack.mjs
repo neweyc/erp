@@ -1,5 +1,7 @@
+import { request } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHmac } from 'node:crypto'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const ROOT = resolve(import.meta.dirname, '..')
@@ -95,12 +97,16 @@ export function isStackReady() {
     // BOTH tenants. A database warmed by a seed that predates the second tenant would otherwise
     // count as ready, and the isolation spec's core.api would start pinned to a tenant that does
     // not exist — every tenant B sign-in failing as invalid credentials.
+    //
+    // AND the operator, which is seeded last: a run that failed between the two leaves tenants but
+    // no operator, and counted as ready, every operator sign-in then fails as bad credentials.
     const out = execFileSync('docker', [
       'exec', CONTAINER, 'psql', '-U', 'postgres', '-d', 'appplatform', '-tAc',
-      `SELECT count(*) FROM platform.tenant WHERE name IN ('${TENANT_NAME}', '${OTHER_TENANT_NAME}')`,
+      `SELECT (SELECT count(*) FROM platform.tenant WHERE name IN ('${TENANT_NAME}', '${OTHER_TENANT_NAME}'))` +
+      ` || '/' || (SELECT count(*) FROM platform.platform_user WHERE email = '${OPERATOR_EMAIL}')`,
     ], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
 
-    return out === '2'
+    return out === '2/1'
   } catch {
     return false
   }
@@ -153,6 +159,8 @@ export function ensureStack() {
     applyMigrations()
     seed()
     seedOperator()
+  } else if (process.env.TEST_WORKER_INDEX === undefined) {
+    ensureOperatorSecret()
   }
 
   return { tenant: seededTenantPublicId(), otherTenant: otherTenantPublicId() }
@@ -287,16 +295,142 @@ export function apiEnvironment({ connection, tenantPublicId, capturePath }) {
 export const OPERATOR_EMAIL = 'operator@e2e.test'
 export const OPERATOR_PASSWORD = 'operator correct horse'
 
-export function seedOperator() {
-  execFileSync('dotnet', [
+export const PLATFORM = 'http://localhost:5101'
+
+/**
+ * The platform's key-encryption key, for THIS SUITE ONLY: it protects nothing but throwaway test
+ * operators in a throwaway database. Real keys are never in the repository (KeyEncryptionKey).
+ */
+export const PLATFORM_KEK_FOR_TESTS_ONLY = 'QPnAVu2bCdrlHkd/84njLirFjxuyl/Z2CMwyxu5zL/I='
+
+/**
+ * The operator's authenticator secret, as their phone would hold it. The platform prints it once,
+ * at enrolment, and stores it only encrypted, so the suite keeps its own copy here (gitignored),
+ * where it survives a warm-stack rerun that skips seeding.
+ */
+const OPERATOR_SECRET_FILE = join(ROOT, 'e2e/.keys/operator-mfa-secret')
+const OPERATOR_SESSION_FILE = join(ROOT, 'e2e/.keys/operator-session.json')
+/** When that session signed in. Its modification time cannot say, because reuse refreshes it. */
+const OPERATOR_SIGNED_IN_AT_FILE = join(ROOT, 'e2e/.keys/operator-session.signed-in-at')
+
+function runOperatorCommand(command) {
+  return execFileSync('dotnet', [
     // --no-restore so CI's prebuild is used rather than re-restored inside this call.
     'run', '--project', join(ROOT, 'platform.api'), '--no-launch-profile', '--no-restore', '--',
-    'create-platform-user', OPERATOR_EMAIL,
+    command, OPERATOR_EMAIL,
   ], {
-    stdio: ['pipe', 'inherit', 'inherit'],
+    stdio: ['pipe', 'pipe', 'inherit'],
     input: OPERATOR_PASSWORD + '\n',
-    env: { ...process.env, ConnectionStrings__Platform: CONNECTION },
-  })
+    env: {
+      ...process.env,
+      ConnectionStrings__Platform: CONNECTION,
+      Encryption__PlatformKeyEncryptionKey: PLATFORM_KEK_FOR_TESTS_ONLY,
+    },
+  }).toString()
+}
+
+/** Keeps the secret a command printed, and forgets any session signed in with an older one. */
+function keepOperatorSecret(output) {
+  const prefix = 'MFA secret (shown once): '
+  const line = output.split('\n').find((l) => l.startsWith(prefix))
+  if (!line) throw new Error(`the operator command printed no MFA secret:\n${output}`)
+
+  mkdirSync(join(ROOT, 'e2e/.keys'), { recursive: true })
+  writeFileSync(OPERATOR_SECRET_FILE, line.slice(prefix.length).trim())
+  rmSync(OPERATOR_SESSION_FILE, { force: true })
+}
+
+export function seedOperator() {
+  keepOperatorSecret(runOperatorCommand('create-platform-user'))
+}
+
+/**
+ * A warm stack whose secret file has gone (deleted .keys, a fresh checkout pointed at an old
+ * container) has an operator nobody can sign in as. Re-enrolling is the operator's own recovery
+ * path, so the suite uses it too.
+ */
+export function ensureOperatorSecret() {
+  if (!existsSync(OPERATOR_SECRET_FILE)) keepOperatorSecret(runOperatorCommand('reset-platform-user-mfa'))
+}
+
+/** RFC 6238, as an authenticator app computes it. The first test in operator-mfa checks it. */
+export function totpCode(base32Secret, step) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let bits = ''
+  for (const c of base32Secret.replace(/=+$/, '').toUpperCase()) {
+    bits += alphabet.indexOf(c).toString(2).padStart(5, '0')
+  }
+  const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)))
+
+  const counter = Buffer.alloc(8)
+  counter.writeBigInt64BE(BigInt(step))
+  const hash = createHmac('sha1', key).update(counter).digest()
+
+  const offset = hash[hash.length - 1] & 0x0f
+  const binary = (hash.readUInt32BE(offset) & 0x7fffffff) % 1_000_000
+  return binary.toString().padStart(6, '0')
+}
+
+export function currentStep() {
+  return Math.floor(Date.now() / 30_000)
+}
+
+export function operatorSecret() {
+  return readFileSync(OPERATOR_SECRET_FILE, 'utf8').trim()
+}
+
+/**
+ * An operator API context with a session and its CSRF token.
+ *
+ * Signs in ONCE and reuses the session. An authenticator code is accepted once (RFC 6238 §5.2), so
+ * several specs signing in within the same 30 seconds would refuse each other — which is the
+ * platform working, not failing. The saved session is forgotten whenever the operator is
+ * re-enrolled, and reused only while it cannot have gone idle: operator sessions end after 30
+ * minutes without a request, so the file's time is refreshed on every reuse (each is followed by a
+ * request) and a file older than 25 minutes is signed in afresh. Separately, a session signed in
+ * more than 7 hours ago is never reused: the operator's absolute lifetime is 8. The platform has no
+ * read-only endpoint to probe a session with, so this is judged by time rather than asked.
+ *
+ * A fresh sign-in tries the current step's code, then the next step's (the platform accepts one
+ * step of drift): the current one may already have been used by a run moments earlier.
+ */
+export async function operatorSignIn() {
+  const idleFor = existsSync(OPERATOR_SESSION_FILE) ? Date.now() - statSync(OPERATOR_SESSION_FILE).mtimeMs : Infinity
+  const ageOf = existsSync(OPERATOR_SIGNED_IN_AT_FILE)
+    ? Date.now() - Number(readFileSync(OPERATOR_SIGNED_IN_AT_FILE, 'utf8'))
+    : Infinity
+  if (idleFor < 25 * 60_000 && ageOf < 7 * 3_600_000) {
+    const now = new Date()
+    utimesSync(OPERATOR_SESSION_FILE, now, now)
+    const api = await request.newContext({ baseURL: PLATFORM, storageState: OPERATOR_SESSION_FILE })
+    return { api, csrf: await csrfOf(api) }
+  }
+
+  const step = currentStep()
+  let lastFailure = ''
+  for (const candidate of [step, step + 1]) {
+    const api = await request.newContext({ baseURL: PLATFORM })
+    const response = await api.post('/api/platform/v1/auth/sign-in', {
+      data: { email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD, code: totpCode(operatorSecret(), candidate) },
+    })
+
+    if (response.status() === 200) {
+      await api.storageState({ path: OPERATOR_SESSION_FILE })
+      writeFileSync(OPERATOR_SIGNED_IN_AT_FILE, String(Date.now()))
+      return { api, csrf: await csrfOf(api) }
+    }
+
+    lastFailure = `${response.status()} ${await response.text()}`
+    await api.dispose()
+  }
+
+  throw new Error(`operator sign-in failed with both codes: ${lastFailure}`)
+}
+
+async function csrfOf(api) {
+  const csrf = (await api.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
+  if (!csrf) throw new Error('the operator session has no csrf token')
+  return csrf
 }
 
 export function seed() {

@@ -174,7 +174,7 @@ address.
 ### What the platform boundary actually guarantees
 
 The loose claim — "the platform cannot read customer data" — is **false**, and an earlier
-draft of this document made it. Withholding `Encryption:FieldKey` protects encrypted
+draft of this document made it. Withholding the tenant key-encryption key protects encrypted
 columns only. Employee names, emails, department names, and ticket titles are plaintext
 in the same database.
 

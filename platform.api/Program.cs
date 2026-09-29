@@ -1,6 +1,7 @@
 using System.Reflection;
 using AppPlatform.Api;
 using AppPlatform.Auth;
+using AppPlatform.Encryption;
 using AppPlatform.Platform.Auth;
 using AppPlatform.Platform.Data;
 using AppPlatform.Platform.Features.Auth;
@@ -12,16 +13,33 @@ var builder = WebApplication.CreateBuilder(args);
 var connection = builder.Configuration.GetConnectionString("Platform")
     ?? throw new InvalidOperationException("ConnectionStrings:Platform is required.");
 
-// A command, not a server. Placed before the service checks below so creating the first operator
-// does not require a configured provisioning endpoint.
+// The platform's OWN key-encryption key. It wraps the data keys that protect operator secrets
+// (authenticator seeds) and nothing else. The platform never receives the key for CUSTOMER data;
+// withholding that protects encrypted columns only (names and emails are plaintext), so the real
+// boundary is that ap_platform_rt holds no grant on core, identity, or any app schema. See
+// docs/database-privileges.md. Required, with no default: see KeyEncryptionKey.
+const string PlatformKekSetting = "Encryption:PlatformKeyEncryptionKey";
+var platformKek = KeyEncryptionKey.FromConfiguration(builder.Configuration[PlatformKekSetting], PlatformKekSetting);
+
+// Commands, not a server. Placed before the service checks below so managing operators does not
+// require a configured provisioning endpoint.
 if (args.Contains("create-platform-user"))
 {
-    return await AppPlatform.Platform.CreatePlatformUser.RunAsync(connection, args);
+    return await AppPlatform.Platform.CreatePlatformUser.RunAsync(connection, platformKek, args);
 }
 
-// The platform NEVER receives Encryption:FieldKey. Withholding it protects encrypted columns
-// only — names and emails are plaintext — so the real boundary is that ap_platform_rt holds no
-// grant on core, identity, or any app schema. See docs/database-privileges.md.
+if (args.Contains("reset-platform-user-mfa"))
+{
+    return await AppPlatform.Platform.ResetPlatformUserMfa.RunAsync(connection, platformKek, args);
+}
+
+// Loaded once, before the service accepts requests, and fails startup rather than the first
+// sign-in if the configured key is wrong. On the very first start it creates the platform's data key.
+await using (var keysDb = PlatformDbContext.ForConnection(connection))
+{
+    builder.Services.AddSingleton(await KeyRing.LoadOrCreateAsync(keysDb, platformKek, TimeProvider.System));
+}
+
 builder.Services.AddDbContext<PlatformDbContext>(options => options
     .UseNpgsql(connection, npgsql => npgsql
         .MigrationsHistoryTable("__ef_migrations_history", PlatformDbContext.Schema))

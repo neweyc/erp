@@ -1,5 +1,5 @@
-import { expect, request, test } from '@playwright/test'
-import { OPERATOR_EMAIL, OPERATOR_PASSWORD, seededTenantPublicId } from '../stack.mjs'
+import { expect, test } from '@playwright/test'
+import { operatorSignIn, seededTenantPublicId } from '../stack.mjs'
 
 const ADMIN_EMAIL = 'admin@e2e.test'
 const ADMIN_PASSWORD = 'correct horse battery'
@@ -16,12 +16,7 @@ const year = today.slice(0, 4)
  * by the database; this proves the whole path from the screen to it.
  */
 test.beforeAll(async () => {
-  const operator = await request.newContext({ baseURL: 'http://localhost:5101' })
-  const signedIn = await operator.post('/api/platform/v1/auth/sign-in', {
-    data: { email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD },
-  })
-  expect(signedIn.status(), await signedIn.text()).toBe(200)
-  const csrf = (await operator.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
+  const { api: operator, csrf } = await operatorSignIn()
 
   const granted = await operator.post(`/api/platform/v1/tenants/${seededTenantPublicId()}/entitlements`, {
     headers: { 'X-CSRF-Token': csrf },

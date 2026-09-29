@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using AppPlatform.Api;
 using AppPlatform.Auth;
+using AppPlatform.Encryption;
 using AppPlatform.Platform.Auth;
 using AppPlatform.Platform.Data;
 using Microsoft.AspNetCore.Authentication;
@@ -11,13 +12,19 @@ namespace AppPlatform.Platform.Features.Auth;
 
 public static class SignInFeature
 {
-    public record SignInCommand(string? Email, string? Password);
+    /// <summary>
+    /// Password and authenticator code together, in one request. No session exists until both
+    /// pass, so there is never a half-signed-in operator. A client that omits the code learns only
+    /// AFTER the password is verified that one is needed (mfa_required), and asks for it.
+    /// </summary>
+    public record SignInCommand(string? Email, string? Password, string? Code = null);
 
     public record SignInOutcome(Guid? SessionId, string? ProblemCode);
 
     public class SignInCommandHandler(
         IOperatorSessionStore sessions,
         ITenantAuditWriter audit,
+        KeyRing keyRing,
         TimeProvider clock)
     {
         public async Task<SignInOutcome> Handle(SignInCommand cmd, CancellationToken ct = default)
@@ -59,7 +66,28 @@ public static class SignInFeature
                 await sessions.UpdatePasswordHashAsync(user.Id, user.PasswordHash, ct);
             }
 
-            var sessionId = await sessions.CreateSessionAsync(user.Id, clock.GetUtcNow(), ct);
+            // The second factor. Checked only after the password, so every answer before this point
+            // is the same invalid_credentials, and nothing here tells a guesser whether an account
+            // exists. Past this point the caller has proved the password, so saying what is missing
+            // tells them nothing they do not already know.
+            if (!user.MfaEnabled)
+                return Failure(email, "no authenticator enrolled", OperatorProblems.MfaNotEnrolled);
+
+            if (string.IsNullOrWhiteSpace(cmd.Code))
+                return Failure(email, "code required", OperatorProblems.MfaRequired);
+
+            var step = Totp.Verify(OperatorMfa.ReadSecret(user, keyRing), cmd.Code, clock.GetUtcNow(), user.TotpLastUsedStep);
+            if (step is null)
+                return Failure(email, "wrong or reused code", OperatorProblems.MfaCodeInvalid);
+
+            // The code is used and the session created together, and only while the secret is still
+            // the one the code was checked against. Of two sign-ins racing with one code, exactly one
+            // gets a session; a reset in between leaves neither with one.
+            if (await sessions.CreateSessionWithCodeAsync(user.Id, user.TotpSecretVersion, step.Value, clock.GetUtcNow(), ct)
+                is not { } sessionId)
+            {
+                return Failure(email, "code already used, or the authenticator was reset", OperatorProblems.MfaCodeInvalid);
+            }
 
             audit.Write(new PlatformAuditLog
             {
@@ -72,7 +100,8 @@ public static class SignInFeature
             return new SignInOutcome(sessionId, null);
         }
 
-        private SignInOutcome Failure(string? email, string reason)
+        private SignInOutcome Failure(
+            string? email, string reason, string problemCode = OperatorProblems.InvalidCredentials)
         {
             // Audited even on failure: repeated failures against an operator account are the
             // signal that matters most on this surface, and they are invisible if only
@@ -84,7 +113,7 @@ public static class SignInFeature
                 CreatedAt = clock.GetUtcNow(),
             });
 
-            return new SignInOutcome(null, OperatorProblems.InvalidCredentials);
+            return new SignInOutcome(null, problemCode);
         }
     }
 
@@ -102,10 +131,11 @@ public static class SignInFeature
                 HttpContext http,
                 [FromServices] IOperatorSessionStore sessions,
                 [FromServices] ITenantAuditWriter audit,
+                [FromServices] KeyRing keyRing,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new SignInCommandHandler(sessions, audit, clock);
+                var handler = new SignInCommandHandler(sessions, audit, keyRing, clock);
                 var outcome = await handler.Handle(cmd, ct);
 
                 await audit.FlushAsync(ct);

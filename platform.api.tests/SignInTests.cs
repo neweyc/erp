@@ -22,16 +22,24 @@ public class SignInTests
         audit.Setup(a => a.Write(It.IsAny<PlatformAuditLog>())).Callback<PlatformAuditLog>(_audit.Add);
         Audit = audit.Object;
 
-        _sessions.Setup(s => s.CreateSessionAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), default))
+        _sessions.Setup(s => s.CreateSessionWithCodeAsync(
+                It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<long>(), It.IsAny<DateTimeOffset>(), default))
             .ReturnsAsync(_sessionId);
     }
 
     private ITenantAuditWriter Audit { get; }
 
-    private SignInFeature.SignInCommandHandler Handler()
-        => new(_sessions.Object, Audit, new FakeTimeProvider(Now));
+    private readonly Encryption.KeyRing _keyRing = TestKeyRing.Create();
 
-    private PlatformUser Operator(string password = "hunter2", bool active = true)
+    /// <summary>The enrolled operator's authenticator secret, as their phone holds it.</summary>
+    private string _secret = "";
+
+    private string CodeNow() => Totp.CodeAt(_secret, Totp.StepAt(Now));
+
+    private SignInFeature.SignInCommandHandler Handler()
+        => new(_sessions.Object, Audit, _keyRing, new FakeTimeProvider(Now));
+
+    private PlatformUser Operator(string password = "hunter2", bool active = true, bool enrolled = true)
     {
         var user = new PlatformUser
         {
@@ -41,6 +49,7 @@ public class SignInTests
             PasswordHash = PasswordHasher.Hash(password),
             Active = active,
         };
+        if (enrolled) _secret = OperatorMfa.Enroll(user, _keyRing);
         _sessions.Setup(s => s.FindByEmailAsync("op@example.com", default)).ReturnsAsync(user);
         return user;
     }
@@ -50,12 +59,12 @@ public class SignInTests
     {
         var user = Operator();
 
-        var outcome = await Handler().Handle(new("OP@Example.com", "hunter2"));
+        var outcome = await Handler().Handle(new("OP@Example.com", "hunter2", CodeNow()));
 
         Assert.Equal(_sessionId, outcome.SessionId);
         Assert.Null(outcome.ProblemCode);
         Assert.Equal("operator.signed_in", Assert.Single(_audit).Action);
-        _sessions.Verify(s => s.CreateSessionAsync(user.Id, Now, default), Times.Once);
+        _sessions.Verify(s => s.CreateSessionWithCodeAsync(user.Id, user.TotpSecretVersion, Totp.StepAt(Now), Now, default), Times.Once);
     }
 
     [Theory]
@@ -81,7 +90,7 @@ public class SignInTests
         var outcome = await Handler().Handle(new("op@example.com", "hunter2"));
 
         Assert.Equal(OperatorProblems.InvalidCredentials, outcome.ProblemCode);
-        _sessions.Verify(s => s.CreateSessionAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), default), Times.Never);
+        AssertStoreNotAsked();
     }
 
     [Fact]
@@ -131,6 +140,104 @@ public class SignInTests
 
         Assert.Equal(OperatorProblems.InvalidCredentials, outcome.ProblemCode);
     }
+
+    [Fact]
+    public async Task The_right_password_without_a_code_asks_for_one_and_creates_no_session()
+    {
+        Operator();
+
+        var outcome = await Handler().Handle(new("op@example.com", "hunter2"));
+
+        Assert.Equal(OperatorProblems.MfaRequired, outcome.ProblemCode);
+        AssertStoreNotAsked();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_wrong_code_is_refused_and_creates_no_session(bool rightLength)
+    {
+        Operator();
+        // The current code with its first digit changed is always wrong; a five-digit one is malformed.
+        var current = CodeNow();
+        var wrong = rightLength ? $"{(current[0] - '0' + 1) % 10}{current[1..]}" : current[..5];
+
+        var outcome = await Handler().Handle(new("op@example.com", "hunter2", wrong));
+
+        Assert.Equal(OperatorProblems.MfaCodeInvalid, outcome.ProblemCode);
+        AssertStoreNotAsked();
+        AssertStoreNotAsked();
+    }
+
+    [Fact]
+    public async Task A_wrong_password_with_a_right_code_says_nothing_about_the_code()
+    {
+        // Everything before the password check answers invalid_credentials, so a guesser learns
+        // nothing about whether the account exists or has an authenticator.
+        Operator();
+
+        var outcome = await Handler().Handle(new("op@example.com", "wrong", CodeNow()));
+
+        Assert.Equal(OperatorProblems.InvalidCredentials, outcome.ProblemCode);
+        AssertStoreNotAsked();
+    }
+
+    [Fact]
+    public async Task A_code_the_store_will_not_use_is_refused()
+    {
+        // The store answers null when another sign-in has used this step or a later one, or the
+        // authenticator was reset after the code was checked: the races its transaction settles.
+        var user = Operator();
+        _sessions.Setup(s => s.CreateSessionWithCodeAsync(user.Id, It.IsAny<int>(), It.IsAny<long>(), It.IsAny<DateTimeOffset>(), default))
+            .ReturnsAsync((Guid?)null);
+
+        var outcome = await Handler().Handle(new("op@example.com", "hunter2", CodeNow()));
+
+        Assert.Equal(OperatorProblems.MfaCodeInvalid, outcome.ProblemCode);
+        Assert.Null(outcome.SessionId);
+    }
+
+    [Fact]
+    public async Task A_code_at_or_before_the_last_used_step_is_refused_without_asking_the_store()
+    {
+        var user = Operator();
+        user.TotpLastUsedStep = Totp.StepAt(Now);
+
+        var outcome = await Handler().Handle(new("op@example.com", "hunter2", CodeNow()));
+
+        Assert.Equal(OperatorProblems.MfaCodeInvalid, outcome.ProblemCode);
+        AssertStoreNotAsked();
+    }
+
+    [Fact]
+    public async Task An_operator_with_no_authenticator_cannot_sign_in()
+    {
+        // MFA is mandatory for operators. No enrolment means no sign-in, not a password-only one.
+        Operator(enrolled: false);
+
+        var outcome = await Handler().Handle(new("op@example.com", "hunter2", "123456"));
+
+        Assert.Equal(OperatorProblems.MfaNotEnrolled, outcome.ProblemCode);
+        AssertStoreNotAsked();
+    }
+
+    [Fact]
+    public async Task The_store_is_told_which_secret_version_the_code_was_checked_against()
+    {
+        // So that a reset committed after the check makes the store refuse, rather than admit a
+        // code from the secret that was just replaced.
+        var user = Operator();
+        user.TotpSecretVersion = 7;
+
+        await Handler().Handle(new("op@example.com", "hunter2", CodeNow()));
+
+        _sessions.Verify(s => s.CreateSessionWithCodeAsync(user.Id, 7, Totp.StepAt(Now), Now, default), Times.Once);
+    }
+
+    /// <summary>Refused before the store was asked to use a code or create a session.</summary>
+    private void AssertStoreNotAsked()
+        => _sessions.Verify(s => s.CreateSessionWithCodeAsync(
+            It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<long>(), It.IsAny<DateTimeOffset>(), default), Times.Never);
 
     private static async Task<long> Time(Func<Task> action)
     {

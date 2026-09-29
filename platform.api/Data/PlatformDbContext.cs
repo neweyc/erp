@@ -1,4 +1,6 @@
+using AppPlatform.Encryption;
 using AppPlatform.Ids;
+using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AppPlatform.Platform.Data;
@@ -19,6 +21,13 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
 {
     public const string Schema = "platform";
 
+    /// <summary>A context outside dependency injection, for the operator commands run on the machine.</summary>
+    public static PlatformDbContext ForConnection(string connectionString)
+        => new(new DbContextOptionsBuilder<PlatformDbContext>()
+            .UseNpgsql(connectionString)
+            .UseSnakeCaseNamingConvention()
+            .Options);
+
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<TenantApp> TenantApps => Set<TenantApp>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
@@ -26,8 +35,28 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
     public DbSet<PlatformSession> PlatformSessions => Set<PlatformSession>();
     public DbSet<PlatformAuditLog> AuditLogs => Set<PlatformAuditLog>();
 
+    /// <summary>
+    /// Refuses to modify or delete an append-only row (a data key), in code as well as by grant.
+    /// Every save goes through one of these two overloads.
+    /// </summary>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        AppendOnlyGuard.Enforce(ChangeTracker);
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        AppendOnlyGuard.Enforce(ChangeTracker);
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // The platform's own data keys, wrapped by Encryption:PlatformKeyEncryptionKey. They protect
+        // operator secrets only; the platform never holds a key for customer data.
+        modelBuilder.AddDataKeys(Schema);
+
         modelBuilder.Entity<Tenant>(e =>
         {
             e.ToTable("tenant", Schema);

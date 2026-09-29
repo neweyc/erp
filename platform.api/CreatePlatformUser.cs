@@ -1,4 +1,6 @@
 using AppPlatform.Auth;
+using AppPlatform.Encryption;
+using AppPlatform.Platform.Auth;
 using AppPlatform.Ids;
 using AppPlatform.Platform.Data;
 using Microsoft.EntityFrameworkCore;
@@ -25,18 +27,15 @@ public static class CreatePlatformUser
     public const int MinimumPasswordLength = 12;
 
     /// <summary>Wires the database and reads stdin; the decisions live in <see cref="CreateAsync"/>.</summary>
-    public static async Task<int> RunAsync(string connectionString, string[] args)
+    public static async Task<int> RunAsync(string connectionString, KeyEncryptionKey kek, string[] args)
     {
         var email = args.SkipWhile(a => a != "create-platform-user").Skip(1).FirstOrDefault();
         var password = await Console.In.ReadLineAsync();
 
-        await using var db = new PlatformDbContext(
-            new DbContextOptionsBuilder<PlatformDbContext>()
-                .UseNpgsql(connectionString)
-                .UseSnakeCaseNamingConvention()
-                .Options);
+        await using var db = PlatformDbContext.ForConnection(connectionString);
+        var keyRing = await KeyRing.LoadOrCreateAsync(db, kek, TimeProvider.System);
 
-        var (exitCode, message) = await CreateAsync(db, email, password, TimeProvider.System);
+        var (exitCode, message) = await CreateAsync(db, keyRing, email, password, TimeProvider.System);
 
         (exitCode == 0 ? Console.Out : Console.Error).WriteLine(message);
         return exitCode;
@@ -47,7 +46,7 @@ public static class CreatePlatformUser
     /// that matters most: a re-run must NOT change an existing operator's password.
     /// </summary>
     internal static async Task<(int ExitCode, string Message)> CreateAsync(
-        PlatformDbContext db, string? emailArgument, string? password, TimeProvider clock)
+        PlatformDbContext db, KeyRing keyRing, string? emailArgument, string? password, TimeProvider clock)
     {
         var email = emailArgument?.Trim().ToLowerInvariant();
 
@@ -78,6 +77,11 @@ public static class CreatePlatformUser
             CreatedAt = now,
         };
 
+        // Enrolled at creation, on the machine, not at first sign-in. Enrolling at first sign-in
+        // would let whoever first uses the password bind THEIR authenticator; a password leaked
+        // before then would hand over the second factor too.
+        var secret = OperatorMfa.Enroll(user, keyRing);
+
         db.PlatformUsers.Add(user);
 
         db.AuditLogs.Add(new PlatformAuditLog
@@ -91,6 +95,19 @@ public static class CreatePlatformUser
 
         await db.SaveChangesAsync();
 
-        return (0, $"create-platform-user: created {user.PublicId} ({email})");
+        return (0, $"create-platform-user: created {user.PublicId} ({email})\n" + SecretNotice(email, secret));
     }
+
+    /// <summary>
+    /// The secret, shown ONCE, for the operator to add to an authenticator app. It is not stored in
+    /// plaintext anywhere, so it cannot be shown again; a lost one is replaced with
+    /// reset-platform-user-mfa. The terminal's scrollback holds it until cleared.
+    /// </summary>
+    internal static string SecretNotice(string email, string secret)
+        => $"{SecretLinePrefix}{secret}\n" +
+           $"Authenticator link: {Totp.ProvisioningUri(OperatorMfa.Issuer, email, secret)}\n" +
+           "Add it to an authenticator app now. It is not shown again.";
+
+    /// <summary>Scripts (the e2e harness) read the secret from the line starting with this.</summary>
+    internal const string SecretLinePrefix = "MFA secret (shown once): ";
 }

@@ -39,8 +39,9 @@ knowing what the app does? If no, it is not a package.
 - `audit` — `IAuditable` and `AuditedDbContext`, which stages audit rows on every save. Each
   service owns its own `audit_log` in its own schema (core's covers `identity` too). See
   `docs/audit.md`.
-- `encryption` — AES-256-GCM field converter. Encrypted columns get no max length and
-  **cannot be searched or filtered in SQL**; cap plaintext length in handler validation.
+- `encryption` — envelope encryption: AES-256-GCM values under data keys, data keys wrapped by a
+  key-encryption key from configuration (see the root CLAUDE.md). Encrypted columns get no max
+  length and **cannot be searched or filtered in SQL**; cap plaintext length in handler validation.
 - `storage` — `IFileStore`. Never touch the filesystem from feature code.
 - `email` — `IEmailService`, transport chosen by which credential is present. Sending
   never happens inside a request transaction.

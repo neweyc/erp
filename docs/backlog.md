@@ -238,7 +238,8 @@ ERP will need again.
   `FileEmailTransport`, which is a local capture substitute gated to non-production. A real
   transport (SMTP/HTTP API) does not exist.
 - **Resend invitation.** If delivery dead-letters there is no way to reissue without SQL.
-- **MFA enforcement** for operators. Schema and evaluator gate exist; enrolment does not. M2.
+- **Operator MFA polish (M3):** step-up re-authentication for destructive operator actions
+  (docs/auth-and-access.md §8), and web enrolment/recovery UX. Enforcement itself is Cycle 10.
 - **Backup and restore, Stage 2; key recovery.** Stage 1 (scripts and an automated drill) is
   Cycle 8. What needs a hosting provider, and key custody (item 14), remain. Gates the first real
   customer data.
@@ -646,6 +647,56 @@ Open from the closure: D16.
 
 ## Current cycle
 
+**Cycle 10 — envelope encryption and mandatory operator MFA (M2 items 14 and 16).** Chris decided
+envelope encryption with a data key per tenant, and deferred where production keys live.
+**Complete. Independent review (Codex, three rounds) CLOSED: no blocking findings.**
+
+- `packages/encryption`: `KeyEncryptionKey` (base64 32 bytes from configuration; no default; a
+  fingerprint), `DataKey` (append-only, wrapped, keyed by id and KEK fingerprint so rotating the
+  KEK adds rows), `KeyRing` (AES-256-GCM, `enc:v1:<key id>:<payload>`, every value bound to its
+  row and column; loads at startup, creating the first key; fails there, naming fingerprints, on
+  a wrong KEK). Deliberately not yet: the per-tenant lookup and the EF converter. Nothing
+  tenant-scoped is encrypted yet, and a converter would capture one key ring in EF's cached model.
+- `platform.data_key` (migration `AddDataKeysAndOperatorTotp`, both SQL scripts generated), listed
+  append-only in `02-grants.sql` and `99-verify.sql`. `PlatformDbContext` now enforces
+  `AppendOnlyGuard` on save.
+- `packages/auth/Totp.cs`: RFC 6238, ±1 step, a code accepted once, base32, the provisioning URI.
+- Operator sign-in takes password and code together; no half-signed-in session exists. Answers
+  are the same `invalid_credentials` until the password is proven, then `mfa_not_enrolled`,
+  `mfa_required` or `mfa_code_invalid`. The accepted step is recorded by one conditional UPDATE
+  before the session is created.
+- `create-platform-user` enrols at creation and prints the secret once. This departs from
+  `platform.api/CLAUDE.md`'s "first login walks enrollment": that would let whoever first used the
+  password bind their own authenticator. `reset-platform-user-mfa` re-enrols and revokes sessions.
+- Evidence: 18 encryption tests; 22 TOTP tests (RFC vectors); 50 platform unit tests, including
+  the MFA outcomes; real-Postgres tests for enrolment, reset and the one-code race (8 concurrent,
+  exactly one wins); e2e `operator-mfa.spec.mjs` (password alone refused, wrong code refused, a
+  used code refused a second time). Broken on purpose, each caught by the right test: MFA checked
+  only when a code is sent; the replay guard removed. 27/27 Playwright.
+- Harness: operators sign in once per run and share the session (a code works once). The
+  readiness check now also requires the operator, after a failed run left tenants but no operator.
+- Not done: step-up for destructive operator actions (§8), web enrolment, per-account limiting on
+  code guesses (the per-address limit applies).
+- **Review.** Round 1: 3 blocking. (a) A reset racing a sign-in could leave a session admitted by
+  the OLD secret. Fixed: using the code and creating the session are now one transaction, requiring
+  the secret version the code was checked against, and the reset locks the operator row
+  (`FOR UPDATE`) before reading sessions. (b) Password-only sessions from before this change
+  survived it. Fixed: the migration revokes them (stop the old platform.api before applying). (c)
+  Concurrent first starts could each create a first key. Round 2 found my first fix (a fixed first
+  key id) still failed when the racers had DIFFERENT KEKs. Fixed properly: a transaction-scoped
+  Postgres advisory lock around read-and-create; a wrong-key racer then fails at startup and writes
+  nothing. An advisory lock because the runtime role cannot `LOCK TABLE` an append-only table.
+  Should-fix: the harness's saved operator session now respects the 30-minute idle and 8-hour
+  absolute limits. Round 3: no blocking findings.
+- Each fix is proved on real Postgres with the interleaving forced, not hoped for: one side held
+  mid-transaction by hand, the other asserted blocked on the lock, then released
+  (`OperatorMfaRaceTests`), plus an upgrade test that migrates a database holding a live
+  password-only session (`OperatorMfaUpgradeTests`). Each fails when its fix is removed: no version
+  predicate, no `FOR UPDATE`, no advisory lock, no revocation step. Final: 630 .NET tests, 27/27
+  Playwright.
+
+## Previous cycle
+
 **Cycle 9 — rate limiting anonymous endpoints (M2 item 18).** Chosen as the one unblocked M2 item.
 Operator MFA (16) needs `packages/encryption` and the key-custody decision (14) first. **Complete.
 Independent review (Codex, two rounds) CLOSED: no blocking findings.**
@@ -765,16 +816,18 @@ against the upgraded schema are required here, even with coordinated releases.
 
 13. Backup of database **and** file storage together, restored and **verified working**,
     not merely completed. A restore that has never been exercised is a hypothesis.
-14. **Encryption key custody and recovery.** Losing `Encryption:FieldKey` loses the data
+14. **Encryption key custody and recovery.** Losing a key-encryption key loses the data under it
     permanently. Where the key lives, who can retrieve it, and how recovery is rehearsed
     must be written down and tested before the key protects anything real. Key
-    *rotation* can wait; key *recovery* cannot.
+    *rotation* can wait; key *recovery* cannot. *Structure decided and built in Cycle 10
+    (envelope, per-tenant data keys, KEKs from configuration); the custody LOCATION is deferred by
+    Chris (docs/open-questions.md) and still gates the first deployment.*
 15. Restore drill script and runbook. *Stage 1 built in Cycle 8: scripts, an automated drill on
     every CI run, and `ops/README.md`. Stage 2 (provider, timed real drill) outstanding.*
 16. **Mandatory operator MFA, enforced.** An operator reaches the control plane for every
     tenant, so an unprotected operator account is a larger exposure than most of this
     milestone. Enforcement belongs to the gate; enrolment polish and the recovery UX can
-    wait for M3.
+    wait for M3. *Enforced: Cycle 10.*
 17. Per-project audit logging and the operator error feed (metadata only).
 18. Rate limiting on anonymous auth endpoints and uploads. *Anonymous endpoints: built (see
     Cycle 9 below and `docs/auth-and-access.md` §3a). Per-account limiting and uploads (not

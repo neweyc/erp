@@ -46,7 +46,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE ap_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBL
 -- ---------------------------------------------------------------------------
 -- Every `audit_log`, in every schema, plus the tables listed below, lose UPDATE, DELETE and
 -- TRUNCATE for every runtime role. A posted journal is corrected by a reversal, never an edit;
--- an audit row is never corrected at all. The code refuses both too (IAppendOnly), but only for
+-- an audit row is never corrected at all; a data key is never edited, because deleting one makes
+-- everything encrypted under it unreadable for good. The code refuses both too (IAppendOnly), but only for
 -- code that goes through it — this is the defence that holds against code that is not in this
 -- repo.
 --
@@ -79,7 +80,8 @@ BEGIN
     SELECT to_regclass(listed)
     FROM unnest(ARRAY[
       'ledger.journal_entry',
-      'ledger.journal_line'
+      'ledger.journal_line',
+      'platform.data_key'
     ]) AS listed
     WHERE to_regclass(listed) IS NOT NULL
   LOOP

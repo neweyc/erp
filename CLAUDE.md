@@ -380,12 +380,22 @@ You have now written these twice (redshift -> EMS). A third copy is the bad outc
   and on anything that will be encrypted. Append-only: runtime roles hold no UPDATE/DELETE/TRUNCATE
   on any `audit_log`. `BoundaryTests` requires every tenant-scoped, publicly identified entity to be
   auditable. Not built: login and other non-entity events. Design: `docs/audit.md`.
+- `packages/encryption` — **envelope encryption** (decided 2026-09-29). Field values are AES-256-GCM
+  under a data key; data keys are stored only WRAPPED by a key-encryption key (KEK) that comes from
+  configuration and never touches the database. Each service keeps its data keys in its own schema's
+  append-only `data_key` table; `KeyRing` loads them at startup and fails there, naming the
+  fingerprints, if the configured KEK is wrong. Every value is bound to its row and column. Customer
+  data gets **one data key per tenant** (erase a tenant by deleting its key); the platform has its
+  own KEK (`Encryption:PlatformKeyEncryptionKey`) for operator secrets and never receives the tenant
+  KEK. Built today: the envelope, the key ring, the platform's key. **Not yet built**: the per-tenant
+  key lookup and the EF field converter, which arrive with the first encrypted tenant field.
+  Encrypted columns get no max length and **cannot be searched or filtered in SQL** — keep
+  queryable fields plaintext. Where production KEKs live and how they are recovered is deferred
+  (`docs/open-questions.md`) and gates the first customer deployment.
 
 **Not built.** Declared here because the shape is decided, not because it exists. Do not write
 code that assumes one of these is available — check first.
 
-- `packages/encryption` — AES-256-GCM field converter. Encrypted columns get no max length and
-  **cannot be searched or filtered in SQL** — keep queryable fields plaintext.
 - `packages/storage` — `IFileStore`; bytes at `tenant-{id}/{app}/{yyyy}/{MM}/{guid}`, metadata in
   the app's own `stored_file` table. Never touch the filesystem from feature code.
 - `packages/email` — a real `IEmailService` transport. Today `packages/outbox` ships
@@ -434,7 +444,7 @@ false and would be believed.
 
 | Mechanism | What it actually guarantees |
 |---|---|
-| Platform never receives `Encryption:FieldKey` | **Encrypted columns only** — PII, narratives, termination reasons — are unreadable ciphertext. It says nothing about plaintext. |
+| Platform never receives the tenant key-encryption key | **Encrypted columns only** — PII, narratives, termination reasons — are unreadable ciphertext. It says nothing about plaintext. |
 | `PlatformDbContext` maps only `platform` + slim `tenant` | Code **in this repo** cannot accidentally query customer tables. It does not constrain raw SQL or a compromised process. |
 | **Postgres role grants** (`database/privileges.sql`) | The connection is *unable* to read `core`, `identity`, or any app schema. This is the only one of the three that holds against code that is not in this repo. |
 

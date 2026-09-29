@@ -40,6 +40,13 @@ remain open; they are not a blanket prohibition on building experiments.
   lives. The handshake, progress reporting, and failure/resume semantics are unspecified.
   Key *recovery* is a different and more urgent thing — it gates the first customer
   deployment (`backlog.md`, Milestone 2).
+- **Where production keys live, and how they are recovered** (deferred by Chris, 2026-09-29). The
+  structure is decided: envelope encryption, a data key per tenant, KEKs from configuration. The
+  location of the tenant KEK, the platform KEK, and the backup `age` identity is not: a Docker
+  secret or environment variable to start, a password manager or a cloud KMS (bring-your-own-key,
+  keeping the original offline) later. **Gates the first customer deployment**, together with a
+  recovery drill that restores a backup and decrypts a known value. Until then, at minimum two
+  offline copies of each production key the day it is generated.
 - **Row-level security as defence in depth** behind the EF tenant filter. Attractive, and
   it changes how pooling and tenant context work. See `database-privileges.md`.
 - **Impersonation for support** ("operator views tenant as admin") is undesigned and

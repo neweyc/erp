@@ -29,6 +29,12 @@ public static class OperatorProblems
     public const string OperatorDeactivated = "operator_deactivated";
     public const string MfaRequired = "mfa_required";
     public const string InvalidCredentials = "invalid_credentials";
+
+    /// <summary>Right password, but the authenticator code is wrong, stale, or already used.</summary>
+    public const string MfaCodeInvalid = "mfa_code_invalid";
+
+    /// <summary>Right password, but no authenticator is enrolled: run reset-platform-user-mfa on the machine.</summary>
+    public const string MfaNotEnrolled = "mfa_not_enrolled";
 }
 
 /// <summary>

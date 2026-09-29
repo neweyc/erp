@@ -51,8 +51,12 @@ Widening any of this is a design decision with a written record, never a conveni
 ## Operator auth
 
 Separate operator accounts, sessions, and tokens from tenant identity. **MFA is
-mandatory**; first login walks enrollment. Accounts are created by CLI with the password
-read from stdin, never a flag. Recovery is a CLI reset, not a self-service flow.
+mandatory**: sign-in takes the password and a current authenticator code together, and no session
+exists until both pass. Accounts are created by CLI with the password read from stdin, never a
+flag, and are **enrolled in MFA at creation** — not at first sign-in, which would let whoever first
+used the password bind their own authenticator. Recovery is a CLI reset
+(`reset-platform-user-mfa`, which also revokes the operator's sessions), not a self-service flow.
+A code is accepted once (RFC 6238 §5.2).
 
 ## Provisioning delegates
 

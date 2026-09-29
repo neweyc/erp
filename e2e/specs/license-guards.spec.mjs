@@ -1,5 +1,5 @@
 import { expect, request, test } from '@playwright/test'
-import { OPERATOR_EMAIL, OPERATOR_PASSWORD, seededTenantPublicId } from '../stack.mjs'
+import { operatorSignIn, seededTenantPublicId } from '../stack.mjs'
 
 const PLATFORM = 'http://localhost:5101'
 
@@ -13,11 +13,8 @@ const PLATFORM = 'http://localhost:5101'
  */
 test('a grant without the csrf token is refused', async () => {
   const tenantId = seededTenantPublicId()
-  const api = await request.newContext({ baseURL: PLATFORM })
-
-  await api.post('/api/platform/v1/auth/sign-in', {
-    data: { email: OPERATOR_EMAIL, password: OPERATOR_PASSWORD },
-  })
+  // A signed-in operator whose request simply omits the header.
+  const { api } = await operatorSignIn()
 
   const forged = await api.post(`/api/platform/v1/tenants/${tenantId}/entitlements`, {
     data: { app: 'tickets', licensed: true },
