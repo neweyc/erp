@@ -48,6 +48,8 @@ ops/                         backup/restore/drill, deployment scripts
 docs/                        architecture, decisions, backlog, open questions
 ```
 
+Running the whole platform locally, step by step: `docs/local-development.md`.
+
 Prioritized roadmap lives in `docs/backlog.md`; undecided things live in
 `docs/open-questions.md`. Keep both current — an open question that has been answered
 in conversation but not written down will be re-litigated.

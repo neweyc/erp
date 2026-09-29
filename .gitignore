@@ -41,3 +41,7 @@ coverage/
 # the repo root would record it as a gitlink rather than as files. Scoped to
 # worktrees/ deliberately: the rest of .claude/ holds shareable project config.
 .claude/worktrees/
+
+# Local development (docs/local-development.md): settings with a key-encryption key, the shared
+# data-protection key ring, and captured email holding invitation tokens. Never committed.
+.local/
