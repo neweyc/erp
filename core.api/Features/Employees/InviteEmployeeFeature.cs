@@ -20,10 +20,20 @@ public static class InviteEmployeeFeature
 {
     public record InviteEmployeeCommand(string? Role);
 
+    /// <summary>
+    /// Who may invite. Administrators only, because an invitation grants any role — admin
+    /// included — to whoever holds the email address. Open to every signed-in user, a member could
+    /// create an employee at an address they control, invite it as admin, and accept. Declared
+    /// here because packages/auth has no role or policy model yet (CLAUDE.md: Roles.* and Policy*
+    /// constants, not built); move it there when that exists.
+    /// </summary>
+    public static readonly string[] RolesThatMayInvite = ["admin"];
+
     public class InviteEmployeeCommandHandler(
         IEmployeeService employees,
         IUserService users,
-        IOutbox outbox)
+        IOutbox outbox,
+        TimeProvider clock)
     {
         private static readonly string[] Roles = ["admin", "manager", "member"];
 
@@ -31,6 +41,14 @@ public static class InviteEmployeeFeature
             Caller caller, string employeePublicId, InviteEmployeeCommand cmd,
             CancellationToken ct = default)
         {
+            // First, before any lookup or write: a refusal must not reveal whether the employee
+            // exists, and must stage nothing.
+            if (!RolesThatMayInvite.Contains(caller.Role))
+            {
+                return CommandResult.Forbidden(
+                    CoreProblems.NotPermitted, "Only an administrator can invite people.");
+            }
+
             // The prefix is the point: without this check a ticket id passed here finds no
             // employee, the caller gets a 404, and the actual mistake — two kinds of id sharing
             // one route parameter — never surfaces.
@@ -91,14 +109,20 @@ public static class InviteEmployeeFeature
 
             users.Add(user);
 
-            // Staged, then committed with the user — never sent first. Sending before the commit
-            // is how a recipient ends up holding a link to an invitation that does not exist;
-            // committing before queueing is how an invite is created that nobody is ever told
-            // about. Both rows go in one transaction.
+            // The link the invitee accepts with. Without it the account can never be activated:
+            // accepting requires a token, and a second invitation is refused because this account
+            // now exists (D17 — what this line was missing).
+            var (token, plaintext) = InvitationToken.Issue(user.Id, clock.GetUtcNow());
+            users.AddToken(token);
+
+            // Staged, then committed with the user and the token — never sent first. Sending before
+            // the commit is how a recipient ends up holding a link to an invitation that does not
+            // exist; committing before queueing is how an invite is created that nobody is ever
+            // told about. All three rows go in one transaction.
             outbox.AddMessage(
                 OutboxTransports.Email,
                 destination: user.Email,
-                payload: $$"""{"kind":"invite","userId":"{{user.PublicId}}"}""");
+                payload: $$"""{"kind":"invite","userId":"{{user.PublicId}}","token":"{{plaintext}}"}""");
 
             await employees.SaveAsync(ct);
 
@@ -117,9 +141,10 @@ public static class InviteEmployeeFeature
                 [FromServices] IEmployeeService employees,
                 [FromServices] IUserService users,
                 [FromServices] IOutbox outbox,
+                [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new InviteEmployeeCommandHandler(employees, users, outbox);
+                var handler = new InviteEmployeeCommandHandler(employees, users, outbox, clock);
                 var result = await handler.Handle(callerContext.Require(), employeeId, cmd, ct);
                 return result.CreateIResult();
             })

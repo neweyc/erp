@@ -122,18 +122,8 @@ public static class ProvisionTenantFeature
             // email, and this outbox payload. That payload is a password-equivalent credential
             // in a readable table, which is why OutboxWorker prunes delivered messages on the
             // retention schedule rather than leaving them forever.
-            var (plaintext, hash) = Services.TokenGenerator.Create();
-
-            db.UserTokens.Add(new UserToken
-            {
-                UserId = admin.Id,
-                Purpose = TokenPurpose.Invite,
-                TokenHash = hash,
-                CreatedAt = now,
-                // Long enough to survive a weekend and a spam folder; short enough that a
-                // forgotten invitation is not a permanent way in.
-                ExpiresAt = now.AddDays(7),
-            });
+            var (token, plaintext) = Services.InvitationToken.Issue(admin.Id, now);
+            db.UserTokens.Add(token);
 
             // Staged, then committed with everything else. Sending first and committing after
             // is how a recipient ends up holding a link to a tenant that does not exist.

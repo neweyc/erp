@@ -52,4 +52,6 @@ public class EFUserService(CoreDbContext db) : IUserService
         => db.Users.FirstOrDefaultAsync(u => u.EmployeeId == employeeId, ct);
 
     public void Add(User user) => db.Users.Add(user);
+
+    public void AddToken(UserToken token) => db.UserTokens.Add(token);
 }

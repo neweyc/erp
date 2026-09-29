@@ -22,4 +22,7 @@ public interface IUserService
     Task<bool> EmailInUseAsync(string email, CancellationToken ct = default);
     Task<User?> FindByEmployeeAsync(Guid employeeId, CancellationToken ct = default);
     void Add(User user);
+
+    /// <summary>An invitation or reset token for a user, saved with the next save.</summary>
+    void AddToken(UserToken token);
 }

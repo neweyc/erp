@@ -231,7 +231,8 @@ export async function waitForInvitation(
 
   throw new Error(
     `No invitation delivered to ${toAddress} after ${floor.toISOString()} within ${timeoutMs}ms. ` +
-    'The outbox worker did not run, or delivery failed — check core.outbox_message.last_error.')
+    'The outbox worker did not run, delivery failed (check core.outbox_message.last_error), or the ' +
+    'message was delivered without a token in its payload.')
 }
 
 export function resetCapture() {
