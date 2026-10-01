@@ -647,6 +647,26 @@ Open from the closure: D16.
 
 ## Current cycle
 
+**Developer tooling: `bin/dev` (2026-09-30).** One command for everything in
+`docs/local-development.md`: setup, up/down/status/logs, operator create/reset, tenant create
+(licensing, pinning core.api, the invitation link), invite-link, reset. bash 3.2 (macOS).
+**Independent review (Codex, four rounds) CLOSED: no blocking findings.** What the review and
+testing caught, each fixed and checked:
+- stopping a service by `lsof -i :port` also killed its clients (platform.api via core, and the
+  browser via the shell); it now matches only the listener;
+- secrets in process arguments (the operator password, then the platform key via `env`): bodies go
+  to node and curl on stdin, settings are exported in a subshell, and checked with `ps`;
+- `.local/` was world-readable: `umask 077` in the script and in `dev.env`;
+- a half-finished setup looked complete: a marker is written only after `99-verify.sql` passes;
+- a restart could leave the old, unpinned core running: stopping waits for the port;
+- `reset` could delete local state while the database survived (failed listings, and the `grep -q`
+  SIGPIPE under pipefail, reproduced with a 20,000-line listing): fixed, and a failed listing stops it;
+- values written unescaped to `dev.env`, emails not normalised as the API does, the platform key
+  exported to every service, and BSD-only `sed -i`.
+Verified by full runs on `/bin/bash` 3.2, including a password containing `"` and `\`.
+
+## Previous cycle
+
 **Cycle 11 — the operator error feed (M2 item 17).** Chris: "build the operator feed". Shape as
 `platform.api/CLAUDE.md` fixed it: metadata only, bounded, rate-limited per fingerprint, never
 blocking, throwing or recursing. **Complete. Independent review (Codex, two rounds) CLOSED: no

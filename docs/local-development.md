@@ -11,6 +11,39 @@ again is Part 7.
 
 ---
 
+## Quick start: `bin/dev`
+
+`bin/dev` does everything in Parts 2–7 for you. The parts below remain the explanation of what it
+does, and the way to do any step by hand. After the prerequisites in Part 1:
+
+```bash
+bin/dev setup                                   # build, settings, database (safe to re-run)
+bin/dev operator create you@example.com         # asks for a password; prints the MFA secret ONCE
+bin/dev up                                      # database + four APIs + shell, in the background
+bin/dev tenant create "Acme Fire" admin@acme.test
+                                                # asks for the operator password and a current code,
+                                                # creates the tenant, licenses Tickets and Ledger,
+                                                # pins core.api to it, prints the invitation link
+```
+
+Open the printed link, set the admin's password, then sign in at http://localhost:5173.
+
+Day to day:
+
+| Command | Does |
+|---|---|
+| `bin/dev up` / `bin/dev down` | start / stop everything (data is kept) |
+| `bin/dev status` | what is running, the operator, the pinned tenant |
+| `bin/dev logs core` | follow a service's log (`core`, `platform`, `tickets`, `ledger`, `shell`); logs are in `.local/logs/` |
+| `bin/dev invite-link [email]` | the newest invitation link, for that address if given |
+| `bin/dev operator reset` | a new authenticator secret for the operator (lost phone) |
+| `bin/dev reset` | delete the local database and state, after you type `reset`; keeps `.local/dev.env` |
+
+It runs the services in the background with `dotnet run --no-build` after one build, and stops them
+by the process listening on each port.
+
+---
+
 ## What runs where
 
 | Piece | Where | Notes |
@@ -66,8 +99,11 @@ a different key the platform refuses to start (it names both key fingerprints), 
 to re-enrol the operator (see Troubleshooting).
 
 ```bash
-mkdir -p .local/keys .local/mail
+mkdir -p .local/keys .local/mail && chmod -R 700 .local   # it will hold keys: readable by you only
+umask 077                                                # and so will everything written into it
 cat > .local/dev.env <<EOF
+# Every terminal that sources this writes owner-only files: keys, captured mail, logs.
+umask 077
 export ASPNETCORE_ENVIRONMENT=Development
 
 # One key ring for every service, or a cookie issued by core is unreadable by tickets and every
@@ -81,8 +117,9 @@ export Email__CapturePath="$(pwd)/.local/mail"
 export Internal__ApiKey="$(openssl rand -hex 24)"
 export Core__BaseUrl="http://localhost:5100"
 
-# The platform's key-encryption key. Only platform.api receives it.
-export Encryption__PlatformKeyEncryptionKey="$(openssl rand -base64 32)"
+# The platform's key-encryption key. NOT exported, so no other service inherits it: platform
+# commands below pass it to platform.api explicitly.
+PLATFORM_KEK="$(openssl rand -base64 32)"
 
 # The database, without a user: each service adds its own role.
 export DB="Host=localhost;Port=5433;Database=appplatform;Password=dev"
@@ -124,6 +161,13 @@ docker exec app-platform-dev-db psql -U postgres -d appplatform -c "
   ALTER ROLE ap_platform_rt PASSWORD 'dev';"
 ```
 
+Finally, mark the database as set up. `bin/dev` checks for this mark, so that it treats a setup
+which stopped half way as unfinished; without it, `bin/dev` would refuse this database:
+
+```bash
+docker exec app-platform-dev-db psql -U postgres -d appplatform -c "COMMENT ON DATABASE appplatform IS 'bin/dev: initialised'"
+```
+
 ## Part 5 — Create your operator
 
 Operators are created on the machine, never over the API. The password is read from stdin so it
@@ -132,8 +176,9 @@ stays out of your shell history. It must be at least 12 characters.
 ```bash
 source .local/dev.env
 read -rs "OPERATOR_PASSWORD?Operator password: " && echo   # zsh; in bash: read -rsp "Operator password: " OPERATOR_PASSWORD
-echo "$OPERATOR_PASSWORD" | \
+printf '%s\n' "$OPERATOR_PASSWORD" | \
   ConnectionStrings__Platform="$DB;Username=ap_platform_rt" \
+  Encryption__PlatformKeyEncryptionKey="$PLATFORM_KEK" \
   dotnet run --project platform.api --no-launch-profile -- create-platform-user you@example.com
 ```
 
@@ -152,8 +197,9 @@ Open **five terminal tabs** at the repository root. In each, run `source .local/
 ConnectionStrings__Core="$DB;Username=ap_core_rt" \
   dotnet run --project core.api --no-launch-profile --urls http://localhost:5100
 
-# Tab 2: platform.api
+# Tab 2: platform.api (the only service given the platform's key)
 ConnectionStrings__Platform="$DB;Username=ap_platform_rt" \
+  Encryption__PlatformKeyEncryptionKey="$PLATFORM_KEK" \
   dotnet run --project platform.api --no-launch-profile --urls http://localhost:5101
 
 # Tab 3: tickets.api
@@ -190,9 +236,13 @@ source .local/dev.env
 read -rs "OPERATOR_PASSWORD?Operator password: " && echo
 read -r "CODE?Authenticator code: "
 
-curl -s -c .local/operator.jar -H 'Content-Type: application/json' \
-  -d "{\"email\":\"you@example.com\",\"password\":\"$OPERATOR_PASSWORD\",\"code\":\"$CODE\"}" \
-  http://localhost:5101/api/platform/v1/auth/sign-in
+# The body is built by node from environment variables and piped to curl, so the password never
+# appears in a command's arguments (which any process can read with `ps`), and a quote or backslash
+# in it cannot break the JSON.
+E=you@example.com P="$OPERATOR_PASSWORD" C="$CODE" \
+  node -e 'process.stdout.write(JSON.stringify({ email: process.env.E, password: process.env.P, code: process.env.C }))' \
+  | curl -s -c .local/operator.jar -H 'Content-Type: application/json' --data-binary @- \
+      http://localhost:5101/api/platform/v1/auth/sign-in
 # → {"signedIn":true}
 
 # Every change needs the CSRF token the sign-in issued, sent back as a header.
@@ -313,7 +363,7 @@ starts your app as a separate process, and stopping one does not always stop the
 port, then start again:
 
 ```bash
-kill $(lsof -ti :5100)     # or 5101, 5102, 5104, 5173
+kill $(lsof -ti tcp:5100 -sTCP:LISTEN)     # or 5101, 5102, 5104, 5173
 ```
 
 **Signed in, but every Tickets or Ledger call answers 401.** The services are not sharing one key
@@ -325,8 +375,12 @@ pinned to the tenant, or is pinned to a different one. Check tab 1 was started w
 `Tenant__PublicId="$TENANT"` and that `echo $TENANT` shows the tenant's id.
 
 **platform.api or `create-platform-user` refuses to start, naming key fingerprints.** It was started
-with a different `Encryption__PlatformKeyEncryptionKey` from the one that created its keys, almost
-always because `.local/dev.env` was recreated. Use the original file, or start completely fresh.
+with a different `PLATFORM_KEK` from the one that created its keys, almost always because
+`.local/dev.env` was recreated. Use the original file, or start completely fresh.
+
+**platform.api refuses to start: "Encryption:PlatformKeyEncryptionKey is required".** The command
+was missing `Encryption__PlatformKeyEncryptionKey="$PLATFORM_KEK"`, which is passed to platform.api
+on its own command line rather than exported to every service.
 
 **Lost the operator's authenticator, or its secret was never saved.** Re-enrol. This also signs the
 operator out everywhere:
@@ -334,6 +388,7 @@ operator out everywhere:
 ```bash
 source .local/dev.env
 ConnectionStrings__Platform="$DB;Username=ap_platform_rt" \
+  Encryption__PlatformKeyEncryptionKey="$PLATFORM_KEK" \
   dotnet run --project platform.api --no-launch-profile -- reset-platform-user-mfa you@example.com
 ```
 

@@ -1,0 +1,610 @@
+#!/usr/bin/env bash
+# Runs the whole platform on this machine: database, four APIs, and the shell.
+#
+# The steps are the ones docs/local-development.md explains by hand; this only saves the typing.
+# Everything local lives in .local/ (gitignored, readable only by you): settings, logs, the cookie
+# key ring, captured mail.
+#
+#   bin/dev setup                              once: check tools, build, settings, database
+#   bin/dev operator create <email>            once: an operator (prints the MFA secret, once)
+#   bin/dev up                                 start everything in the background
+#   bin/dev tenant create "<name>" <email>     a tenant with Tickets and Ledger, and its admin's invitation
+#   bin/dev invite-link [email]                the newest invitation link (for that address)
+#   bin/dev status                             what is running
+#   bin/dev logs <core|platform|tickets|ledger|shell>
+#   bin/dev down                               stop everything (data is kept)
+#   bin/dev operator reset                     new authenticator secret for the operator
+#   bin/dev reset                              delete the local database and state, after asking
+#
+# Written for the bash 3.2 that macOS ships. Run from anywhere; it works from the repository root.
+
+set -euo pipefail
+
+# Everything this creates (settings holding keys, the cookie key ring, captured invitations, the
+# operator's session) and everything the services it starts write: readable by you only.
+umask 077
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+LOCAL="$ROOT/.local"
+ENV_FILE="$LOCAL/dev.env"
+LOGS="$LOCAL/logs"
+OPERATOR_JAR="$LOCAL/operator.jar"
+
+DB_CONTAINER="app-platform-dev-db"
+DB_VOLUME="app-platform-dev-data"
+DB_PORT=5433
+
+# Written into the database once setup has finished every step, so a setup that failed half way
+# is recognised as unfinished rather than skipped next time.
+SETUP_MARKER="bin/dev: initialised"
+
+SHELL_URL="http://localhost:5173"
+
+say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
+die() { printf '\033[31mdev: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# --------------------------------------------------------------------------------------------
+# The services. Name, port, project, and the database role it connects as. The ports are fixed:
+# the shell's proxy (shell.ui/vite.config.ts) expects them.
+# --------------------------------------------------------------------------------------------
+SERVICES="core platform tickets ledger"
+
+port_of() {
+  case "$1" in
+    core) echo 5100 ;; platform) echo 5101 ;; tickets) echo 5102 ;; ledger) echo 5104 ;; shell) echo 5173 ;;
+    *) die "no service '$1' (core, platform, tickets, ledger, shell)" ;;
+  esac
+}
+
+project_of() {
+  case "$1" in
+    core) echo core.api ;; platform) echo platform.api ;;
+    tickets) echo apps/tickets/tickets.api ;; ledger) echo apps/ledger/ledger.api ;;
+  esac
+}
+
+connection_setting_of() {
+  case "$1" in
+    core) echo ConnectionStrings__Core ;; platform) echo ConnectionStrings__Platform ;;
+    tickets) echo ConnectionStrings__Tickets ;; ledger) echo ConnectionStrings__Ledger ;;
+  esac
+}
+
+# An endpoint that answers once the service is up: 401 with no session is a healthy answer.
+probe_of() {
+  case "$1" in
+    core) echo /api/core/v1/auth/session ;; platform) echo /api/platform/v1/errors ;;
+    tickets) echo /api/tickets/v1/tickets ;; ledger) echo /api/ledger/v1/accounts ;; shell) echo / ;;
+  esac
+}
+
+# --------------------------------------------------------------------------------------------
+# Local state
+# --------------------------------------------------------------------------------------------
+
+# Owner-only, including state from before this script set its umask.
+protect_local_state() {
+  mkdir -p "$LOCAL/keys" "$LOCAL/mail" "$LOGS"
+  chmod -R go-rwx "$LOCAL"
+}
+
+load_env() {
+  [ -f "$ENV_FILE" ] || die "no $ENV_FILE yet: run 'bin/dev setup' first."
+  protect_local_state
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+}
+
+# One `NAME=value` line in dev.env, replacing any earlier one. The value is shell-quoted (%q), so
+# sourcing the file reads it back exactly and never runs anything in it. Rewritten through a
+# temporary file and a rename, which works on any system and never leaves a half-written file.
+set_setting() {
+  local name="$1" value="$2" temporary
+  temporary="$(mktemp "$LOCAL/dev.env.XXXXXX")"
+  grep -v "^export $name=" "$ENV_FILE" > "$temporary" || true
+  printf 'export %s=%q\n' "$name" "$value" >> "$temporary"
+  mv "$temporary" "$ENV_FILE"
+}
+
+remove_setting() {
+  local name="$1" temporary
+  [ -f "$ENV_FILE" ] || return 0
+  temporary="$(mktemp "$LOCAL/dev.env.XXXXXX")"
+  grep -v "^export $name=" "$ENV_FILE" > "$temporary" || true
+  mv "$temporary" "$ENV_FILE"
+}
+
+# The platform's key-encryption key, which dev.env deliberately does NOT export: it is handed to
+# platform.api and the operator commands only, never to core, the apps or the shell.
+platform_kek() {
+  [ -n "${PLATFORM_KEK:-}" ] || die "PLATFORM_KEK is missing from $ENV_FILE."
+  printf '%s' "$PLATFORM_KEK"
+}
+
+# Addresses as the APIs store them: trimmed and lower case. Matching invitations, and the
+# idempotency key that makes a repeated 'tenant create' harmless, both depend on it.
+normalise_email() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+# --------------------------------------------------------------------------------------------
+# JSON for the operator API
+# --------------------------------------------------------------------------------------------
+
+# A JSON object from `name=text` and `name:=json` arguments ("licensed:=true" is a boolean,
+# "password=true" the text "true"). The pairs reach node on stdin, NUL-separated: printf is a shell
+# builtin, so no value — the operator's password included — ever appears in a process's arguments,
+# which any process on the machine can read with `ps`.
+json_object() {
+  printf '%s\0' "$@" | node -e '
+    let input = "";
+    process.stdin.on("data", chunk => input += chunk).on("end", () => {
+      const result = {};
+      for (const pair of input.split("\0").filter(p => p.length > 0)) {
+        const raw = pair.indexOf(":=");
+        const text = pair.indexOf("=");
+        if (raw >= 0 && raw < text) result[pair.slice(0, raw)] = JSON.parse(pair.slice(raw + 2));
+        else result[pair.slice(0, text)] = pair.slice(text + 1);
+      }
+      process.stdout.write(JSON.stringify(result));
+    });'
+}
+
+# POSTs the JSON on stdin, so the body never appears in curl's arguments either.
+post_json() {
+  curl -s -H 'Content-Type: application/json' --data-binary @- "$@"
+}
+
+# --------------------------------------------------------------------------------------------
+# The database
+# --------------------------------------------------------------------------------------------
+db_sql() { docker exec "$DB_CONTAINER" psql -U postgres -d appplatform -v ON_ERROR_STOP=1 -tAc "$1"; }
+
+# Whether a line of a listing is exactly NAME. grep reads ALL of its input (output discarded) rather
+# than stopping at the first match with -q: under pipefail, stopping early sends the writer SIGPIPE,
+# the pipeline reports failure, and a name that IS listed reads as missing.
+listed() { grep -x "$1" >/dev/null; }
+
+container_exists() { docker ps -a --format '{{.Names}}' | listed "$DB_CONTAINER"; }
+container_running() { docker ps --format '{{.Names}}' | listed "$DB_CONTAINER"; }
+
+start_db() {
+  if container_running; then
+    return
+  elif container_exists; then
+    say "starting the database"
+    docker start "$DB_CONTAINER" >/dev/null
+  else
+    say "creating the database container (port $DB_PORT, volume $DB_VOLUME)"
+    docker run -d --name "$DB_CONTAINER" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=appplatform \
+      -p "$DB_PORT:5432" -v "$DB_VOLUME:/var/lib/postgresql/data" postgres:16-alpine >/dev/null
+  fi
+
+  # A real query against the database, not pg_isready: the image runs a temporary server while it
+  # initialises, which answers before the database exists (see e2e/stack.mjs).
+  for _ in $(seq 1 60); do
+    db_sql "SELECT 1" >/dev/null 2>&1 && return
+    sleep 1
+  done
+  die "the database did not start; see: docker logs $DB_CONTAINER"
+}
+
+# The state of the schema: "done", "partial" (an earlier setup stopped half way), or "empty".
+db_state() {
+  if [ "$(db_sql "SELECT coalesce(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = 'appplatform'")" = "$SETUP_MARKER" ]; then
+    echo "done"
+  elif [ "$(db_sql "SELECT count(*) FROM pg_namespace WHERE nspname <> 'public' AND nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema'")" != "0" ]; then
+    echo "partial"
+  else
+    echo "empty"
+  fi
+}
+
+initialise_db() {
+  say "initialising the database (roles, schemas, migrations, grants)"
+  docker cp database "$DB_CONTAINER:/database"
+  # Notices silenced: re-granted memberships print one each, which reads like a problem.
+  docker exec -e PGUSER=postgres -e PGDATABASE=appplatform -e PGOPTIONS='-c client_min_messages=warning' \
+    "$DB_CONTAINER" bash /database/init-local.sh | grep -E '^==>'
+
+  # init-local.sh prints 99-verify.sql's findings but does not fail on them; this does.
+  local findings
+  findings="$(docker exec "$DB_CONTAINER" psql -U postgres -d appplatform -tA -f /database/privileges/99-verify.sql)"
+  [ -z "$findings" ] || die "99-verify.sql reported problems:
+$findings"
+  echo "    99-verify.sql: no findings"
+
+  # Roles are created without passwords; give each service's role a local one.
+  db_sql "ALTER ROLE ap_core_rt PASSWORD 'dev'; ALTER ROLE ap_tickets_rt PASSWORD 'dev';
+          ALTER ROLE ap_ledger_rt PASSWORD 'dev'; ALTER ROLE ap_platform_rt PASSWORD 'dev';" >/dev/null
+
+  # Last, so it is only there when everything above succeeded.
+  db_sql "COMMENT ON DATABASE appplatform IS '$SETUP_MARKER'" >/dev/null
+}
+
+# --------------------------------------------------------------------------------------------
+# setup
+# --------------------------------------------------------------------------------------------
+cmd_setup() {
+  say "checking tools"
+  command -v docker >/dev/null || die "Docker is not installed (docker.com)."
+  docker info >/dev/null 2>&1 || die "Docker is not running: start Docker Desktop."
+  command -v dotnet >/dev/null || die ".NET 10 SDK is not installed (dot.net)."
+  case "$(dotnet --version)" in 10.*) ;; *) die ".NET 10 SDK needed; found $(dotnet --version)." ;; esac
+  command -v node >/dev/null || die "Node.js 20.19+ is not installed (nodejs.org)."
+
+  say "installing packages and building"
+  npm ci --silent
+  dotnet build app-platform.slnx -v quiet -nologo -clp:NoSummary
+
+  protect_local_state
+  if [ -f "$ENV_FILE" ]; then
+    say "keeping existing $ENV_FILE"
+  else
+    say "writing $ENV_FILE (keep it: it holds the platform's key-encryption key)"
+    {
+      echo "# Local settings for bin/dev and docs/local-development.md. Readable by you only."
+      echo "# Every terminal that sources this writes owner-only files: keys, captured mail, logs."
+      echo "umask 077"
+      echo "export ASPNETCORE_ENVIRONMENT=Development"
+      echo "# One key ring for every service, or a cookie from core is unreadable by tickets (401 everywhere)."
+      printf 'export DataProtection__KeyPath=%q\n' "$LOCAL/keys"
+      echo "# Email is captured to files here instead of sent. Invitations arrive here."
+      printf 'export Email__CapturePath=%q\n' "$LOCAL/mail"
+      echo "# Shared by platform.api and core.api for provisioning tenants."
+      printf 'export Internal__ApiKey=%q\n' "$(openssl rand -hex 24)"
+      echo "export Core__BaseUrl=http://localhost:5100"
+      echo "# The platform's key-encryption key. NOT exported: give it to platform.api only, as"
+      echo "# Encryption__PlatformKeyEncryptionKey=\"\$PLATFORM_KEK\"."
+      printf 'PLATFORM_KEK=%q\n' "$(openssl rand -base64 32)"
+      echo "# The database, without a user: each service adds its own role."
+      printf 'export DB=%q\n' "Host=localhost;Port=$DB_PORT;Database=appplatform;Password=dev"
+    } > "$ENV_FILE"
+  fi
+
+  start_db
+  case "$(db_state)" in
+    done) say "database already initialised" ;;
+    empty) initialise_db ;;
+    partial) die "an earlier setup stopped part way through initialising the database. Start the database again
+from nothing with 'bin/dev reset', then 'bin/dev setup'." ;;
+  esac
+
+  say "done. Next: bin/dev operator create you@example.com"
+}
+
+# --------------------------------------------------------------------------------------------
+# up / down / status / logs
+# --------------------------------------------------------------------------------------------
+cmd_up() {
+  load_env
+  start_db
+  [ "$(db_state)" = "done" ] || die "the database is not set up: bin/dev setup"
+
+  say "building"
+  dotnet build app-platform.slnx -v quiet -nologo -clp:NoSummary
+
+  local service
+  for service in $SERVICES; do start_service "$service"; done
+  start_shell
+
+  for service in $SERVICES shell; do wait_for "$service"; done
+
+  if [ -z "${TENANT:-}" ]; then
+    say "up, with no tenant yet. Next: bin/dev tenant create \"Acme Fire\" admin@acme.test"
+  else
+    say "up. Open $SHELL_URL"
+  fi
+}
+
+# Started detached, output to .local/logs/<service>.log. --no-build because 'up' built once:
+# four simultaneous builds of shared projects trip over each other.
+start_service() {
+  local service="$1" port
+  port="$(port_of "$service")"
+  if is_listening "$port"; then
+    echo "    $service already running on $port"
+    return
+  fi
+
+  echo "    starting $service on $port"
+
+  # Read here, not inside the subshell, so a missing key stops this script instead of starting a
+  # platform.api that then fails on its own in the background.
+  local platform_key=""
+  [ "$service" = "platform" ] && platform_key="$(platform_kek)"
+
+  # In a subshell that EXPORTS the service's settings, rather than `env NAME=value …`: a setting
+  # passed to `env` is a command-line argument, which any process on the machine can read, and one
+  # of them is the platform's key. Each service gets its own database role; only platform.api gets
+  # the platform's key; core.api is pinned to one tenant for anonymous sign-in until tenants resolve
+  # by hostname (D5).
+  # shellcheck disable=SC2030 # exported only inside this subshell, on purpose
+  (
+    export "$(connection_setting_of "$service")=$DB;Username=ap_${service}_rt"
+    case "$service" in
+      platform) export Encryption__PlatformKeyEncryptionKey="$platform_key" ;;
+      core) export Tenant__PublicId="${TENANT:-}" ;;
+    esac
+    exec nohup dotnet run --no-build --project "$(project_of "$service")" \
+      --no-launch-profile --urls "http://localhost:$port" > "$LOGS/$service.log" 2>&1
+  ) &
+}
+
+start_shell() {
+  if is_listening 5173; then
+    echo "    shell already running on 5173"
+    return
+  fi
+  echo "    starting shell on 5173"
+  nohup npm run dev --workspace @app-platform/shell -- --port 5173 --strictPort > "$LOGS/shell.log" 2>&1 &
+}
+
+# Ready means answering HTTP at all.
+wait_for() {
+  local service="$1" port
+  port="$(port_of "$service")"
+  for _ in $(seq 1 120); do
+    if curl -s -o /dev/null "http://localhost:$port$(probe_of "$service")"; then
+      echo "    $service ready"
+      return
+    fi
+    sleep 1
+  done
+  tail -20 "$LOGS/$service.log" >&2 || true
+  die "$service did not start within 2 minutes; the end of its log is above ($LOGS/$service.log)."
+}
+
+# The process LISTENING on a port, and only that one. A bare `lsof -i :port` also lists every client
+# connected to it, so stopping core would stop platform.api (which calls core), and stopping the
+# shell would stop your browser.
+listener_on() { lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null || true; }
+is_listening() { [ -n "$(listener_on "$1")" ]; }
+
+# Stops a service by the process listening on its port, and waits until the port is free. 'dotnet
+# run' starts the app as a separate process and stopping one does not reliably stop the other; the
+# listener is always the app. Waiting matters: a restart that found the old process still listening
+# would leave it running, with the old settings.
+stop_service() {
+  local service="$1" port
+  port="$(port_of "$service")"
+  is_listening "$port" || return 0
+
+  listener_on "$port" | xargs kill 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    if ! is_listening "$port"; then
+      echo "    stopped $service"
+      return
+    fi
+    sleep 1
+  done
+  die "$service is still listening on $port after 20 seconds; stop it with: kill -9 \$(lsof -ti tcp:$port -sTCP:LISTEN)"
+}
+
+cmd_down() {
+  say "stopping services"
+  local service
+  for service in shell $SERVICES; do stop_service "$service"; done
+  if container_running; then
+    say "stopping the database (data is kept)"
+    docker stop "$DB_CONTAINER" >/dev/null
+  fi
+}
+
+cmd_status() {
+  local service port state
+  if container_running; then
+    echo "database   running (port $DB_PORT)"
+  else
+    echo "database   stopped"
+  fi
+  for service in $SERVICES shell; do
+    port="$(port_of "$service")"
+    if is_listening "$port"; then state="running"; else state="stopped"; fi
+    printf '%-10s %-8s http://localhost:%s\n' "$service" "$state" "$port"
+  done
+  if [ -f "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    echo "operator   ${OPERATOR_EMAIL:-none yet}"
+    if [ -n "${TENANT:-}" ]; then
+      echo "tenant     $TENANT (core.api is pinned to it)"
+    else
+      echo "tenant     none yet"
+    fi
+  fi
+}
+
+cmd_logs() {
+  [ $# -ge 1 ] || die "usage: bin/dev logs <core|platform|tickets|ledger|shell>"
+  port_of "$1" >/dev/null
+  tail -n 50 -f "$LOGS/$1.log"
+}
+
+# --------------------------------------------------------------------------------------------
+# The operator
+# --------------------------------------------------------------------------------------------
+# Exported in a subshell, never passed as arguments: see start_service.
+operator_command() {
+  local platform_key
+  platform_key="$(platform_kek)"
+  # shellcheck disable=SC2030,SC2031 # exported only inside this subshell, on purpose
+  (
+    export ConnectionStrings__Platform="$DB;Username=ap_platform_rt"
+    export Encryption__PlatformKeyEncryptionKey="$platform_key"
+    exec dotnet run --project platform.api --no-launch-profile -- "$@"
+  )
+}
+
+cmd_operator() {
+  load_env
+  start_db
+  case "${1:-}" in
+    create)
+      [ -n "${2:-}" ] || die "usage: bin/dev operator create <email>"
+      local email password
+      email="$(normalise_email "$2")"
+      read -rsp "Operator password (12+ characters): " password; echo
+      # On stdin, never as an argument.
+      printf '%s\n' "$password" | operator_command create-platform-user "$email"
+      # Remembered so 'tenant create' and 'status' know who the operator is.
+      set_setting OPERATOR_EMAIL "$email"
+      say "add the MFA secret above to your authenticator app now: it is not shown again."
+      ;;
+    reset)
+      [ -n "${OPERATOR_EMAIL:-}" ] || die "no operator yet: bin/dev operator create <email>"
+      operator_command reset-platform-user-mfa "$OPERATOR_EMAIL"
+      rm -f "$OPERATOR_JAR"
+      say "add the new MFA secret above to your authenticator app, replacing the old one."
+      ;;
+    *) die "usage: bin/dev operator create <email> | bin/dev operator reset" ;;
+  esac
+}
+
+# Signs the operator in, leaving the session in $OPERATOR_JAR and the CSRF token in $CSRF.
+# Password and code are asked for and never stored; the session lasts 30 minutes idle.
+operator_sign_in() {
+  [ -n "${OPERATOR_EMAIL:-}" ] || die "no operator yet: bin/dev operator create <email>"
+  local password code answer
+  read -rsp "Password for $OPERATOR_EMAIL: " password; echo
+  read -rp "Authenticator code: " code
+
+  answer="$(json_object "email=$OPERATOR_EMAIL" "password=$password" "code=$code" \
+    | post_json -c "$OPERATOR_JAR" http://localhost:5101/api/platform/v1/auth/sign-in)"
+  case "$answer" in
+    *signedIn*) ;;
+    *mfa_code_invalid*) die "that code was wrong or already used; wait for the next one and try again." ;;
+    *) die "operator sign-in failed: $answer" ;;
+  esac
+
+  CSRF="$(awk '$6=="ap_csrf"{print $7}' "$OPERATOR_JAR")"
+}
+
+# --------------------------------------------------------------------------------------------
+# A tenant
+# --------------------------------------------------------------------------------------------
+cmd_tenant() {
+  [ "${1:-}" = "create" ] && [ $# -eq 3 ] || die "usage: bin/dev tenant create \"<name>\" <admin-email>"
+  local name="$2" admin tenant answer app
+  admin="$(normalise_email "$3")"
+  load_env
+  if ! is_listening 5101 || ! is_listening 5100; then
+    die "the services are not running: bin/dev up"
+  fi
+
+  operator_sign_in
+
+  # Keyed by the admin's address, so running this twice for the same admin returns the same tenant
+  # instead of creating a second.
+  say "creating the tenant"
+  answer="$(json_object "name=$name" "adminEmail=$admin" "idempotencyKey=local-$admin" \
+    | post_json -b "$OPERATOR_JAR" -H "X-CSRF-Token: $CSRF" http://localhost:5101/api/platform/v1/tenants)"
+  tenant="$(echo "$answer" | sed -n 's/.*"tenantId":"\([^"]*\)".*/\1/p')"
+  [ -n "$tenant" ] || die "tenant creation failed: $answer"
+  echo "    $tenant"
+
+  say "licensing Tickets and Ledger"
+  for app in tickets ledger; do
+    answer="$(json_object "app=$app" "licensed:=true" \
+      | post_json -b "$OPERATOR_JAR" -H "X-CSRF-Token: $CSRF" \
+          "http://localhost:5101/api/platform/v1/tenants/$tenant/entitlements")"
+    case "$answer" in
+      *'"licensed":true'*|*app_already_licensed*) echo "    $app" ;;
+      *) die "licensing $app failed: $answer" ;;
+    esac
+  done
+
+  # Sign-in resolves the tenant from core.api's configuration until it resolves it from the
+  # hostname (D5), so core.api is pinned to this tenant and restarted.
+  set_setting TENANT "$tenant"
+  TENANT="$tenant"
+  say "restarting core.api pinned to $tenant"
+  stop_service core
+  start_service core
+  wait_for core
+
+  say "waiting for the invitation to $admin"
+  local link=""
+  for _ in $(seq 1 20); do
+    link="$(invite_link "$admin")"
+    [ -n "$link" ] && break
+    sleep 1
+  done
+  [ -n "$link" ] || die "no invitation arrived in $LOCAL/mail; see bin/dev logs core"
+
+  say "open this to set the admin's password, then sign in at $SHELL_URL as $admin"
+  echo "    $link"
+}
+
+# The newest captured invitation's link, for one address or for anyone.
+invite_link() {
+  node -e '
+    const fs = require("fs"), dir = process.argv[1], to = process.argv[2], shell = process.argv[3];
+    const invites = fs.readdirSync(dir).filter(n => n.endsWith(".json"))
+      .map(n => ({ path: dir + "/" + n, time: fs.statSync(dir + "/" + n).mtimeMs }))
+      .sort((a, b) => b.time - a.time)
+      .map(f => JSON.parse(fs.readFileSync(f.path, "utf8")))
+      .filter(m => m.payload && m.payload.token && (!to || m.to === to));
+    if (invites.length) console.log(shell + "/accept-invite?token=" + encodeURIComponent(invites[0].payload.token));
+  ' "$LOCAL/mail" "$1" "$SHELL_URL"
+}
+
+cmd_invite_link() {
+  local address="" link
+  [ -n "${1:-}" ] && address="$(normalise_email "$1")"
+  link="$(invite_link "$address")"
+  [ -n "$link" ] || die "no invitation found in $LOCAL/mail${address:+ for $address}"
+  echo "$link"
+}
+
+# --------------------------------------------------------------------------------------------
+# reset
+# --------------------------------------------------------------------------------------------
+cmd_reset() {
+  printf 'This deletes the local database, the operator, every tenant, and captured mail.\n'
+  printf 'Settings and keys in %s are kept. Type "reset" to continue: ' "$ENV_FILE"
+  local answer
+  read -r answer
+  [ "$answer" = "reset" ] || die "nothing deleted."
+
+  # The database goes first, and nothing local is deleted unless it really went: local state that
+  # points at a database still there would be worse than either.
+  docker info >/dev/null 2>&1 || die "Docker is not running, so the database cannot be deleted; nothing deleted."
+
+  local service
+  for service in shell $SERVICES; do stop_service "$service"; done
+
+  # Listed first, and a FAILED listing stops everything: it must not be mistaken for "not there",
+  # or a Docker hiccup here would delete local state while the database survives.
+  local containers volumes
+  containers="$(docker ps -a --format '{{.Names}}')" || die "could not list Docker containers; nothing deleted."
+  volumes="$(docker volume ls -q)" || die "could not list Docker volumes; nothing deleted."
+
+  if printf '%s\n' "$containers" | listed "$DB_CONTAINER"; then
+    docker rm -f "$DB_CONTAINER" >/dev/null || die "could not delete the container $DB_CONTAINER; nothing else deleted."
+  fi
+  if printf '%s\n' "$volumes" | listed "$DB_VOLUME"; then
+    docker volume rm "$DB_VOLUME" >/dev/null || die "could not delete the volume $DB_VOLUME; nothing else deleted."
+  fi
+
+  rm -rf "$LOCAL/keys" "$LOCAL/mail" "$OPERATOR_JAR"
+  remove_setting TENANT
+  remove_setting OPERATOR_EMAIL
+  say "reset. Start again with: bin/dev setup"
+}
+
+# --------------------------------------------------------------------------------------------
+case "${1:-}" in
+  setup) cmd_setup ;;
+  up) cmd_up ;;
+  down) cmd_down ;;
+  status) cmd_status ;;
+  logs) shift; cmd_logs "$@" ;;
+  operator) shift; cmd_operator "$@" ;;
+  tenant) shift; cmd_tenant "$@" ;;
+  invite-link) shift; cmd_invite_link "$@" ;;
+  reset) cmd_reset ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

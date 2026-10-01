@@ -1,5 +1,7 @@
 # .NET
 bin/
+# ...but not the repository-root bin/, which holds developer commands (bin/dev).
+!/bin/
 obj/
 *.user
 .vs/

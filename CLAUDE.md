@@ -43,6 +43,7 @@ apps/
     ledger.ui/               workspace package imported by shell.ui
 packages/                    shared libraries, versioned (see Shared code)
 database/                    generated SQL scripts, seed/reference data, ER diagrams
+bin/dev                      run the whole platform locally (docs/local-development.md)
 e2e/                         Playwright smoke of the critical journey
 ops/                         backup/restore/drill, deployment scripts
 docs/                        architecture, decisions, backlog, open questions
