@@ -23,6 +23,9 @@ public sealed record SessionContext
     public required int CompanyId { get; init; }
     public required TenantStatus TenantStatus { get; init; }
     public required string Role { get; init; }
+
+    /// <summary>App name to role name, decoded from <c>identity.user.app_roles</c>.</summary>
+    public IReadOnlyDictionary<string, string> AppRoles { get; init; } = new Dictionary<string, string>();
     public required bool UserActive { get; init; }
     public required bool MfaSatisfied { get; init; }
     public required DateTimeOffset LastSeenAt { get; init; }

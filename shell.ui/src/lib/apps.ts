@@ -1,7 +1,6 @@
 import type { ComponentType, LazyExoticComponent } from 'react'
 import { lazy } from 'react'
-
-export type Role = 'admin' | 'manager' | 'member'
+import { Permissions, type AppProps, type Permission } from '@app-platform/web-api'
 
 /**
  * One entry per app. This is the ONLY place an app is wired: nav, router, and permissions all
@@ -18,16 +17,17 @@ export interface AppDefinition {
   /** Route prefix. Every route the app owns lives under it. */
   readonly path: string
   /**
-   * Roles that may see the app at all. Hidden, never disabled — a disabled control advertises
-   * a capability the reader cannot have and invites them to ask for it.
+   * The permission needed to see the app at all — in practice its read permission, which every
+   * one of its roles grants. Hidden, never disabled: a disabled control advertises a capability
+   * the reader cannot have and invites them to ask for it.
    */
-  readonly roles: readonly Role[]
+  readonly permission: Permission
   /**
    * Deferred on purpose. Held as a function so the module is fetched only when an entitled
    * user actually routes to it: an unlicensed app's code must never reach the browser, both
    * because it is wasted bytes and because the bundle would advertise features nobody bought.
    */
-  readonly load: () => Promise<{ default: ComponentType }>
+  readonly load: () => Promise<{ default: ComponentType<AppProps> }>
 }
 
 /** Always on for every tenant, so it carries no entitlement and no registry entry. */
@@ -38,37 +38,40 @@ export const APPS: readonly AppDefinition[] = [
     id: 'tickets',
     name: 'Tickets',
     path: '/tickets',
-    roles: ['admin', 'manager', 'member'],
+    permission: Permissions.tickets.ticketRead,
     load: () => import('@app-platform/tickets-ui'),
   },
   {
     id: 'ledger',
     name: 'Ledger',
     path: '/ledger',
-    roles: ['admin', 'manager', 'member'],
+    permission: Permissions.ledger.read,
     load: () => import('@app-platform/ledger-ui'),
   },
 ]
 
 /**
- * What this viewer may open: licensed to the tenant AND permitted to the role.
+ * What this viewer may open: licensed to the tenant AND readable with their permissions.
  *
- * Both gates are cosmetic. The API enforces the entitlement independently and answers 403; the
- * shell only decides what to show. Treat anything decided here as a convenience, never as
- * access control.
+ * Both gates are cosmetic. The APIs enforce entitlement and permission independently and answer
+ * 403; the shell only decides what to show. Treat anything decided here as a convenience, never
+ * as access control.
  */
-export function visibleApps(licensedApps: readonly string[], role: Role): AppDefinition[] {
-  return APPS.filter((app) => licensedApps.includes(app.id) && app.roles.includes(role))
+export function visibleApps(
+  licensedApps: readonly string[],
+  permissions: readonly string[],
+): AppDefinition[] {
+  return APPS.filter((app) => licensedApps.includes(app.id) && permissions.includes(app.permission))
 }
 
-const componentCache = new Map<string, LazyExoticComponent<ComponentType>>()
+const componentCache = new Map<string, LazyExoticComponent<ComponentType<AppProps>>>()
 
 /**
  * Cached so a re-render does not re-enter the loader. React.lazy holds its own promise, but a
  * fresh lazy() on every render creates a fresh component type and remounts the app — losing
  * whatever the user had typed.
  */
-export function componentFor(app: AppDefinition): LazyExoticComponent<ComponentType> {
+export function componentFor(app: AppDefinition): LazyExoticComponent<ComponentType<AppProps>> {
   let component = componentCache.get(app.id)
 
   if (!component) {

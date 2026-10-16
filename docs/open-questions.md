@@ -72,7 +72,13 @@ remain open; they are not a blanket prohibition on building experiments.
 - **Who may see the employee roster, and with what fields?** `GetEmployeesFeature` returns email
   addresses to any authenticated user of any role, because the tickets assignee picker needs names.
   A member-role user arguably needs names without addresses. Raised by review 2026-09-25; a product
-  decision, not a defect.
+  decision, not a defect. Since the permission model (2026-10-15) the change is small: split
+  `core.employee.read` into names and contact details, and grant the second to fewer roles.
+- **Tenant-defined roles.** v1 roles are fixed in code (docs/permissions.md §1). Build custom roles
+  only when a customer asks; endpoints name permissions, so it would change the catalogue's storage,
+  not the features.
+- **Is the role matrix right?** The starting matrix in docs/permissions.md §2 was proposed, not
+  validated with anyone who runs a ticket queue or a set of books. Cheap to change: one file.
 
 ## Integration
 
@@ -87,9 +93,9 @@ remain open; they are not a blanket prohibition on building experiments.
 
 ## Ledger
 
-- **Who may post and reverse.** Today any signed-in user of a tenant that licensed the ledger can.
-  Posting to the books is usually a narrower permission than reading them; the role model for it is
-  undecided. Decide before a real customer's books are in it.
+- ~~Who may post and reverse.~~ **Decided (2026-10-15, docs/permissions.md):** ledger roles.
+  A viewer reads; an accountant also posts and reverses; a controller also adds accounts and
+  closes periods. Nobody has a ledger role until an administrator assigns one.
 - ~~Who may reopen a closed period.~~ **Decided (cycle 7): nobody.** Closing only moves forward;
   corrections go into an open period. Closing is per company. Revisit only if a customer's
   auditors require a controlled reopen — it would need its own audit story.

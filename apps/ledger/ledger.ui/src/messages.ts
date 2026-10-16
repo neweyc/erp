@@ -15,7 +15,8 @@ export const LEDGER_PROBLEMS: Record<string, string> = {
   cannot_reverse_a_reversal: 'A reversal cannot itself be reversed. Post the original again instead.',
   idempotency_key_reused: 'This form was already used for a different entry. Reload and try again.',
   period_closed: 'The books are closed for that date. Date the entry after the close.',
-  not_permitted: 'Only an administrator can close the books.',
+  // Reached only if roles changed while the page was open; otherwise the action is hidden.
+  not_permitted: 'Your ledger role does not allow that. Ask an administrator if you need it.',
   concurrent_change: 'Someone else changed this at the same moment. Try again.',
   app_not_licensed: 'Your organisation does not have the Ledger app enabled.',
   csrf_failed: 'Your session needs refreshing. Reload the page and try again.',

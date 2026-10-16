@@ -103,6 +103,7 @@ public static partial class CreateAccountFeature
                 return (await handler.Handle(callerContext.Require(), cmd, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.AccountCreate)
             .RequireApp(Apps.Ledger);
     }
 }

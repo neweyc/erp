@@ -24,10 +24,18 @@ vi.mock('../lib/apps', async () => {
       id: 'tickets',
       name: 'Tickets',
       path: '/tickets',
-      roles: ['admin', 'manager', 'member'] as const,
+      permission: 'tickets.ticket.read',
       load: async () => {
         loadTickets()
-        return { default: () => <p>Tickets app</p> }
+        // Renders the permissions it was handed, so a test can see what the shell passed.
+        return {
+          default: ({ permissions }: { permissions: readonly string[] }) => (
+            <>
+              <p>Tickets app</p>
+              <p>Permissions: {permissions.join(' ')}</p>
+            </>
+          ),
+        }
       },
     },
   ]
@@ -35,8 +43,8 @@ vi.mock('../lib/apps', async () => {
   return {
     ...actual,
     APPS: apps,
-    visibleApps: (licensed: readonly string[], role: string) =>
-      apps.filter((a) => licensed.includes(a.id) && a.roles.includes(role as never)),
+    visibleApps: (licensed: readonly string[], permissions: readonly string[]) =>
+      apps.filter((a) => licensed.includes(a.id) && permissions.includes(a.permission)),
   }
 })
 
@@ -45,6 +53,8 @@ function session(overrides: Partial<Session> = {}): Session {
     userId: 'usr_1',
     email: 'ada@acme.test',
     role: 'member',
+    appRoles: { tickets: 'requester' },
+    permissions: ['core.employee.read', 'tickets.ticket.read', 'tickets.ticket.create'],
     tenantName: 'Acme',
     licensedApps: ['tickets'],
     tenantSuspended: false,
@@ -105,6 +115,28 @@ describe('entitlement gating', () => {
     renderAt('/dashboard', session())
 
     expect(await screen.findByRole('link', { name: 'Tickets' })).toBeInTheDocument()
+  })
+
+  it('hides a licensed app from someone with no role in it, and never fetches it', async () => {
+    renderAt('/tickets', session({ appRoles: {}, permissions: ['core.employee.read'] }))
+
+    expect(await screen.findByText('Page not found')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Tickets' })).not.toBeInTheDocument()
+    expect(loadTickets).not.toHaveBeenCalled()
+  })
+
+  it('passes the caller’s permissions to the app', async () => {
+    renderAt('/tickets', session())
+
+    expect(await screen.findByText(/^Permissions:/)).toHaveTextContent(
+      'Permissions: core.employee.read tickets.ticket.read tickets.ticket.create',
+    )
+  })
+
+  it('shows Users in the nav only with core.user.read', async () => {
+    renderAt('/dashboard', session())
+    await screen.findByRole('link', { name: 'Dashboard' })
+    expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
   })
 
   it('tells the reader an app may simply not be enabled, rather than leaving a bare 404', async () => {

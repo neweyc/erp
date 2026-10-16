@@ -66,6 +66,22 @@ test('an invited employee accepts in the browser and signs in', async ({ page })
   })
   expect(escalation.status(), await escalation.text()).toBe(403)
   expect((await escalation.json()).problemCode).toBe('not_permitted')
+
+  // D18: a member reads the roster but cannot add to it (core.employee.create is admin and manager).
+  const created = await invitee.post(`${CORE}/api/core/v1/employees`, {
+    headers: { 'X-CSRF-Token': inviteeCsrf },
+    data: { firstName: 'Not', lastName: 'Allowed', email: `not-allowed-${Date.now()}@e2e.test` },
+  })
+  expect(created.status(), await created.text()).toBe(403)
+  expect((await created.json()).problemCode).toBe('not_permitted')
+
+  // Nor change roles, their own included: that is the escalation path the Users page opens.
+  const selfPromotion = await invitee.put(`${CORE}/api/core/v1/users/${session.userId}/roles`, {
+    headers: { 'X-CSRF-Token': inviteeCsrf },
+    data: { role: 'admin' },
+  })
+  expect(selfPromotion.status(), await selfPromotion.text()).toBe(403)
+  expect((await selfPromotion.json()).problemCode).toBe('not_permitted')
   await invitee.dispose()
 
   // Single use: the same link cannot set a password a second time.

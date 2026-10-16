@@ -15,9 +15,10 @@ public sealed record SessionCookie(string Name, string SchemeName)
     public const string SessionIdClaim = "ap:sid";
 
     /// <summary>
-    /// The role at the time the ticket was issued, compared against the live row on every
-    /// request. This is what makes a demotion take effect immediately rather than at
-    /// cookie expiry.
+    /// The user's roles when the ticket was issued (<see cref="AppRoles.AccessStamp"/>), compared
+    /// against the live row on every request. A mismatch is <c>role_changed</c>, which sends the
+    /// shell back to sign-in so what it shows matches what the user may now do. Access itself is
+    /// recomputed from the live row on every request whether or not this matches.
     /// </summary>
-    public const string RoleClaim = "ap:role";
+    public const string AccessClaim = "ap:access";
 }

@@ -104,6 +104,7 @@ public static class ReverseJournalEntryFeature
                 return (await handler.Handle(callerContext.Require(), entryId, cmd, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.EntryReverse)
             .RequireApp(Apps.Ledger);
     }
 }

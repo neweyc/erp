@@ -71,7 +71,10 @@ public static class AuthenticationExtensions
     /// cookie-authenticated (a bearer key needs no token); suspension is authorization and
     /// must see a caller that authentication has already accepted. Any other order either
     /// checks CSRF against an unknown principal or refuses a suspended tenant before it
-    /// has an identity to authorize.
+    /// has an identity to authorize. Permission runs last: it is the narrowest decision, and a
+    /// suspended tenant should hear that it is suspended, not that it lacks a permission.
+    ///
+    /// Permission is wired HERE rather than by each service, so no service can forget it.
     /// </summary>
     public static IApplicationBuilder UseAppPlatformAuth(this IApplicationBuilder app)
     {
@@ -81,6 +84,7 @@ public static class AuthenticationExtensions
         app.UseMiddleware<SessionAuthenticationMiddleware>();
         app.UseMiddleware<CsrfMiddleware>();
         app.UseMiddleware<SuspensionMiddleware>();
+        app.UseMiddleware<PermissionMiddleware>();
 
         return app;
     }

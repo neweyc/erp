@@ -12,6 +12,8 @@ export const TICKET_PROBLEMS: Record<string, string> = {
   assignee_terminated: 'That person has left. Assign someone who still works here.',
   concurrent_change: 'Someone else changed this ticket. Reload and try again.',
   app_not_licensed: 'Your organisation does not have the Tickets app enabled.',
+  // Reached only if roles changed while the page was open; otherwise the action is hidden.
+  not_permitted: 'Your role does not allow that. Ask an administrator if you need it.',
   csrf_failed: 'Your session needs refreshing. Reload the page and try again.',
 }
 

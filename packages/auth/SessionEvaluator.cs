@@ -22,9 +22,9 @@ public sealed record AuthenticationResult
 public static class SessionEvaluator
 {
     /// <param name="context">The row, or null when the session id matched nothing.</param>
-    /// <param name="ticketRole">The role recorded in the cookie when it was issued.</param>
+    /// <param name="ticketAccess">The access stamp recorded in the cookie when it was issued.</param>
     public static AuthenticationResult Evaluate(
-        SessionContext? context, string? ticketRole, DateTimeOffset now)
+        SessionContext? context, string? ticketAccess, DateTimeOffset now)
     {
         if (context is null) return AuthenticationResult.Fail(AuthProblem.SessionInvalid);
 
@@ -37,10 +37,11 @@ public static class SessionEvaluator
         if (!context.UserActive)
             return AuthenticationResult.Fail(AuthProblem.UserDeactivated);
 
-        // Role is compared against the cookie's claim, not merely read. A ticket issued
-        // when someone was an admin must stop working the moment they are not — this is
-        // the check that makes a demotion take effect immediately rather than at expiry.
-        if (ticketRole is not null && !string.Equals(ticketRole, context.Role, StringComparison.Ordinal))
+        // Roles are compared against the cookie's claim, not merely read. Permissions below are
+        // computed from the live row either way, so a demotion is already effective; this ends
+        // the session so the shell reloads and stops offering what the user can no longer do.
+        if (ticketAccess is not null
+            && !string.Equals(ticketAccess, AppRoles.AccessStamp(context.Role, context.AppRoles), StringComparison.Ordinal))
             return AuthenticationResult.Fail(AuthProblem.RoleChanged);
 
         if (!context.MfaSatisfied)
@@ -68,6 +69,8 @@ public static class SessionEvaluator
             TenantId = context.TenantId,
             CompanyId = context.CompanyId,
             Role = context.Role,
+            AppRoles = context.AppRoles,
+            Permissions = RoleCatalogue.PermissionsFor(context.Role, context.AppRoles, context.LicensedApps),
             EmployeeId = context.EmployeeId,
             LicensedApps = context.LicensedApps,
             TenantSuspended = context.TenantStatus == TenantStatus.Suspended,

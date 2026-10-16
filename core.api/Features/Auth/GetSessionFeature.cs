@@ -10,8 +10,13 @@ namespace AppPlatform.Core.Features.Auth;
 /// </summary>
 public static class GetSessionFeature
 {
+    /// <param name="Permissions">
+    /// Computed here, from the same rule every API enforces, so the shell never derives permissions
+    /// from roles itself. The shell uses them to hide what the user cannot do; the APIs still decide.
+    /// </param>
     public record SessionModel(
-        string UserId, string Email, string Role, string TenantName,
+        string UserId, string Email, string Role, IReadOnlyDictionary<string, string> AppRoles,
+        IReadOnlyList<string> Permissions, string TenantName,
         IReadOnlyList<string> LicensedApps, bool TenantSuspended);
 
     public class GetSessionQueryHandler(IAuthService auth)
@@ -26,7 +31,8 @@ public static class GetSessionFeature
                 return CommandResult.Forbidden(AuthProblems.NotSignedIn, "Not signed in.");
 
             return CommandResult.Ok(new SessionModel(
-                user.PublicId, user.Email, caller.Role,
+                user.PublicId, user.Email, caller.Role, caller.AppRoles,
+                caller.Permissions.Order(StringComparer.Ordinal).ToList(),
                 // The CALLER's tenant, passed explicitly. This read once had no id and relied on a
                 // filter the tenant table does not have, so every tenant was shown the name of
                 // whichever tenant was provisioned first. Found by the second-tenant e2e (A2).
@@ -51,6 +57,7 @@ public static class GetSessionFeature
                 // wiring fault rather than a 401 to be rendered.
                 return (await handler.Handle(callerContext.Require(), ct)).CreateIResult();
             })
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .AllowAnySignedInUser();
     }
 }

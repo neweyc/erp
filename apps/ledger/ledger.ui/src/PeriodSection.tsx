@@ -2,15 +2,16 @@ import { useState } from 'react'
 import type { Period } from './api'
 
 /**
- * How far the books are closed, and closing them further. Offered to everyone; the server decides
- * who may close (administrators) and says so plainly if the viewer may not — the shell hides, the
- * API enforces.
+ * How far the books are closed, and closing them further. The close form is shown only to a
+ * controller (ledger.period.close); everyone who can read the ledger sees the closed periods. The
+ * API enforces the permission regardless.
  */
 export function PeriodSection({
   periods, onClose,
 }: {
   periods: readonly Period[]
-  onClose: (closedThrough: string) => Promise<boolean>
+  /** Null when the user may not close periods: the form is not shown. */
+  onClose: ((closedThrough: string) => Promise<boolean>) | null
 }) {
   const [through, setThrough] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -18,7 +19,7 @@ export function PeriodSection({
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     setSubmitting(true)
-    if (await onClose(through)) setThrough('')
+    if (onClose && (await onClose(through))) setThrough('')
     setSubmitting(false)
   }
 
@@ -32,13 +33,15 @@ export function PeriodSection({
         </p>
       ))}
 
-      <form onSubmit={submit} aria-label="Close the books">
-        <label htmlFor="close-through">Close through</label>
-        <input id="close-through" type="date" value={through} onChange={(e) => setThrough(e.target.value)} required />
-        {/* Said before the click: there is no reopen. */}
-        <button type="submit" disabled={submitting || through === ''}>Close the books</button>
-        <p>Closing is permanent. Corrections to a closed period are posted in an open one.</p>
-      </form>
+      {onClose && (
+        <form onSubmit={submit} aria-label="Close the books">
+          <label htmlFor="close-through">Close through</label>
+          <input id="close-through" type="date" value={through} onChange={(e) => setThrough(e.target.value)} required />
+          {/* Said before the click: there is no reopen. */}
+          <button type="submit" disabled={submitting || through === ''}>Close the books</button>
+          <p>Closing is permanent. Corrections to a closed period are posted in an open one.</p>
+        </form>
+      )}
     </section>
   )
 }

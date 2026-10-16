@@ -140,7 +140,8 @@ public class AuthTests
         var outcome = await SignIn().Handle(1, new("Ada@Acme.test", "correct horse battery"));
 
         Assert.NotNull(outcome.SessionId);
-        Assert.Equal("admin", outcome.Role);
+        // No app roles yet, so the cookie's access stamp is the core role alone.
+        Assert.Equal("admin", outcome.Access);
         Assert.Equal(Now.AddDays(7), added!.AbsoluteExpiry);
     }
 

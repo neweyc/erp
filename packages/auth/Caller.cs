@@ -27,7 +27,17 @@ public sealed record Caller
     public required PrincipalKind Kind { get; init; }
     public required int TenantId { get; init; }
     public required int CompanyId { get; init; }
+    /// <summary>The core role. Never compare it to decide access — check <see cref="Permissions"/>.</summary>
     public required string Role { get; init; }
+
+    /// <summary>App name to role name, at most one per app. Empty for an API key.</summary>
+    public IReadOnlyDictionary<string, string> AppRoles { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// What this caller may do, from <see cref="RoleCatalogue.PermissionsFor"/>. This is what
+    /// <c>.RequirePermission</c> checks. For an API key it will be the key's scopes (not built).
+    /// </summary>
+    public IReadOnlySet<string> Permissions { get; init; } = new HashSet<string>();
 
     /// <summary>Null for an API key. Read it through <see cref="RequireUserId"/>.</summary>
     public Guid? UserId { get; init; }

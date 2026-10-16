@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Permissions } from '@app-platform/web-api'
 import LedgerApp from './index'
 import { fromMinor, toMinor } from './money'
 import { lineAmount } from './PostEntryForm'
@@ -77,6 +78,9 @@ describe('a posting line', () => {
   })
 })
 
+/** A controller's permissions: everything the page can do. */
+const controller = Object.values(Permissions.ledger)
+
 describe('ledger app', () => {
   async function fillBalancedEntry(user: ReturnType<typeof userEvent.setup>) {
     await user.type(screen.getByLabelText('Memo'), 'Sale')
@@ -89,7 +93,7 @@ describe('ledger app', () => {
   it('will not post until the entry balances, and says by how much it is out', async () => {
     stubApi(standardRoutes())
     const user = userEvent.setup()
-    render(<LedgerApp />)
+    render(<LedgerApp permissions={controller} />)
     await screen.findByRole('heading', { name: 'Ledger' })
 
     await user.selectOptions(screen.getByLabelText('Line 1 account'), 'acct_cash')
@@ -108,7 +112,7 @@ describe('ledger app', () => {
       'POST /api/ledger/v1/entries': () => (fail ? { status: 504, body: { problemCode: 'unknown' } } : { body: { entryId: 'je_new' } }),
     }))
     const user = userEvent.setup()
-    render(<LedgerApp />)
+    render(<LedgerApp permissions={controller} />)
     await screen.findByRole('heading', { name: 'Ledger' })
 
     await fillBalancedEntry(user)
@@ -136,7 +140,7 @@ describe('ledger app', () => {
       entry({ entryId: 'je_orig', number: 2, memo: 'Mistake', reversedByEntryId: 'je_rev' }),
       entry({ entryId: 'je_rev', number: 3, memo: 'Reversal', reversesEntryId: 'je_orig' }),
     ]))
-    render(<LedgerApp />)
+    render(<LedgerApp permissions={controller} />)
 
     const live = await screen.findByRole('article', { name: 'Entry 2026-1' })
     const original = screen.getByRole('article', { name: 'Entry 2026-2' })
@@ -154,7 +158,7 @@ describe('ledger app', () => {
       'POST /api/ledger/v1/entries': () => ({ status: 409, body: { problemCode: 'period_closed' } }),
     }))
     const user = userEvent.setup()
-    render(<LedgerApp />)
+    render(<LedgerApp permissions={controller} />)
     await screen.findByRole('heading', { name: 'Ledger' })
 
     await fillBalancedEntry(user)
@@ -162,6 +166,34 @@ describe('ledger app', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The books are closed for that date')
     expect(screen.getByLabelText('Memo')).toHaveValue('Sale')
+  })
+
+  it('shows a viewer the books but no way to change them', async () => {
+    // Hidden rather than offered and refused; the API would answer not_permitted either way. The
+    // entry is one a controller could reverse, so the missing button is the role's doing.
+    stubApi(standardRoutes([entry({ entryId: 'je_live' })]))
+    render(<LedgerApp permissions={[Permissions.ledger.read]} />)
+    await screen.findByRole('article', { name: 'Entry 2026-1' })
+
+    expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Post an entry' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Add account' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Close the books' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reverse' })).not.toBeInTheDocument()
+  })
+
+  it('lets an accountant post and reverse but not close the books or add accounts', async () => {
+    stubApi(standardRoutes())
+    render(
+      <LedgerApp
+        permissions={[Permissions.ledger.read, Permissions.ledger.entryPost, Permissions.ledger.entryReverse]}
+      />,
+    )
+    await screen.findByRole('heading', { name: 'Ledger' })
+
+    expect(screen.getByRole('form', { name: 'Post an entry' })).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Close the books' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Add account' })).not.toBeInTheDocument()
   })
 
   it('shows the trial balance per currency with its totals', async () => {
@@ -182,7 +214,7 @@ describe('ledger app', () => {
         },
       }),
     })
-    render(<LedgerApp />)
+    render(<LedgerApp permissions={controller} />)
 
     const table = await screen.findByRole('table', { name: 'Trial balance in USD' })
     expect(within(table).getByRole('row', { name: /Total USD/ })).toHaveTextContent('12.50')

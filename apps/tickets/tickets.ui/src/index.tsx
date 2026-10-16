@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError } from '@app-platform/web-api'
+import { ApiError, Permissions, type AppProps } from '@app-platform/web-api'
 import {
   assignTicket, closeTicket, createTicket, listEmployees, listTickets,
   type Employee, type Ticket,
@@ -12,8 +12,15 @@ import { explain } from './messages'
  * One page on purpose: list, create, assign, close. A ticket's whole lifecycle is visible without
  * navigating, which is what makes the workflow testable end to end and what a user of a small
  * queue actually wants.
+ *
+ * Actions the user's role does not allow are hidden, not disabled (a requester raises tickets but
+ * does not assign or close them). The API refuses them regardless; this only keeps the page honest.
  */
-export default function TicketsApp() {
+export default function TicketsApp({ permissions }: AppProps) {
+  const canCreate = permissions.includes(Permissions.tickets.ticketCreate)
+  const canAssign = permissions.includes(Permissions.tickets.ticketAssign)
+  const canClose = permissions.includes(Permissions.tickets.ticketClose)
+
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [includeClosed, setIncludeClosed] = useState(false)
@@ -100,7 +107,7 @@ export default function TicketsApp() {
 
       {error && <p role="alert">{error}</p>}
 
-      <NewTicketForm onCreate={(title) => run(() => createTicket(title))} />
+      {canCreate && <NewTicketForm onCreate={(title) => run(() => createTicket(title))} />}
 
       <label>
         <input
@@ -115,7 +122,7 @@ export default function TicketsApp() {
         <p role="status">Loading tickets…</p>
       ) : tickets.length === 0 ? (
         // Says what to do rather than just reporting emptiness, which reads as a fault.
-        <p>No tickets yet. Raise the first one above.</p>
+        <p>{canCreate ? 'No tickets yet. Raise the first one above.' : 'No tickets yet.'}</p>
       ) : (
         <ul aria-label="Tickets">
           {tickets.map((ticket) => (
@@ -123,8 +130,8 @@ export default function TicketsApp() {
               <TicketRow
                 ticket={ticket}
                 employees={employees}
-                onAssign={(employeeId) => run(() => assignTicket(ticket.ticketId, employeeId))}
-                onClose={() => run(() => closeTicket(ticket.ticketId))}
+                onAssign={canAssign ? (employeeId) => run(() => assignTicket(ticket.ticketId, employeeId)) : null}
+                onClose={canClose ? () => run(() => closeTicket(ticket.ticketId)) : null}
               />
             </li>
           ))}
@@ -171,8 +178,10 @@ function TicketRow({
 }: {
   ticket: Ticket
   employees: Employee[]
-  onAssign: (employeeId: string | null) => Promise<boolean>
-  onClose: () => Promise<boolean>
+  /** Null when the user may not assign: the picker is not shown at all. */
+  onAssign: ((employeeId: string | null) => Promise<boolean>) | null
+  /** Null when the user may not close. */
+  onClose: (() => Promise<boolean>) | null
 }) {
   const closed = ticket.status === 'Closed'
 
@@ -188,34 +197,38 @@ function TicketRow({
         <span>{ticket.assigneeDisplayName ?? 'Nobody'}</span>
       </p>
 
-      <label htmlFor={`assignee-${ticket.ticketId}`}>Assignee</label>
-      <select
-        id={`assignee-${ticket.ticketId}`}
-        // Pick-only, never free text: a typed name cannot become an assignment, so a mistyped
-        // person dead-ends rather than being recorded.
-        //
-        // Held at "" so the control always reads "Choose…" rather than claiming to show current
-        // state — the assignee is displayed above, from the stored snapshot. Unassigning therefore
-        // needs its own action: selecting the placeholder cannot fire a change event.
-        value=""
-        disabled={closed}
-        onChange={(e) => void onAssign(e.target.value)}
-      >
-        <option value="">Choose…</option>
-        {employees.map((employee) => (
-          <option key={employee.employeeId} value={employee.employeeId}>
-            {employee.displayName}
-          </option>
-        ))}
-      </select>
+      {onAssign && (
+        <>
+          <label htmlFor={`assignee-${ticket.ticketId}`}>Assignee</label>
+          <select
+            id={`assignee-${ticket.ticketId}`}
+            // Pick-only, never free text: a typed name cannot become an assignment, so a mistyped
+            // person dead-ends rather than being recorded.
+            //
+            // Held at "" so the control always reads "Choose…" rather than claiming to show current
+            // state — the assignee is displayed above, from the stored snapshot. Unassigning therefore
+            // needs its own action: selecting the placeholder cannot fire a change event.
+            value=""
+            disabled={closed}
+            onChange={(e) => void onAssign(e.target.value)}
+          >
+            <option value="">Choose…</option>
+            {employees.map((employee) => (
+              <option key={employee.employeeId} value={employee.employeeId}>
+                {employee.displayName}
+              </option>
+            ))}
+          </select>
 
-      {!closed && ticket.assigneeDisplayName !== null && (
-        <button type="button" onClick={() => void onAssign(null)}>
-          Unassign
-        </button>
+          {!closed && ticket.assigneeDisplayName !== null && (
+            <button type="button" onClick={() => void onAssign(null)}>
+              Unassign
+            </button>
+          )}
+        </>
       )}
 
-      {!closed && (
+      {!closed && onClose && (
         <button type="button" onClick={() => void onClose()}>
           Close ticket
         </button>

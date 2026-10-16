@@ -330,6 +330,15 @@ namespace AppPlatform.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<long>("AccessVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("access_version");
+
+                    b.PrimitiveCollection<string[]>("AppRoles")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("app_roles");
+
                     b.Property<int>("CompanyId")
                         .HasColumnType("integer")
                         .HasColumnName("company_id");

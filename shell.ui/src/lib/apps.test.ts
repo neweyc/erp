@@ -1,31 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Permissions } from '@app-platform/web-api'
 import { APPS, componentFor, resetComponentCache, visibleApps, type AppDefinition } from './apps'
 
 const licensed = ['tickets']
+const ticketReader = [Permissions.core.employeeRead, Permissions.tickets.ticketRead]
 
 describe('app registry', () => {
   beforeEach(() => resetComponentCache())
 
-  it('shows an app the tenant has licensed and the role may open', () => {
-    expect(visibleApps(licensed, 'member').map((a) => a.id)).toEqual(['tickets'])
+  it('shows an app the tenant has licensed and the user may read', () => {
+    expect(visibleApps(licensed, ticketReader).map((a) => a.id)).toEqual(['tickets'])
   })
 
-  it('hides an app the tenant has not licensed', () => {
-    expect(visibleApps([], 'admin')).toEqual([])
+  it('hides an app the tenant has not licensed, whatever the permissions', () => {
+    expect(visibleApps([], ticketReader)).toEqual([])
   })
 
-  it('hides an app the role may not open even when licensed', () => {
-    const restricted: AppDefinition = {
-      id: 'billing',
-      name: 'Billing',
-      path: '/billing',
-      roles: ['admin'],
-      load: async () => ({ default: () => null }),
-    }
-
-    // Filtering is over both gates, so a licensed app still disappears for a role that may not
-    // open it — hidden rather than disabled, per the nav rule.
-    expect([restricted].filter((a) => a.roles.includes('member'))).toEqual([])
+  it('hides a licensed app from a user with no role in it', () => {
+    // Both gates apply, so a licensed app still disappears for someone it grants nothing —
+    // hidden rather than disabled, per the nav rule. A core administrator is such a user until
+    // they give themselves an app role.
+    expect(visibleApps(licensed, [Permissions.core.userManage])).toEqual([])
   })
 
   it('never loads the module of an unlicensed app', async () => {
@@ -34,7 +29,7 @@ describe('app registry', () => {
       id: 'unlicensed',
       name: 'Unlicensed',
       path: '/unlicensed',
-      roles: ['admin'],
+      permission: Permissions.tickets.ticketRead,
       load,
     }
 
@@ -64,9 +59,10 @@ describe('app registry', () => {
     expect(new Set(APPS.map((a) => a.path)).size).toBe(APPS.length)
   })
 
-  it('gives every app at least one role, so it is reachable by someone', () => {
-    // An app with no roles is registered, routable in principle, and invisible to everyone —
-    // which looks exactly like a bug in the entitlement system.
-    for (const app of APPS) expect(app.roles.length).toBeGreaterThan(0)
+  it('gates every app on one of its own permissions', () => {
+    // An app gated on another app's permission would appear or vanish with the wrong licence.
+    // That every permission is granted by some role is checked on the .NET side
+    // (PermissionTests, PermissionCatalogueTests).
+    for (const app of APPS) expect(app.permission.startsWith(`${app.id}.`)).toBe(true)
   })
 })

@@ -9,7 +9,8 @@ export function JournalSection({
   entries, onReverse,
 }: {
   entries: readonly Entry[]
-  onReverse: (entryId: string) => Promise<boolean>
+  /** Null when the user may not reverse (ledger.entry.reverse): no Reverse buttons. */
+  onReverse: ((entryId: string) => Promise<boolean>) | null
 }) {
   const byId = new Map(entries.map((e) => [e.entryId, e]))
 
@@ -50,7 +51,7 @@ export function JournalSection({
                   </Scrolls>
 
                   {/* Offered only where the server would accept it: never twice, never a reversal. */}
-                  {!entry.reversesEntryId && !entry.reversedByEntryId && (
+                  {onReverse && !entry.reversesEntryId && !entry.reversedByEntryId && (
                     <button type="button" onClick={() => void onReverse(entry.entryId)}>Reverse</button>
                   )}
                 </article>

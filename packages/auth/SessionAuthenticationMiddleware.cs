@@ -41,7 +41,7 @@ public sealed class SessionAuthenticationMiddleware(
         var stored = await sessions.FindAsync(id, context.RequestAborted);
         var result = SessionEvaluator.Evaluate(
             stored,
-            context.User.FindFirstValue(SessionCookie.RoleClaim),
+            context.User.FindFirstValue(SessionCookie.AccessClaim),
             clock.GetUtcNow());
 
         if (!result.Succeeded)

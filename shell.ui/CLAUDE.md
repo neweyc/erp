@@ -6,7 +6,7 @@ this file covers the shell specifically.
 ## The app registry is the only place apps are wired
 
 One declarative entry per app — id, display name, icon, route prefix, lazy component,
-required entitlement, required roles, terminology keys — feeds nav, router, permissions,
+required entitlement, required permission, terminology keys — feeds nav, router, permissions,
 and the command palette. **Adding an app must never mean edits scattered through the
 shell.** If you find yourself touching the nav *and* the router *and* a permissions map,
 the registry is missing a field.
@@ -16,7 +16,10 @@ the registry is missing a field.
 1. **Entitlement** — not licensed, not in nav, route not registered, and the bundle is
    never fetched (route-level dynamic import). Unlicensed app code must not reach the
    browser.
-2. **Role** — licensed but not permitted: hidden, not disabled. Same spirit as EMS's nav.
+2. **Permission** — licensed but the user holds no role granting the app's read permission:
+   hidden, not disabled. Same spirit as EMS's nav. The session carries the caller's
+   permissions, computed by the server; the shell never derives them from roles. Apps receive
+   them as props (`AppProps`) and hide actions the same way.
 3. **Neither is access control.** The API enforces both independently. The shell is a
    convenience; treat every gate here as cosmetic.
 

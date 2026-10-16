@@ -20,35 +20,20 @@ public static class InviteEmployeeFeature
 {
     public record InviteEmployeeCommand(string? Role);
 
-    /// <summary>
-    /// Who may invite. Administrators only, because an invitation grants any role — admin
-    /// included — to whoever holds the email address. Open to every signed-in user, a member could
-    /// create an employee at an address they control, invite it as admin, and accept. Declared
-    /// here because packages/auth has no role or policy model yet (CLAUDE.md: Roles.* and Policy*
-    /// constants, not built); move it there when that exists.
-    /// </summary>
-    public static readonly string[] RolesThatMayInvite = ["admin"];
-
     public class InviteEmployeeCommandHandler(
         IEmployeeService employees,
         IUserService users,
         IOutbox outbox,
         TimeProvider clock)
     {
-        private static readonly string[] Roles = ["admin", "manager", "member"];
+        /// <summary>The core roles; app roles are given afterwards on the Users page.</summary>
+        private static readonly string[] Roles =
+            RoleCatalogue.RolesIn(RoleCatalogue.CoreApp).Select(r => r.Name).ToArray();
 
         public async Task<CommandResult> Handle(
             Caller caller, string employeePublicId, InviteEmployeeCommand cmd,
             CancellationToken ct = default)
         {
-            // First, before any lookup or write: a refusal must not reveal whether the employee
-            // exists, and must stage nothing.
-            if (!RolesThatMayInvite.Contains(caller.Role))
-            {
-                return CommandResult.Forbidden(
-                    CoreProblems.NotPermitted, "Only an administrator can invite people.");
-            }
-
             // The prefix is the point: without this check a ticket id passed here finds no
             // employee, the caller gets a 404, and the actual mistake — two kinds of id sharing
             // one route parameter — never surfaces.
@@ -148,6 +133,10 @@ public static class InviteEmployeeFeature
                 var result = await handler.Handle(callerContext.Require(), employeeId, cmd, ct);
                 return result.CreateIResult();
             })
-            .RequireAuthorization();
+            .RequireAuthorization()
+            // core.user.manage, the same permission that changes roles: an invitation grants any
+            // core role, admin included, to whoever holds the address. Open to anyone else, a member
+            // could create an employee at an address they control, invite it as admin, and accept.
+            .RequirePermission(Permissions.Core.UserManage);
     }
 }

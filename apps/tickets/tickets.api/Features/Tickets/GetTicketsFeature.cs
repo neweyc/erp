@@ -45,6 +45,7 @@ public static class GetTicketsFeature
                     .CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Tickets.TicketRead)
             .RequireApp(Apps.Tickets);
     }
 }

@@ -322,20 +322,10 @@ public class LedgerTests
         return books;
     }
 
-    private Task<Api.CommandResult> Close(DateOnly? through, string role = "admin")
+    // Who may close is ledger.period.close, enforced on the route — see PermissionTests.
+    private Task<Api.CommandResult> Close(DateOnly? through)
         => new Features.Periods.ClosePeriodFeature.ClosePeriodCommandHandler(_ledger.Object, _outbox, _clock)
-            .Handle(Fake.Caller() with { Role = role }, new(through, null));
-
-    [Fact]
-    public async Task Only_an_administrator_can_close_the_books()
-    {
-        ClosedThrough(null);
-
-        var result = await Close(Fake.Today.AddDays(-1), role: "member");
-
-        Assert.Equal(LedgerProblems.NotPermitted, result.ProblemCode);
-        Assert.Equal(Api.CommandOutcome.Forbidden, result.Outcome);
-    }
+            .Handle(Fake.Caller(), new(through, null));
 
     [Theory]
     [InlineData(0)]  // today is still being posted to

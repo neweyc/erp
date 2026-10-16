@@ -164,6 +164,7 @@ public static partial class PostJournalEntryFeature
                 return (await handler.Handle(callerContext.Require(), cmd, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.EntryPost)
             .RequireApp(Apps.Ledger);
     }
 }

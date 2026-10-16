@@ -66,14 +66,17 @@ test('the tickets API refuses an unlicensed tenant, and accepts once an operator
   expect(granted.status(), await granted.text()).toBe(200)
   expect(await granted.json()).toMatchObject({ app: 'tickets', licensed: true })
 
-  // AFTER the grant, on the SAME tenant session. Entitlement is read per request, so licensing
-  // takes effect without signing in again — and the API, not the shell, is what enforces it.
-  const accepted = await tenant.api.post('/api/tickets/v1/tickets', {
+  // AFTER the grant, on the SAME tenant session. Entitlement is read per request, so the answer
+  // changes without signing in again — but licensing grants nobody a role (docs/permissions.md),
+  // so the administrator is now refused for a different, more specific reason. The next test gives
+  // them a role; creating a ticket succeeds there.
+  const noRole = await tenant.api.post('/api/tickets/v1/tickets', {
     headers: { 'X-CSRF-Token': tenant.csrf },
-    data: { title: 'After licensing' },
+    data: { title: 'After licensing, before a role' },
   })
 
-  expect(accepted.status(), await accepted.text()).toBe(200)
+  expect(noRole.status(), await noRole.text()).toBe(403)
+  expect((await noRole.json()).problemCode).toBe('not_permitted')
 
   // Granting again, in the same test rather than a separate one. As its own test this passed only
   // because a previous test had granted — which breaks under -g, --repeat-each, or any future
@@ -90,4 +93,54 @@ test('the tickets API refuses an unlicensed tenant, and accepts once an operator
 
   await tenant.api.dispose()
   await operator.api.dispose()
+})
+
+/**
+ * The administrator gives themselves a Tickets role on the Users page, in the browser.
+ *
+ * Licensing granted nobody anything, so the dashboard says so and points here. Changing your own
+ * roles ends your session (role_changed); signing in again shows the app. Every later spec that
+ * works in Tickets as this administrator depends on this.
+ */
+test('the administrator gives themselves a tickets role on the Users page', async ({ page }) => {
+  async function signIn() {
+    await page.getByLabel('Email').fill(ADMIN_EMAIL)
+    await page.getByLabel('Password').fill(ADMIN_PASSWORD)
+    await page.getByRole('button', { name: 'Sign in' }).click()
+  }
+
+  await page.goto('/')
+  await signIn()
+  await expect(page.getByRole('heading', { name: 'E2E Ltd' })).toBeVisible()
+
+  // Licensed but invisible: no role yet, and the dashboard says what to do about it.
+  await expect(page.getByRole('link', { name: 'Tickets' })).toHaveCount(0)
+  await expect(page.getByText(/no role yet in Tickets/)).toBeVisible()
+
+  // Followed from the hint itself, which is the path an administrator in this position takes.
+  await page.getByRole('main').getByRole('link', { name: 'Users' }).click()
+  await expect(page.getByRole('heading', { name: 'Users', level: 1 })).toBeVisible()
+
+  // A new page: wide content must scroll inside its container, never widen the document (CLAUDE.md).
+  await page.setViewportSize({ width: 390, height: 800 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth === window.innerWidth)).toBe(true)
+  await page.setViewportSize({ width: 1280, height: 800 })
+
+  await page.getByLabel(`Tickets role for ${ADMIN_EMAIL}`).selectOption('agent')
+
+  // Your own roles changed, so the session ends and the sign-in page says why.
+  await expect(page.getByText('Your permissions changed. Please sign in again.')).toBeVisible()
+  await signIn()
+  // Back on the Users page it was on, now showing the role it gave itself.
+  await expect(page.getByLabel(`Tickets role for ${ADMIN_EMAIL}`)).toHaveValue('agent')
+  await expect(page.getByRole('link', { name: 'Tickets' })).toBeVisible()
+
+  // And the API agrees, on a fresh session.
+  const tenant = await signInAsTenantAdmin(TICKETS)
+  const accepted = await tenant.api.post('/api/tickets/v1/tickets', {
+    headers: { 'X-CSRF-Token': tenant.csrf },
+    data: { title: 'After licensing and a role' },
+  })
+  expect(accepted.status(), await accepted.text()).toBe(200)
+  await tenant.api.dispose()
 })

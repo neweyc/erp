@@ -22,7 +22,27 @@ public class User : IAuditable
     public string PublicId { get; set; } = "";
 
     public required string Email { get; set; }
+    /// <summary>The core role. Its permissions are in <c>RoleCatalogue</c> (packages/auth).</summary>
     public required string Role { get; set; }
+
+    /// <summary>
+    /// One <c>app:role</c> entry per app, e.g. <c>tickets:agent</c>. A column rather than a table so
+    /// a role change is an ordinary audited update of this row. Written only by
+    /// ChangeUserRolesFeature, which keeps it to one entry per app. Replace the array rather than
+    /// mutating it, so the change is plainly a new value. See docs/permissions.md §3.
+    /// </summary>
+    public string[] AppRoles { get; set; } = [];
+
+    /// <summary>
+    /// Advanced by every role change; it numbers the <c>user.roles_changed</c> events.
+    ///
+    /// Deliberately NOT a concurrency token. EF puts a token in the WHERE clause of EVERY update to
+    /// the row, so an invitation accepted while an administrator changed the user's roles would
+    /// match no row and fail. Role changes are serialized instead by a per-tenant advisory lock,
+    /// taken before anything is read (ChangeUserRolesFeature), which leaves other writes to the
+    /// user unaffected.
+    /// </summary>
+    public long AccessVersion { get; set; } = 1;
 
     /// <summary>
     /// Null until the invitation is accepted. An invited account has no password and cannot

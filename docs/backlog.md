@@ -212,7 +212,7 @@ ERP will need again.
 
 | ID | Sev | Defect | Reproduction | Consequence |
 |---|---|---|---|---|
-| **D18** | Medium | Any signed-in user can create an employee: `CreateEmployeeFeature` checks no role. More broadly, packages/auth has no role or policy model (CLAUDE.md's `Roles.*` / `Policy*` constants are not built), so each feature decides for itself, and two (period close, invite) do. | A member POSTs `/api/core/v1/employees` and gets 200. | Members can add to the organisation's master data. It is no longer an escalation path, because inviting is admin-only (found in the D17 review). **Needs a decision**: which roles may create and change employees, and whether to build the shared policy model now. |
+| **D18** | Medium — **fixed** (Cycle 12) | Any signed-in user could create an employee: `CreateEmployeeFeature` checked no role, and packages/auth had no role or policy model, so each feature decided for itself. | A member POSTs `/api/core/v1/employees` and gets 200. | Fixed by the permission model (`docs/permissions.md`): creating an employee needs `core.employee.create` (admin, manager). Evidence: `PermissionTests.A_member_cannot_create_employees_D18`; e2e `employee-invite.spec.mjs`, where the invited member is refused 403 `not_permitted` by the running core. |
 | **D17** | Medium — **fixed** | An employee invitation could never be accepted: it staged an email with no token and created no `identity.user_token` row, while acceptance requires one. | e2e `employee-invite.spec.mjs` | Fixed: `InvitationToken.Issue` is now the one issuer (provisioning uses it too); the invite commits user, token and message in one save. The review found this completed a **member-to-admin escalation** (the invite checked no role and can grant admin), so inviting is now admin-only (403 `not_permitted`). Evidence: unit tests, and the e2e spec, where an admin invites, the message is delivered, the invitee accepts in the browser and signs in as member, a reused link is refused, and the member's own invite attempt is refused. Both fail with the fix reverted. Codex, two rounds: no blocking findings. |
 | **D16** | Low | The `AddPeriodClose` backfill mints `books.public_id` as `bk_` + 25 hex characters of md5, not the pinned format (25 Crockford base32 characters carrying 125 random bits, `docs/integration.md` §2.1). | `database/ledger/20260925211934_AddPeriodClose.sql`, the backfill `INSERT … SELECT` | Hex is a subset of the Crockford alphabet, so the ids parse, but they carry about 100 bits and use only 16 of 32 symbols. Reaches only databases that already posted entries before the migration, and none is deployed. Fix before the first deployment (generate the body properly in SQL) or accept it in writing. |
 | **D15** | High — **fixed** | The session endpoint showed every tenant the name of whichever tenant was provisioned first. `TenantNameAsync` read `db.Tenants.FirstAsync()` with no id, and the tenant table has no query filter — it is what tenants are scoped *by*. | Tenant B's session on a core.api reports "E2E Ltd". Invisible with one tenant, which is why nothing caught it. | A cross-tenant disclosure on every dashboard load. Now takes the caller's tenant id explicitly; `AuthTests.The_session_names_the_callers_tenant_not_the_first_tenant` and the e2e cover it. `Tenant` is the only entity without the filter, and its other two reads are keyed. |
@@ -247,6 +247,9 @@ ERP will need again.
 - **Webhooks, public API, API keys.** Designed in `docs/integration.md`; the three irreversible
   decisions are built, the surface is not.
 - **Idle timeout, notifications bell** — `ActivityPolicy` anticipates both; neither is built.
+- **Deactivating a user** from the Users page. `identity.user.status` supports it; no endpoint
+  changes it. Today an administrator can remove someone's app roles, but every account keeps a
+  core role and so its roster access.
 
 ---
 
@@ -646,6 +649,84 @@ ahead of review while Codex was at its usage limit; the review then ran and its 
 Open from the closure: D16.
 
 ## Current cycle
+
+**Cycle 12 — IAM: a permission model (D18).** Chris: "work on IAM and a permissions model";
+chose per-app roles fixed in code, and a Users page this cycle. Design written first:
+`docs/permissions.md`. **Complete. Independent review (Codex, three rounds) CLOSED: no blocking
+findings.**
+
+- `packages/auth/Permissions.cs`: every permission (`<app>.<thing>.<verb>`), the roles per app
+  and what each grants. A user holds one core role and at most one role per app. A caller's
+  permissions are computed per request from the live row, and only for licensed apps; an unknown
+  role grants nothing. Licensing an app grants nobody a role, the administrator included.
+- `.RequirePermission(...)` on every customer endpoint, `.AllowAnySignedInUser()` on session and
+  sign-out only. `PermissionMiddleware`, wired inside `UseAppPlatformAuth` so no service can omit
+  it, answers 403 `not_permitted` (or `app_not_licensed` for a permission in an unlicensed app). An
+  authenticated endpoint that declares neither is refused and logged as an error. The two
+  hand-written role checks (invite, period close) are gone.
+- `identity.user.app_roles` and `access_version` (migration `AddUserAppRoles`), and
+  `identity_v1.session_context` returning `app_roles` (`AddAppRolesToSessionContext`, applied as
+  `ap_owner`; DROP and CREATE, restoring its grants in the same script). Per-migration and full SQL
+  scripts generated; `database/README.md` lists the new `ap_owner` migration.
+- The cookie's role claim became an access claim (core role + app roles); any change ends the
+  session as `role_changed` so the shell reloads. Security rests on the live recomputation, not
+  the claim.
+- core: `GET /users`, `GET /roles`, `PUT /users/{id}/roles`. Only the apps named change; granting
+  a role in an unlicensed app is refused; the tenant always keeps an active admin (`last_admin`,
+  decided under a per-tenant role-change lock); a no-op saves nothing; role changes in a tenant run
+  one at a time.
+  Audited as an update of the user; emits `user.roles_changed`.
+- Session payload adds `appRoles` and `permissions`. Shell: apps gated on a read permission, a
+  Users page (saves per select; scrolls inside its container at 390px), a dashboard hint when a
+  licensed app has no role for an administrator. Tickets and ledger hide what the role forbids.
+  Permission names mirrored in `packages/web-api/src/permissions.ts`.
+- Evidence (measured): 716 .NET tests (191 against real PostgreSQL), 30/30 Playwright, UI suites
+  24 shell / 15 tickets / 26 ledger / 8 web-api, all builds (`tsc -b`) clean. New: `PermissionTests`
+  (matrix, computation, middleware through a host), `PermissionCoverageTests` (every customer
+  service's real route table), `PermissionCatalogueTests` (TS mirror; apps match `Apps.All`),
+  `ChangeUserRolesTests`, `UserRolesTests` (real Postgres: the last-admin race with one side held
+  mid-transaction, the role reaching `session_context` as `ap_tickets_rt`, audit row and event),
+  and e2e: the administrator gives themselves a Tickets role on the Users page in the browser, a
+  member is refused creating an employee and promoting themselves. Broken on purpose, each
+  caught: `FOR UPDATE` removed (race test fails); a permission removed from one endpoint (coverage
+  test names it); the middleware's check bypassed (2 tests); a permission removed from the TS
+  mirror.
+- Behaviour changes worth knowing: closing a period is now a ledger controller's, not a core
+  admin's; every e2e spec that works in an app first gives its administrator a role
+  (`grantOwnAppRole` in `e2e/stack.mjs`).
+- **Independent review (Codex), round 1 — 1 blocking, 2 optional. All taken.**
+  - BLOCKING: `access_version` was an EF concurrency token, which EF checks on every update of the
+    user. An invitation accepted (or a password rehashed) from a user loaded before a role change
+    and saved after matched no row and failed with a 500. Fixed: no token; every role change locks
+    the active admins and then the target user (replaced in round 2), so changes to one user run
+    in turn and apply on top of each other. The 409 `concurrent_change` path is gone. Tests (real
+    PostgreSQL): *a role change does not break another write to the same user* (fails with the
+    token restored), *a second change to the same user waits and keeps the first*.
+  - OPTIONAL: the 409 and cross-tenant unit tests proved nothing about the database. Replaced by
+    real-PostgreSQL tests above and *another tenant's user cannot be changed* (404, row, version and
+    outbox untouched).
+  - OPTIONAL: a NULL element in `app_roles` would throw during session resolution. `Decode` skips
+    it; the malformed-entries test includes one.
+- **Round 2 — round-1 fixes confirmed; 1 blocking, 1 optional. Both taken.**
+  - BLOCKING: the row locks (admins by id, then the target) could deadlock when a promotion was in
+    flight: a waiter's admin query cannot see a member promoted after it started, so two changes
+    could take the same rows in different orders, and the loser got a 500. Fixed: every role change
+    first takes a per-tenant advisory lock (`LockRoleChangesAsync`, the `KeyRing` pattern), then
+    reads the admins (still `FOR UPDATE`, against other writers) and the target. The target-user
+    row lock is gone; the tenant lock covers it.
+  - OPTIONAL: the same-user test targeted an admin, so the admin lock alone made it pass. Now it
+    targets a member while the other side holds only the tenant lock, and checks the second change
+    numbered itself after the first. It fails with the tenant lock removed. Not added: a
+    three-transaction deadlock test, which could only fail by timing; with one lock per tenant
+    there is no second lock to take in the wrong order.
+- **Round 3 — round-2 fixes confirmed. NO BLOCKING FINDINGS.** Two optional wording fixes, both
+  taken: the `User.AccessVersion` comment now names the tenant lock, and docs/permissions.md §4
+  gives the real middleware order (permission before entitlement, which is why the permission check
+  itself answers `app_not_licensed`). **Independent review CLOSED.**
+- Not done (docs/permissions.md §9): tenant-defined roles, row-level rules, deactivating a user
+  from the Users page, operator roles, narrowing roster fields.
+
+## Previous cycle
 
 **Developer tooling: `bin/dev` (2026-09-30).** One command for everything in
 `docs/local-development.md`: setup, up/down/status/logs, operator create/reset, tenant create

@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { Permissions } from '@app-platform/web-api'
 import { visibleApps } from '../lib/apps'
 import { useSession } from './session-provider'
 
@@ -7,7 +8,7 @@ export function AppNav() {
 
   if (!session) return null
 
-  const apps = visibleApps(session.licensedApps, session.role)
+  const apps = visibleApps(session.licensedApps, session.permissions)
 
   return (
     <nav aria-label="Applications">
@@ -22,6 +23,11 @@ export function AppNav() {
             <NavLink to={app.path}>{app.name}</NavLink>
           </li>
         ))}
+        {session.permissions.includes(Permissions.core.userRead) && (
+          <li>
+            <NavLink to="/users">Users</NavLink>
+          </li>
+        )}
       </ul>
     </nav>
   )

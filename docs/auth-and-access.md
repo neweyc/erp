@@ -175,7 +175,9 @@ Caller
   UserId         Guid?         -- null for a key
   TenantId       int
   CompanyId      int
-  Role           string
+  Role           string        -- the core role; shown, never compared to decide access
+  AppRoles       app -> role   -- at most one per app
+  Permissions    set<string>   -- what .RequirePermission checks (docs/permissions.md)
   Scopes         string[]      -- empty for an interactive user
   EmployeeId     Guid?         -- the self-service link
 ```
@@ -186,8 +188,8 @@ supply a fake one — which lands in audit as a person who did not do it.
 
 - **Audit records the principal**, so "closed by integration key 'phone-bridge'" is
   representable, and revoking that key has a reviewable trail.
-- Policies evaluate against `Caller`, so an entitlement or role check is written once and
-  applies to both kinds.
+- Policies evaluate against `Caller.Permissions`, so an entitlement or permission check is
+  written once and applies to both kinds. For a key, permissions will be its scopes.
 - A handler needing a real person (anything self-service) requires `UserId` explicitly and
   fails a key-authenticated call with a clear message, rather than dereferencing a null.
 

@@ -24,6 +24,12 @@ public static class AuthProblem
     /// <summary>403. The tenant has not licensed the app this endpoint belongs to.</summary>
     public const string AppNotLicensed = "app_not_licensed";
 
+    /// <summary>
+    /// 403. The caller lacks the permission the endpoint requires. Same string as
+    /// <c>CommandResult</c>'s not_permitted, so the UI has one code to branch on.
+    /// </summary>
+    public const string NotPermitted = "not_permitted";
+
     /// <summary>403. Missing or mismatched CSRF token on an unsafe method.</summary>
     public const string CsrfFailed = "csrf_failed";
 

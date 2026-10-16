@@ -88,6 +88,7 @@ public static class CreateEmployeeFeature
                 var result = await handler.Handle(callerContext.Require(), cmd, ct);
                 return result.CreateIResult();
             })
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .RequirePermission(Permissions.Core.EmployeeCreate);
     }
 }

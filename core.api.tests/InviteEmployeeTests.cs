@@ -87,26 +87,8 @@ public class InviteEmployeeTests
         Assert.NotEqual(plaintext, token.TokenHash);
     }
 
-    [Theory]
-    [InlineData("manager")]
-    [InlineData("member")]
-    public async Task Only_an_administrator_can_invite(string role)
-    {
-        // An invitation can grant admin, so letting anyone else send one is an escalation: a
-        // member creates an employee at an address they control, invites it as admin, accepts.
-        var employee = Fake.Employee();
-        Existing(employee);
-
-        var result = await Handler().Handle(Fake.Caller(role), employee.PublicId, new("admin"));
-
-        Assert.Equal(CommandOutcome.Forbidden, result.Outcome);
-        Assert.Equal(CoreProblems.NotPermitted, result.ProblemCode);
-        _employees.Verify(s => s.FindByPublicIdAsync(It.IsAny<string>(), default), Times.Never);
-        _users.Verify(s => s.Add(It.IsAny<User>()), Times.Never);
-        _users.Verify(s => s.AddToken(It.IsAny<UserToken>()), Times.Never);
-        Assert.Empty(_outbox.Messages);
-        _employees.Verify(s => s.SaveAsync(default), Times.Never);
-    }
+    // Who may invite (core.user.manage, admins only) is enforced on the route: see
+    // PermissionTests in packages/auth.tests and the coverage check in boundary.tests.
 
     [Fact]
     public async Task A_refused_invitation_issues_no_token()

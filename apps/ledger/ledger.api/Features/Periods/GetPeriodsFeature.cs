@@ -36,6 +36,7 @@ public static class GetPeriodsFeature
                 return (await handler.Handle(callerContext.Require(), ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.Read)
             .RequireApp(Apps.Ledger);
     }
 }

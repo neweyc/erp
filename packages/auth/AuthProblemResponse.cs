@@ -17,6 +17,7 @@ public static class AuthProblemResponse
     public static int StatusFor(string problemCode) => problemCode switch
     {
         AuthProblem.TenantSuspended or AuthProblem.AppNotLicensed or AuthProblem.CsrfFailed
+            or AuthProblem.NotPermitted
             => StatusCodes.Status403Forbidden,
         AuthProblem.RateLimited => StatusCodes.Status429TooManyRequests,
         _ => StatusCodes.Status401Unauthorized,

@@ -41,6 +41,7 @@ public static class GetEmployeesFeature
                     callerContext.Require(), includeTerminated ?? false, ct);
                 return result.CreateIResult();
             })
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .RequirePermission(Permissions.Core.EmployeeRead);
     }
 }

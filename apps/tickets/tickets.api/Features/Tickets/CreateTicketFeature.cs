@@ -78,6 +78,7 @@ public static class CreateTicketFeature
                 return (await handler.Handle(callerContext.Require(), cmd, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Tickets.TicketCreate)
             .RequireApp(Apps.Tickets);
     }
 }

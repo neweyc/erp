@@ -54,6 +54,7 @@ public static class GetJournalEntriesFeature
                 return (await handler.Handle(callerContext.Require(), from, to, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.Read)
             .RequireApp(Apps.Ledger);
     }
 }

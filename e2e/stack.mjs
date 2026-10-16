@@ -427,6 +427,35 @@ export async function operatorSignIn() {
   throw new Error(`operator sign-in failed with both codes: ${lastFailure}`)
 }
 
+/**
+ * A tenant administrator gives THEMSELVES an app role, through the real Users endpoint. Licensing an
+ * app grants nobody anything (docs/permissions.md), so every spec that works inside an app needs this.
+ *
+ * Signs in afresh for the purpose and disposes of that session: a role change ends the user's
+ * sessions (role_changed), so callers sign in again afterwards. Idempotent — an unchanged role is a
+ * 200 that changes nothing and ends nothing, so a re-run is safe.
+ *
+ * @param signInBase where to sign in; tenant B signs in at its own pinned core (D5).
+ */
+export async function grantOwnAppRole({ core, signInBase = core, email, password, app, role }) {
+  const api = await request.newContext()
+  try {
+    const signIn = await api.post(`${signInBase}/api/core/v1/auth/sign-in`, { data: { email, password } })
+    if (signIn.status() !== 200) throw new Error(`sign-in failed: ${signIn.status()} ${await signIn.text()}`)
+
+    const csrf = (await api.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
+    const { userId } = await (await api.get(`${core}/api/core/v1/auth/session`)).json()
+
+    const changed = await api.put(`${core}/api/core/v1/users/${userId}/roles`, {
+      headers: { 'X-CSRF-Token': csrf },
+      data: { appRoles: { [app]: role } },
+    })
+    if (changed.status() !== 200) throw new Error(`role change failed: ${changed.status()} ${await changed.text()}`)
+  } finally {
+    await api.dispose()
+  }
+}
+
 async function csrfOf(api) {
   const csrf = (await api.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
   if (!csrf) throw new Error('the operator session has no csrf token')

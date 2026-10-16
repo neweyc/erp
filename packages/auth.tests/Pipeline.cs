@@ -68,7 +68,7 @@ internal static class Pipeline
                         if (sessionId is { } id)
                         {
                             var claims = new List<Claim> { new(SessionCookie.SessionIdClaim, id.ToString()) };
-                            if (ticketRole is not null) claims.Add(new Claim(SessionCookie.RoleClaim, ticketRole));
+                            if (ticketRole is not null) claims.Add(new Claim(SessionCookie.AccessClaim, ticketRole));
                             context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
                         }
                         await next();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError } from '@app-platform/web-api'
+import { ApiError, Permissions, type AppProps } from '@app-platform/web-api'
 import {
   closePeriod, createAccount, listAccounts, listEntries, listPeriods, postEntry, reverseEntry, trialBalance,
   type Account, type Entry, type Period, type TrialBalance,
@@ -16,8 +16,13 @@ import { today } from './dates'
  * The ledger — a proof of concept, one page: the chart of accounts, posting, the journal with its
  * reversals, the trial balance, and closing the books. Everything that changes the books is visible
  * on the same screen as its effect, which is what makes the invariants demonstrable.
+ *
+ * What the user's ledger role does not allow is hidden: a viewer reads, an accountant also posts
+ * and reverses, a controller also adds accounts and closes periods. The API enforces each.
  */
-export default function LedgerApp() {
+export default function LedgerApp({ permissions }: AppProps) {
+  const can = (permission: string) => permissions.includes(permission)
+
   const [accounts, setAccounts] = useState<Account[]>([])
   const [entries, setEntries] = useState<Entry[]>([])
   const [periods, setPeriods] = useState<Period[]>([])
@@ -87,22 +92,28 @@ export default function LedgerApp() {
 
       <PeriodSection
         periods={periods}
-        onClose={(through) => run(() => closePeriod(through))}
+        onClose={can(Permissions.ledger.periodClose) ? (through) => run(() => closePeriod(through)) : null}
       />
 
       <AccountsSection
         accounts={accounts}
-        onCreate={(code, name, type) => run(() => createAccount(code, name, type))}
+        onCreate={
+          can(Permissions.ledger.accountCreate)
+            ? (code, name, type) => run(() => createAccount(code, name, type))
+            : null
+        }
       />
 
-      <PostEntryForm
-        accounts={accounts}
-        onPost={(date, memo, currency, lines, key) => run(() => postEntry(date, memo, currency, lines, key))}
-      />
+      {can(Permissions.ledger.entryPost) && (
+        <PostEntryForm
+          accounts={accounts}
+          onPost={(date, memo, currency, lines, key) => run(() => postEntry(date, memo, currency, lines, key))}
+        />
+      )}
 
       <JournalSection
         entries={entries}
-        onReverse={(entryId) => run(() => reverseEntry(entryId))}
+        onReverse={can(Permissions.ledger.entryReverse) ? (entryId) => run(() => reverseEntry(entryId)) : null}
       />
 
       <TrialBalanceSection balance={balance} asOf={asOf} onAsOfChange={setAsOf} />

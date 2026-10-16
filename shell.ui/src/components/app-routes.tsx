@@ -1,8 +1,10 @@
 import { Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { APPS, componentFor, visibleApps } from '../lib/apps'
+import { Permissions } from '@app-platform/web-api'
 import { useSession } from './session-provider'
 import { Dashboard } from '../pages/dashboard'
+import { Users } from '../pages/users'
 
 /**
  * Routes built FROM the registry. An app the viewer may not open has no route at all — not a
@@ -13,12 +15,15 @@ export function AppRoutes() {
 
   if (!session) return null
 
-  const available = visibleApps(session.licensedApps, session.role)
+  const available = visibleApps(session.licensedApps, session.permissions)
 
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Dashboard />} />
+      {session.permissions.includes(Permissions.core.userRead) && (
+        <Route path="/users" element={<Users />} />
+      )}
 
       {available.map((app) => {
         const Component = componentFor(app)
@@ -32,7 +37,7 @@ export function AppRoutes() {
               // deliberately plain: a spinner that appears for 80ms on a fast connection reads
               // as a flicker, not as progress.
               <Suspense fallback={<p role="status">Loading {app.name}…</p>}>
-                <Component />
+                <Component permissions={session.permissions} />
               </Suspense>
             }
           />

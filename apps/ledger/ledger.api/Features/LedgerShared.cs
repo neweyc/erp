@@ -19,7 +19,6 @@ public static class LedgerProblems
     public const string AlreadyReversed = "already_reversed";
     public const string IdempotencyKeyReused = "idempotency_key_reused";
     public const string PeriodClosed = "period_closed";
-    public const string NotPermitted = "not_permitted";
     public const string ConcurrentChange = "concurrent_change";
     public const string CannotReverseAReversal = "cannot_reverse_a_reversal";
 }

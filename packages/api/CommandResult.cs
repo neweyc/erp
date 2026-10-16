@@ -72,7 +72,10 @@ public static class CoreProblems
     public const string EmployeeHasAccount = "employee_has_account";
     public const string EmployeeTerminated = "employee_terminated";
     public const string NotFound = "not_found";
-    public const string NotPermitted = "not_permitted";
+    /// <summary>The change would leave the tenant with no active administrator.</summary>
+    public const string LastAdmin = "last_admin";
+    /// <summary>Re-exported from the permission check, so a handler refusing something itself uses the same code.</summary>
+    public const string NotPermitted = AuthProblem.NotPermitted;
 
     /// <summary>Re-exported so a feature never hand-writes an auth code and drifts from it.</summary>
     public const string AppNotLicensed = AuthProblem.AppNotLicensed;

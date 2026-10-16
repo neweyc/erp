@@ -77,6 +77,7 @@ public static class GetTrialBalanceFeature
                 return (await handler.Handle(callerContext.Require(), asOf, companyId, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.Read)
             .RequireApp(Apps.Ledger);
     }
 }

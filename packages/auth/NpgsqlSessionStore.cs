@@ -33,6 +33,7 @@ public sealed class NpgsqlSessionStore(NpgsqlDataSource dataSource) : ISessionSt
             CompanyId = reader.GetInt32(reader.GetOrdinal("company_id")),
             TenantStatus = ParseStatus(reader.GetString(reader.GetOrdinal("tenant_status"))),
             Role = reader.GetString(reader.GetOrdinal("role")),
+            AppRoles = AppRoles.Decode(reader.GetFieldValue<string?[]>(reader.GetOrdinal("app_roles"))),
             UserActive = reader.GetBoolean(reader.GetOrdinal("user_active")),
             MfaSatisfied = reader.GetBoolean(reader.GetOrdinal("mfa_satisfied")),
             LastSeenAt = reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("last_seen_at")),

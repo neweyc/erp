@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Permissions } from '@app-platform/web-api'
 import TicketsApp from './index'
 import { explain, TICKET_PROBLEMS } from './messages'
 
@@ -40,6 +41,10 @@ const oneEmployee = {
   status: 'Active',
 }
 
+/** An agent's permissions: everything the page can do. */
+const agent = Object.values(Permissions.tickets)
+const requester = [Permissions.tickets.ticketRead, Permissions.tickets.ticketCreate]
+
 afterEach(() => vi.unstubAllGlobals())
 
 describe('tickets app', () => {
@@ -49,7 +54,7 @@ describe('tickets app', () => {
       '/api/core/v1/employees': () => ({ body: [oneEmployee] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
 
     expect(await screen.findByText('Printer jammed')).toBeInTheDocument()
     // The roster comes from core's published view, not from tickets' own tables.
@@ -59,7 +64,7 @@ describe('tickets app', () => {
   it('says what to do when there are no tickets', async () => {
     stubApi({ '/api/tickets': () => ({ body: [] }), '/api/core': () => ({ body: [] }) })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
 
     // "No tickets" alone reads as a fault.
     expect(await screen.findByText(/Raise the first one/i)).toBeInTheDocument()
@@ -71,7 +76,7 @@ describe('tickets app', () => {
       '/api/core': () => ({ body: [] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
 
     // Rendered from the ticket's own snapshot, so it survives the employee being removed from
     // core — the roster above is deliberately empty here.
@@ -84,7 +89,7 @@ describe('tickets app', () => {
       '/api/core': () => ({ body: [oneEmployee] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
 
     // Disabled rather than offered-and-refused: a control that exists and then errors invites the
     // click.
@@ -103,7 +108,7 @@ describe('tickets app', () => {
       '/api/core/v1/employees': () => ({ body: [oneEmployee] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
     await screen.findByText('Printer jammed')
 
     await userEvent.selectOptions(screen.getByLabelText('Assignee'), oneEmployee.employeeId)
@@ -116,7 +121,7 @@ describe('tickets app', () => {
   it('reports an unlicensed app rather than an empty page', async () => {
     stubApi({ '/api/tickets': () => ({ status: 403, body: { problemCode: 'app_not_licensed' } }) })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
 
     // The shell hides unlicensed apps, but a direct navigation must still explain itself.
     expect(await screen.findByRole('alert')).toHaveTextContent(/does not have the Tickets app/i)
@@ -129,7 +134,7 @@ describe('tickets app', () => {
       '/api/tickets/v1/tickets': () => ({ status: 400, body: { problemCode: 'validation_failed' } }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
     await screen.findByText(/Raise the first one/i)
 
     const field = screen.getByLabelText('New ticket')
@@ -149,7 +154,7 @@ describe('tickets app', () => {
       '/api/tickets/v1/tickets': () => ({ body: { ticketId: 'tkt_x' } }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
     await screen.findByText(/Raise the first one/i)
 
     await userEvent.type(screen.getByLabelText('New ticket'), 'Printer jammed')
@@ -169,7 +174,7 @@ describe('tickets app', () => {
       '/api/core/v1/employees': () => ({ body: [] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
     await screen.findByText('Printer jammed')
 
     await userEvent.click(screen.getByRole('button', { name: 'Close ticket' }))
@@ -184,7 +189,7 @@ describe('tickets app', () => {
       '/api/core/v1/employees': () => ({ body: [oneEmployee] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
 
     // Selecting the placeholder cannot fire a change event, so unassigning needs its own control
     // or it is unreachable.
@@ -197,7 +202,7 @@ describe('tickets app', () => {
       '/api/core/v1/employees': () => ({ body: [oneEmployee] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
     await screen.findByText('Printer jammed')
 
     expect(screen.queryByRole('button', { name: 'Unassign' })).not.toBeInTheDocument()
@@ -209,13 +214,38 @@ describe('tickets app', () => {
       '/api/core/v1/employees': () => ({ body: [oneEmployee] }),
     })
 
-    render(<TicketsApp />)
+    render(<TicketsApp permissions={agent} />)
     await screen.findByText(/Raise the first one/i)
 
     // Tickets stores an employee id and a snapshot; it does not own the roster. Pinned by URL so a
     // future "convenience" endpoint on the tickets API is a deliberate change, not a drift.
     const urls = fetchMock.mock.calls.map((call) => String(call[0]))
     expect(urls.some((url) => url.includes('/api/core/v1/employees'))).toBe(true)
+  })
+
+  it('hides assignment and close from a requester', async () => {
+    // Hidden rather than offered and refused: the API would answer not_permitted either way.
+    stubApi({
+      '/api/tickets': () => ({ body: [{ ...oneTicket, assigneeDisplayName: 'Ada Lovelace' }] }),
+      '/api/core': () => ({ body: [oneEmployee] }),
+    })
+
+    render(<TicketsApp permissions={requester} />)
+
+    expect(await screen.findByText('Printer jammed')).toBeInTheDocument()
+    expect(screen.getByLabelText('New ticket')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Assignee')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Unassign' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Close ticket' })).not.toBeInTheDocument()
+  })
+
+  it('offers no create form without the create permission', async () => {
+    stubApi({ '/api/tickets': () => ({ body: [] }), '/api/core': () => ({ body: [] }) })
+
+    render(<TicketsApp permissions={[Permissions.tickets.ticketRead]} />)
+
+    expect(await screen.findByText('No tickets yet.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('New ticket')).not.toBeInTheDocument()
   })
 
   it('falls back to something honest for an unrecognised problem code', () => {

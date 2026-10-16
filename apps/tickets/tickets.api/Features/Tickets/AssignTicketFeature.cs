@@ -102,6 +102,7 @@ public static class AssignTicketFeature
                 return (await handler.Handle(callerContext.Require(), ticketId, cmd, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Tickets.TicketAssign)
             .RequireApp(Apps.Tickets);
     }
 }

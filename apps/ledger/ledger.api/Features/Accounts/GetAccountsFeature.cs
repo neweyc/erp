@@ -38,6 +38,7 @@ public static class GetAccountsFeature
                 return (await handler.Handle(callerContext.Require(), companyId, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.Read)
             .RequireApp(Apps.Ledger);
     }
 }

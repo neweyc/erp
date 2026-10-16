@@ -74,6 +74,7 @@ public static class CloseTicketFeature
                 return (await handler.Handle(callerContext.Require(), ticketId, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Tickets.TicketClose)
             .RequireApp(Apps.Tickets);
     }
 }

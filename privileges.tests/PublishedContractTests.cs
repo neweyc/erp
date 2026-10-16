@@ -80,6 +80,9 @@ public class PublishedContractTests(PrivilegeFixture fixture)
                 "role", "user_active", "mfa_satisfied", "last_seen_at",
                 "absolute_expiry", "revoked_at", "employee_id",
                 "licensed_apps", "idle_timeout_minutes",
+                // Appended, never inserted: the store reads by name, but appending keeps every
+                // older column where any positional reader would expect it.
+                "app_roles",
             ],
             columns);
     }

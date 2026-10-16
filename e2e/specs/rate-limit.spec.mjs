@@ -10,9 +10,11 @@ import { expect, request, test } from '@playwright/test'
  * It uses the tenant-B sign-in core (5103), configured with a real limit of 10 a minute. The
  * other servers in this suite have a limit high enough never to bite, because every request here
  * comes from one address. The isolation spec may already have used a few of this minute's
- * permits (at most three), so the test sends more than enough and asserts that refusal ARRIVES
- * after ordinary failures, rather than counting to an exact attempt. Requiring the ordinary
- * failures first is what stops a server that refuses EVERY sign-in from passing.
+ * permits (at most four: B's first sign-in attempt, B's administrator giving itself a Tickets
+ * role, B's sign-in, and A's refused sign-in there), so the test sends more than enough and
+ * asserts that refusal ARRIVES after ordinary failures, rather than counting to an exact attempt.
+ * Requiring the ordinary failures first is what stops a server that refuses EVERY sign-in from
+ * passing.
  */
 
 const LIMITED_CORE = 'http://localhost:5103'
@@ -40,7 +42,7 @@ test('repeated failed sign-ins from one address are refused with 429 rate_limite
 
   // Before the refusal, several guesses were answered as ordinary failed sign-ins — not errors,
   // and not refused from the first request.
-  expect(ordinaryFailures.length, `statuses: ${statuses}`).toBeGreaterThanOrEqual(LIMIT - 3)
+  expect(ordinaryFailures.length, `statuses: ${statuses}`).toBeGreaterThanOrEqual(LIMIT - 4)
   expect(ordinaryFailures.every((code) => code === 'invalid_credentials'), `${ordinaryFailures}`).toBe(true)
   expect(statuses.slice(0, -1).every((s) => s === 403), `statuses: ${statuses}`).toBe(true)
   expect(refused, `no 429 within ${LIMIT + 5} attempts; statuses: ${statuses}`).toBeTruthy()

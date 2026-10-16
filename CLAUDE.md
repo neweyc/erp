@@ -95,7 +95,8 @@ CI; substantive review must enforce behavior locality and justified abstractions
     `Handle(Caller caller, cmd)` returns `CommandResult`.
   - `Endpoint : IEndpoint` — Minimal API `MapGet`/`MapPost`, `[FromServices]` injection,
     reads userId from `ClaimTypes.NameIdentifier`, news up the handler manually,
-    `.RequireAuthorization(...)` and (in an app) `.RequireApp(...)`.
+    `.RequireAuthorization()`, `.RequirePermission(Permissions.…)` (or, only for a route about
+    the caller themselves, `.AllowAnySignedInUser()`), and (in an app) `.RequireApp(...)`.
 - **`Caller`, not a user id.** EMS passed `Guid userId` because a user was the only thing
   that could call anything. Here an API key is a first-class principal
   (`docs/integration.md` §2.3), and a signature that can only carry a user id forces every
@@ -302,8 +303,13 @@ first commit.
   enter one: `docs/auth-and-access.md`. **Write that before building auth**, not after.
 - MFA (TOTP) optional per user, mandatory for platform operators. Tenant-required MFA is
   enforced at **sign-in**, never mid-session.
-- Permissions defined once in `packages/auth` (`Roles.*` arrays + `Policy*` constants),
-  **mirrored in the shell's `permissions.ts`** — keep in sync whenever either changes.
+- **Permissions, not roles** (`docs/permissions.md`, decided 2026-10-15). A user holds one core
+  role and at most one role per app; roles are fixed bundles of permissions in code
+  (`packages/auth/Permissions.cs`). Endpoints declare `.RequirePermission(...)`, enforced by
+  middleware with 403 `not_permitted`; **handlers never check permissions or compare role names.**
+  An authenticated endpoint that declares nothing is refused at runtime and fails
+  `PermissionCoverageTests`. Licensing an app grants nobody a role in it. Permission names are
+  mirrored in `packages/web-api/src/permissions.ts`, kept in step by `PermissionCatalogueTests`.
 - `identity.user.employee_id` links an account to a core employee. It is what makes
   termination cut access, and it gates all self-service.
 

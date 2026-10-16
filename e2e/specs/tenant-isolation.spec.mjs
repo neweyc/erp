@@ -1,6 +1,6 @@
 import { expect, request, test } from '@playwright/test'
 import {
-  operatorSignIn, OTHER_TENANT_NAME, otherTenantPublicId, waitForInvitation,
+  grantOwnAppRole, operatorSignIn, OTHER_TENANT_NAME, otherTenantPublicId, waitForInvitation,
 } from '../stack.mjs'
 
 /**
@@ -100,13 +100,15 @@ test.describe('a second tenant', () => {
       await anonymous.dispose()
     }
 
+    // Licensed by an operator, as tenant A was, and B's administrator given the same Tickets role
+    // A's has. Without either, every tickets request from B would be refused 403 — and "B cannot
+    // see A's tickets" would pass without the tenant filter ever being consulted.
+    await licenseTicketsForTenantB()
+    await grantOwnAppRole({ core: CORE, signInBase: OTHER_CORE_SIGN_IN, ...B, app: 'tickets', role: 'agent' })
+
+    // Signed in AFTER the role change, which ends the user's earlier sessions.
     tenantB = await signInOrFail(OTHER_CORE_SIGN_IN, B)
     tenantA = await signInOrFail(CORE, A)
-
-    // Licensed by an operator, as tenant A was. Unlicensed, every tickets request from B would be
-    // refused 403 app_not_licensed — and "B cannot see A's tickets" would pass without the tenant
-    // filter ever being consulted.
-    await licenseTicketsForTenantB()
 
     const rosterOfB = await listEmployees(tenantB)
     graceId = rosterOfB.find((e) => e.email === GRACE.email)?.employeeId

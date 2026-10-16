@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { operatorSignIn, seededTenantPublicId } from '../stack.mjs'
+import { grantOwnAppRole, operatorSignIn, seededTenantPublicId } from '../stack.mjs'
 
 const ADMIN_EMAIL = 'admin@e2e.test'
 const ADMIN_PASSWORD = 'correct horse battery'
@@ -26,6 +26,12 @@ test.beforeAll(async () => {
   // 409 only if an earlier attempt of this same run already granted it.
   expect([200, 409], await granted.text()).toContain(granted.status())
   await operator.dispose()
+
+  // Licensing grants nobody a role. A controller may do everything this journey does: add accounts,
+  // post, reverse, and close the books.
+  await grantOwnAppRole({
+    core: 'http://localhost:5100', email: ADMIN_EMAIL, password: ADMIN_PASSWORD, app: 'ledger', role: 'controller',
+  })
 })
 
 test('the ledger, end to end in the browser', async ({ page }) => {

@@ -7,7 +7,8 @@ export function AccountsSection({
   accounts, onCreate,
 }: {
   accounts: readonly Account[]
-  onCreate: (code: string, name: string, type: AccountType) => Promise<boolean>
+  /** Null when the user may not add accounts (ledger.account.create): the form is not shown. */
+  onCreate: ((code: string, name: string, type: AccountType) => Promise<boolean>) | null
 }) {
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
@@ -19,7 +20,7 @@ export function AccountsSection({
     setSubmitting(true)
 
     // Cleared only on success, so a refused account keeps what was typed.
-    if (await onCreate(code.trim(), name.trim(), type)) {
+    if (onCreate && (await onCreate(code.trim(), name.trim(), type))) {
       setCode('')
       setName('')
     }
@@ -32,7 +33,9 @@ export function AccountsSection({
       <h2 id="accounts-heading">Chart of accounts</h2>
 
       {accounts.length === 0 ? (
-        <p>No accounts yet. Add the first one below — nothing can be posted until there are two.</p>
+        <p>
+          No accounts yet.{onCreate && ' Add the first one below — nothing can be posted until there are two.'}
+        </p>
       ) : (
         <ul aria-label="Accounts">
           {accounts.map((a) => (
@@ -43,22 +46,24 @@ export function AccountsSection({
         </ul>
       )}
 
-      <form onSubmit={submit} aria-label="Add account">
-        <label htmlFor="account-code">Code</label>
-        <input id="account-code" value={code} onChange={(e) => setCode(e.target.value)} required maxLength={20} />
+      {onCreate && (
+        <form onSubmit={submit} aria-label="Add account">
+          <label htmlFor="account-code">Code</label>
+          <input id="account-code" value={code} onChange={(e) => setCode(e.target.value)} required maxLength={20} />
 
-        <label htmlFor="account-name">Name</label>
-        <input id="account-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
+          <label htmlFor="account-name">Name</label>
+          <input id="account-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
 
-        <label htmlFor="account-type">Type</label>
-        <select id="account-type" value={type} onChange={(e) => setType(e.target.value as AccountType)}>
-          {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
+          <label htmlFor="account-type">Type</label>
+          <select id="account-type" value={type} onChange={(e) => setType(e.target.value as AccountType)}>
+            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
 
-        <button type="submit" disabled={submitting || code.trim() === '' || name.trim() === ''}>
-          Add account
-        </button>
-      </form>
+          <button type="submit" disabled={submitting || code.trim() === '' || name.trim() === ''}>
+            Add account
+          </button>
+        </form>
+      )}
     </section>
   )
 }

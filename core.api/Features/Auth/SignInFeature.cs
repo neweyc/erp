@@ -13,7 +13,8 @@ namespace AppPlatform.Core.Features.Auth;
 public static class SignInFeature
 {
     public record SignInCommand(string? Email, string? Password);
-    public record SignInOutcome(Guid? SessionId, string? Role, string? ProblemCode);
+    /// <param name="Access">The access stamp for the cookie; see <see cref="SessionCookie.AccessClaim"/>.</param>
+    public record SignInOutcome(Guid? SessionId, string? Access, string? ProblemCode);
 
     public class SignInCommandHandler(IAuthService auth, IAuditActorScope auditActor, TimeProvider clock)
     {
@@ -63,7 +64,8 @@ public static class SignInFeature
             auth.AddSession(session);
             await auth.SaveAsync(ct);
 
-            return new SignInOutcome(session.Id, user.Role, null);
+            return new SignInOutcome(
+                session.Id, AppRoles.AccessStamp(user.Role, AppRoles.Decode(user.AppRoles)), null);
         }
 
         private static SignInOutcome Failed()
@@ -106,9 +108,9 @@ public static class SignInFeature
                 var identity = new ClaimsIdentity(
                     [
                         new Claim(SessionCookie.SessionIdClaim, sessionId.ToString()),
-                        // Compared against the live row on every request, so a demotion takes
-                        // effect immediately rather than at cookie expiry.
-                        new Claim(SessionCookie.RoleClaim, outcome.Role!),
+                        // Compared against the live roles on every request, so a role change ends
+                        // the session and the shell reloads with what the user may now do.
+                        new Claim(SessionCookie.AccessClaim, outcome.Access!),
                     ],
                     SessionCookie.Tenant.SchemeName);
 

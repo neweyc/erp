@@ -45,6 +45,7 @@ public static class SignOutFeature
 
                 return Results.Ok(new { revoked });
             })
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .AllowAnySignedInUser();
     }
 }

@@ -1,4 +1,7 @@
+using AppPlatform.Auth;
 using AppPlatform.Core.Data;
+using AppPlatform.Tenancy;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
 
 namespace AppPlatform.Core.Services;
@@ -43,7 +46,7 @@ public class EFEmployeeService(CoreDbContext db) : IEmployeeService
     public Task SaveAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }
 
-public class EFUserService(CoreDbContext db) : IUserService
+public class EFUserService(CoreDbContext db, ITenantProvider tenant) : IUserService
 {
     public Task<bool> EmailInUseAsync(string email, CancellationToken ct = default)
         => db.Users.AnyAsync(u => u.Email == email, ct);
@@ -51,7 +54,49 @@ public class EFUserService(CoreDbContext db) : IUserService
     public Task<User?> FindByEmployeeAsync(Guid employeeId, CancellationToken ct = default)
         => db.Users.FirstOrDefaultAsync(u => u.EmployeeId == employeeId, ct);
 
+    public Task<User?> FindByPublicIdAsync(string publicId, CancellationToken ct = default)
+        => db.Users.FirstOrDefaultAsync(u => u.PublicId == publicId, ct);
+
+    public Task<List<User>> ListAsync(CancellationToken ct = default)
+        => db.Users.OrderBy(u => u.Email).ToListAsync(ct);
+
     public void Add(User user) => db.Users.Add(user);
 
     public void AddToken(UserToken token) => db.UserTokens.Add(token);
+
+    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default)
+        => db.Database.BeginTransactionAsync(ct);
+
+    public async Task<List<Guid>> LockActiveAdminsAsync(CancellationToken ct = default)
+    {
+        // Raw SQL because EF has no FOR UPDATE, and raw SQL applies no query filter — so the tenant
+        // is bound explicitly, from the same ambient scope the filter uses.
+        //
+        // Ordered by id so that callers take the row locks in a consistent order. Role changes
+        // never contend here, because they already hold the tenant's role-change lock.
+        var tenantId = tenant.TenantId
+            ?? throw new InvalidOperationException("Cannot lock administrators without a tenant scope.");
+
+        return await db.Database.SqlQuery<Guid>($"""
+            SELECT id AS "Value" FROM identity."user"
+            WHERE tenant_id = {tenantId} AND role = {RoleCatalogue.Admin} AND status = 'Active'
+            ORDER BY id
+            FOR UPDATE
+            """).ToListAsync(ct);
+    }
+
+    public async Task LockRoleChangesAsync(CancellationToken ct = default)
+    {
+        var tenantId = tenant.TenantId
+            ?? throw new InvalidOperationException("Cannot lock role changes without a tenant scope.");
+
+        // A transaction-scoped advisory lock, keyed by tenant: released at commit or rollback, and
+        // a change in one tenant never waits for another tenant's. Same pattern as KeyRing.
+        await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({RoleChangeLockKey(tenantId)}))", ct);
+    }
+
+    /// <summary>Public so the real-PostgreSQL tests can hold the same lock the handler takes.</summary>
+    public static string RoleChangeLockKey(int tenantId) => $"app-platform:role-change:{tenantId}";
+
+    public Task SaveAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

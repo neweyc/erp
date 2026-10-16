@@ -18,19 +18,10 @@ public static class ClosePeriodFeature
 {
     public record ClosePeriodCommand(DateOnly? ClosedThrough, string? CompanyId);
 
-    /// <summary>
-    /// Who may close. Declared here because packages/auth has no role or policy model yet
-    /// (CLAUDE.md: Roles.* and Policy* constants, not built); move it there when that exists.
-    /// </summary>
-    public static readonly string[] RolesThatMayClose = ["admin"];
-
     public class ClosePeriodCommandHandler(ILedgerService ledger, IOutbox outbox, TimeProvider clock)
     {
         public async Task<CommandResult> Handle(Caller caller, ClosePeriodCommand cmd, CancellationToken ct = default)
         {
-            if (!RolesThatMayClose.Contains(caller.Role))
-                return CommandResult.Forbidden(LedgerProblems.NotPermitted, "Only an administrator can close the books.");
-
             if (cmd.ClosedThrough is not { } through)
                 return CommandResult.Invalid(LedgerProblems.ValidationFailed, "A closing date is required.");
 
@@ -89,6 +80,7 @@ public static class ClosePeriodFeature
                 return (await handler.Handle(callerContext.Require(), cmd, ct)).CreateIResult();
             })
             .RequireAuthorization()
+            .RequirePermission(Permissions.Ledger.PeriodClose)
             .RequireApp(Apps.Ledger);
     }
 }
