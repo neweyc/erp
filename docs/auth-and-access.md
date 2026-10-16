@@ -175,8 +175,7 @@ Caller
   UserId         Guid?         -- null for a key
   TenantId       int
   CompanyId      int
-  Role           string        -- the core role; shown, never compared to decide access
-  AppRoles       app -> role   -- at most one per app
+  Roles          string[]      -- role keys held, built-in or custom; never compared to decide access
   Permissions    set<string>   -- what .RequirePermission checks (docs/permissions.md)
   Scopes         string[]      -- empty for an interactive user
   EmployeeId     Guid?         -- the self-service link

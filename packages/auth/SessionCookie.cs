@@ -15,7 +15,7 @@ public sealed record SessionCookie(string Name, string SchemeName)
     public const string SessionIdClaim = "ap:sid";
 
     /// <summary>
-    /// The user's roles when the ticket was issued (<see cref="AppRoles.AccessStamp"/>), compared
+    /// What the user's roles granted when the ticket was issued (<see cref="Access.Stamp"/>), compared
     /// against the live row on every request. A mismatch is <c>role_changed</c>, which sends the
     /// shell back to sign-in so what it shows matches what the user may now do. Access itself is
     /// recomputed from the live row on every request whether or not this matches.

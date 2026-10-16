@@ -7,14 +7,14 @@ namespace AppPlatform.Core.Tests;
 
 internal static class Fake
 {
-    public static Caller Caller(string role = "admin") => new()
+    public static Caller Caller() => new()
     {
         PrincipalId = Guid.NewGuid(),
         Kind = PrincipalKind.User,
         UserId = Guid.NewGuid(),
         TenantId = 1,
         CompanyId = 1,
-        Role = role,
+        Roles = [BuiltInRoles.CoreAdmin],
     };
 
     /// <summary>

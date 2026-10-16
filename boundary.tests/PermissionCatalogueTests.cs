@@ -8,7 +8,7 @@ namespace AppPlatform.BoundaryTests;
 /// <summary>
 /// The permission catalogue has a TypeScript mirror and names apps that packages/entitlements also
 /// declares. Neither copy can drift silently: a UI checking a permission the server never grants
-/// hides a feature from everyone, and a role in an app that does not exist can never be licensed.
+/// hides a feature from everyone, and a permission in an app that does not exist can never be used.
 /// </summary>
 public partial class PermissionCatalogueTests
 {
@@ -21,19 +21,21 @@ public partial class PermissionCatalogueTests
         // Every quoted dotted name in the file. The file holds nothing else of that shape.
         var mirrored = PermissionLiteral().Matches(source).Select(m => m.Groups[1].Value).Order();
 
-        Assert.Equal(RoleCatalogue.AllPermissions.Order(), mirrored);
+        Assert.Equal(PermissionCatalogue.Names.Order(), mirrored);
     }
 
     [Fact]
-    public void Every_app_with_roles_is_a_licensable_app()
+    public void Every_app_with_permissions_is_a_licensable_app()
     {
-        var appsWithRoles = RoleCatalogue.All
-            .Select(r => r.App)
-            .Where(app => app != RoleCatalogue.CoreApp)
+        // A permission's prefix is the app whose licence it depends on, so a prefix that names no
+        // app would make the permission impossible to use.
+        var appsWithPermissions = PermissionCatalogue.All
+            .Select(p => p.App)
+            .Where(app => app != Permissions.CoreApp)
             .Distinct()
             .Order();
 
-        Assert.Equal(Apps.All.Order(), appsWithRoles);
+        Assert.Equal(Apps.All.Order(), appsWithPermissions);
     }
 
     [GeneratedRegex(@"'([a-z]+\.[a-z.]+)'")]

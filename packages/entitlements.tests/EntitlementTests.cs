@@ -32,7 +32,6 @@ public class EntitlementTests
         Kind = PrincipalKind.User,
         TenantId = 1,
         CompanyId = 1,
-        Role = "member",
         LicensedApps = licensedApps,
     };
 

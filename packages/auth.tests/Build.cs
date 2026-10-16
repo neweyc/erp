@@ -4,9 +4,12 @@ internal static class Build
 {
     public static readonly DateTimeOffset Now = new(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>The access claim a cookie issued to a <c>core:admin</c> carries.</summary>
+    public static readonly string AdminAccess = Access.Stamp(Access.Granted([BuiltInRoles.CoreAdmin], []));
+
     public static SessionContext Session(
         TenantStatus status = TenantStatus.Active,
-        string role = "admin",
+        string[]? roles = null,
         bool userActive = true,
         bool mfaSatisfied = true,
         DateTimeOffset? revokedAt = null,
@@ -20,7 +23,7 @@ internal static class Build
             TenantId = 1,
             CompanyId = 1,
             TenantStatus = status,
-            Role = role,
+            Roles = roles ?? [BuiltInRoles.CoreAdmin],
             UserActive = userActive,
             MfaSatisfied = mfaSatisfied,
             RevokedAt = revokedAt,

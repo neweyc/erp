@@ -72,8 +72,12 @@ public static class CoreProblems
     public const string EmployeeHasAccount = "employee_has_account";
     public const string EmployeeTerminated = "employee_terminated";
     public const string NotFound = "not_found";
-    /// <summary>The change would leave the tenant with no active administrator.</summary>
+    /// <summary>The change would leave no active user who can manage users.</summary>
     public const string LastAdmin = "last_admin";
+    /// <summary>Another of the tenant's roles already has that name (ignoring case).</summary>
+    public const string RoleNameTaken = "role_name_taken";
+    /// <summary>A role cannot be deleted while anyone holds it.</summary>
+    public const string RoleInUse = "role_in_use";
     /// <summary>Re-exported from the permission check, so a handler refusing something itself uses the same code.</summary>
     public const string NotPermitted = AuthProblem.NotPermitted;
 

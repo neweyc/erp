@@ -37,11 +37,13 @@ public static class SessionEvaluator
         if (!context.UserActive)
             return AuthenticationResult.Fail(AuthProblem.UserDeactivated);
 
-        // Roles are compared against the cookie's claim, not merely read. Permissions below are
-        // computed from the live row either way, so a demotion is already effective; this ends
-        // the session so the shell reloads and stops offering what the user can no longer do.
+        // What the roles grant is compared against the cookie's claim, not merely read. Permissions
+        // below are computed from the live rows either way, so a demotion is already effective;
+        // this ends the session so the shell reloads and stops offering what the user can no
+        // longer do.
+        var granted = Access.Granted(context.Roles, context.RolePermissions);
         if (ticketAccess is not null
-            && !string.Equals(ticketAccess, AppRoles.AccessStamp(context.Role, context.AppRoles), StringComparison.Ordinal))
+            && !string.Equals(ticketAccess, Access.Stamp(granted), StringComparison.Ordinal))
             return AuthenticationResult.Fail(AuthProblem.RoleChanged);
 
         if (!context.MfaSatisfied)
@@ -68,9 +70,8 @@ public static class SessionEvaluator
             UserId = context.UserId,
             TenantId = context.TenantId,
             CompanyId = context.CompanyId,
-            Role = context.Role,
-            AppRoles = context.AppRoles,
-            Permissions = RoleCatalogue.PermissionsFor(context.Role, context.AppRoles, context.LicensedApps),
+            Roles = context.Roles.OfType<string>().ToList(),
+            Permissions = Access.Licensed(granted, context.LicensedApps),
             EmployeeId = context.EmployeeId,
             LicensedApps = context.LicensedApps,
             TenantSuspended = context.TenantStatus == TenantStatus.Suspended,

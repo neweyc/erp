@@ -22,10 +22,11 @@ public sealed record SessionContext
     public required int TenantId { get; init; }
     public required int CompanyId { get; init; }
     public required TenantStatus TenantStatus { get; init; }
-    public required string Role { get; init; }
+    /// <summary>The keys in <c>identity.user.roles</c>. May contain nulls or unknown keys; both grant nothing.</summary>
+    public IReadOnlyList<string?> Roles { get; init; } = [];
 
-    /// <summary>App name to role name, decoded from <c>identity.user.app_roles</c>.</summary>
-    public IReadOnlyDictionary<string, string> AppRoles { get; init; } = new Dictionary<string, string>();
+    /// <summary>The union of the permissions of the user's CUSTOM roles. Built-in roles are resolved in code.</summary>
+    public IReadOnlyList<string?> RolePermissions { get; init; } = [];
     public required bool UserActive { get; init; }
     public required bool MfaSatisfied { get; init; }
     public required DateTimeOffset LastSeenAt { get; init; }

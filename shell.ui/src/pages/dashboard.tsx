@@ -22,7 +22,8 @@ export function Dashboard() {
     <main>
       <h1>{session.tenantName}</h1>
       <p>
-        Signed in as {session.email} ({session.role})
+        Signed in as {session.email}
+        {session.roles.length > 0 && <> ({session.roles.map((r) => r.name).join(', ')})</>}
       </p>
 
       {available.length === 0 ? (

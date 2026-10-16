@@ -102,7 +102,7 @@ CI; substantive review must enforce behavior locality and justified abstractions
   (`docs/integration.md` §2.3), and a signature that can only carry a user id forces every
   machine-authenticated call to invent a fake one — which then lands in audit rows as a
   person who did not do it. `Caller` carries the principal id, its kind (user or api_key),
-  the tenant, the role, and the granted scopes; `UserId` is nullable and null for a key.
+  the tenant, the roles, and the granted scopes; `UserId` is nullable and null for a key.
   **Audit records the principal**, so "deleted by integration key 'payroll-sync'" is
   representable. Settled before the first handler exists, because retrofitting a parameter
   through every feature file is the expensive version.
@@ -303,13 +303,17 @@ first commit.
   enter one: `docs/auth-and-access.md`. **Write that before building auth**, not after.
 - MFA (TOTP) optional per user, mandatory for platform operators. Tenant-required MFA is
   enforced at **sign-in**, never mid-session.
-- **Permissions, not roles** (`docs/permissions.md`, decided 2026-10-15). A user holds one core
-  role and at most one role per app; roles are fixed bundles of permissions in code
-  (`packages/auth/Permissions.cs`). Endpoints declare `.RequirePermission(...)`, enforced by
+- **Permissions, not roles** (`docs/permissions.md`, decided 2026-10-15; customer-defined roles
+  2026-10-16). A user holds any number of roles; their permissions are the union, limited to core
+  and licensed apps. Built-in roles are code (`packages/auth/Permissions.cs`, keys `app:name`) and
+  locked; each tenant may define its own in `identity.role`. The permission catalogue is code: tenants
+  combine permissions, never invent them. Endpoints declare `.RequirePermission(...)`, enforced by
   middleware with 403 `not_permitted`; **handlers never check permissions or compare role names.**
   An authenticated endpoint that declares nothing is refused at runtime and fails
-  `PermissionCoverageTests`. Licensing an app grants nobody a role in it. Permission names are
-  mirrored in `packages/web-api/src/permissions.ts`, kept in step by `PermissionCatalogueTests`.
+  `PermissionCoverageTests`. Licensing an app grants nobody a role in it. **Every role write takes
+  the tenant's role-change lock first** (`IUserService.LockRoleChangesAsync`), and so must any
+  future write that can take access away. Permission names are mirrored in
+  `packages/web-api/src/permissions.ts`, kept in step by `PermissionCatalogueTests`.
 - `identity.user.employee_id` links an account to a core employee. It is what makes
   termination cut access, and it gates all self-service.
 

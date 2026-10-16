@@ -14,12 +14,15 @@ public static class GetSessionFeature
     /// Computed here, from the same rule every API enforces, so the shell never derives permissions
     /// from roles itself. The shell uses them to hide what the user cannot do; the APIs still decide.
     /// </param>
+    /// <param name="Roles">The roles held, with display names, for showing; never for deciding.</param>
     public record SessionModel(
-        string UserId, string Email, string Role, IReadOnlyDictionary<string, string> AppRoles,
+        string UserId, string Email, IReadOnlyList<SessionRole> Roles,
         IReadOnlyList<string> Permissions, string TenantName,
         IReadOnlyList<string> LicensedApps, bool TenantSuspended);
 
-    public class GetSessionQueryHandler(IAuthService auth)
+    public record SessionRole(string Key, string Name);
+
+    public class GetSessionQueryHandler(IAuthService auth, IRoleService roles)
     {
         public async Task<CommandResult> Handle(Caller caller, CancellationToken ct = default)
         {
@@ -30,8 +33,18 @@ public static class GetSessionFeature
             if (user is null)
                 return CommandResult.Forbidden(AuthProblems.NotSignedIn, "Not signed in.");
 
+            // Display names: built-in from code, custom from the tenant's roles. A key that is
+            // neither (a role since removed) grants nothing, so it is not shown either.
+            var custom = (await roles.ListAsync(ct)).ToDictionary(r => r.PublicId, r => r.Name, StringComparer.Ordinal);
+            var held = new List<SessionRole>();
+            foreach (var key in caller.Roles)
+            {
+                var name = BuiltInRoles.Find(key)?.Name ?? custom.GetValueOrDefault(key);
+                if (name is not null) held.Add(new SessionRole(key, name));
+            }
+
             return CommandResult.Ok(new SessionModel(
-                user.PublicId, user.Email, caller.Role, caller.AppRoles,
+                user.PublicId, user.Email, held,
                 caller.Permissions.Order(StringComparer.Ordinal).ToList(),
                 // The CALLER's tenant, passed explicitly. This read once had no id and relied on a
                 // filter the tenant table does not have, so every tenant was shown the name of
@@ -50,9 +63,10 @@ public static class GetSessionFeature
             async (
                 [FromServices] ICallerContext callerContext,
                 [FromServices] IAuthService auth,
+                [FromServices] IRoleService roles,
                 CancellationToken ct) =>
             {
-                var handler = new GetSessionQueryHandler(auth);
+                var handler = new GetSessionQueryHandler(auth, roles);
                 // Require: the endpoint is authorized, so reaching it without a caller is a
                 // wiring fault rather than a 401 to be rendered.
                 return (await handler.Handle(callerContext.Require(), ct)).CreateIResult();

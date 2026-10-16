@@ -1,13 +1,17 @@
 import { api } from '@app-platform/web-api'
-export type Role = 'admin' | 'manager' | 'member'
+
+/** A role the user holds, for display. Never used to decide what to show — see permissions. */
+export interface SessionRole {
+  /** `core:admin` for a built-in role, `rol_…` for one of the organisation's own. */
+  readonly key: string
+  readonly name: string
+}
 
 export interface Session {
   readonly userId: string
   readonly email: string
-  /** The core role. Shown to the user; never used to decide what to show — see permissions. */
-  readonly role: Role
-  /** App name to role name. An app with no entry gives this user nothing in it. */
-  readonly appRoles: Readonly<Record<string, string>>
+  /** Every role held; a user may hold several (docs/permissions.md). */
+  readonly roles: readonly SessionRole[]
   /**
    * What this user may do, computed by the server from the same rule the APIs enforce. The shell
    * uses it to hide what the user cannot do; it never derives permissions from roles itself.

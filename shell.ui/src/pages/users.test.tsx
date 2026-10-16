@@ -9,21 +9,25 @@ import { Users } from './users'
 const admin: Session = {
   userId: 'usr_admin',
   email: 'admin@acme.test',
-  role: 'admin',
-  appRoles: {},
-  permissions: ['core.employee.read', 'core.employee.create', 'core.user.read', 'core.user.manage'],
+  roles: [{ key: 'core:admin', name: 'Administrator' }],
+  permissions: ['core.employee.read', 'core.employee.create', 'core.user.read', 'core.user.manage', 'core.role.manage'],
   tenantName: 'Acme',
   licensedApps: ['tickets'],
   tenantSuspended: false,
 }
 
-const grace = { userId: 'usr_grace', email: 'grace@acme.test', status: 'Active', role: 'member', appRoles: {} }
+const grace = { userId: 'usr_grace', email: 'grace@acme.test', status: 'Active', roles: ['core:member'] }
+
+function role(key: string, name: string, builtIn = true) {
+  return { key, name, description: `${name} things.`, builtIn, permissions: [], holders: 0 }
+}
 
 const roles = [
-  { app: 'core', name: 'admin', description: 'Manages people.', permissions: [] },
-  { app: 'core', name: 'member', description: 'Sees the roster.', permissions: [] },
-  { app: 'tickets', name: 'requester', description: 'Raises tickets.', permissions: [] },
-  { app: 'tickets', name: 'agent', description: 'Works tickets.', permissions: [] },
+  role('core:admin', 'Administrator'),
+  role('core:member', 'Member'),
+  role('tickets:requester', 'Requester'),
+  role('tickets:agent', 'Agent'),
+  role('rol_clerk', 'Clerk', false),
 ]
 
 type Handler = (init?: RequestInit) => { status?: number; body: unknown }
@@ -55,61 +59,88 @@ function renderUsers() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('users page', () => {
-  it('saves an app role the moment it is chosen, sending only that app', async () => {
-    const fetchMock = stubApi({
-      'GET /api/core/v1/auth/session': () => ({ body: admin }),
-      'GET /api/core/v1/users': () => ({ body: [grace] }),
-      'GET /api/core/v1/roles': () => ({ body: roles }),
-      'PUT /api/core/v1/users/usr_grace/roles': () => ({ body: {} }),
-    })
-    const user = userEvent.setup()
-    renderUsers()
-
-    await user.selectOptions(await screen.findByLabelText('Tickets role for grace@acme.test'), 'agent')
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/core/v1/users/usr_grace/roles',
-        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ appRoles: { tickets: 'agent' } }) }),
-      ),
-    )
-  })
-
-  it('sends null to take an app role away', async () => {
-    const fetchMock = stubApi({
-      'GET /api/core/v1/auth/session': () => ({ body: admin }),
-      'GET /api/core/v1/users': () => ({ body: [{ ...grace, appRoles: { tickets: 'agent' } }] }),
-      'GET /api/core/v1/roles': () => ({ body: roles }),
-      'PUT /api/core/v1/users/usr_grace/roles': () => ({ body: {} }),
-    })
-    const user = userEvent.setup()
-    renderUsers()
-
-    await user.selectOptions(await screen.findByLabelText('Tickets role for grace@acme.test'), 'No access')
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/core/v1/users/usr_grace/roles',
-        expect.objectContaining({ body: JSON.stringify({ appRoles: { tickets: null } }) }),
-      ),
-    )
-  })
-
-  it('explains a refused change in words and shows the real value again', async () => {
+  it('names each user’s roles, built-in and custom', async () => {
     stubApi({
       'GET /api/core/v1/auth/session': () => ({ body: admin }),
-      'GET /api/core/v1/users': () => ({ body: [{ ...grace, role: 'admin' }] }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, roles: ['core:member', 'rol_clerk'] }] }),
       'GET /api/core/v1/roles': () => ({ body: roles }),
-      'PUT /api/core/v1/users/usr_grace/roles': () => ({ status: 409, body: { problemCode: 'last_admin' } }),
+    })
+    renderUsers()
+
+    expect(await screen.findByRole('cell', { name: 'Member, Clerk' })).toBeInTheDocument()
+  })
+
+  it('sends only what changed, as additions and removals', async () => {
+    const fetchMock = stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, roles: ['core:member', 'tickets:requester'] }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'PATCH /api/core/v1/users/usr_grace/roles': () => ({ body: {} }),
     })
     const user = userEvent.setup()
     renderUsers()
 
-    const select = await screen.findByLabelText('Role for grace@acme.test')
-    await user.selectOptions(select, 'member')
+    await user.click(await screen.findByRole('button', { name: 'Edit roles for grace@acme.test' }))
+    await user.click(screen.getByRole('checkbox', { name: /Agent/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Requester/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Clerk/ }))
+    await user.click(screen.getByRole('button', { name: 'Save roles' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/only active administrator/i)
-    await waitFor(() => expect(screen.getByLabelText('Role for grace@acme.test')).toHaveValue('admin'))
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/core/v1/users/usr_grace/roles',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ add: ['tickets:agent', 'rol_clerk'], remove: ['tickets:requester'] }),
+        }),
+      ),
+    )
+  })
+
+  it('never removes a role the page does not list', async () => {
+    // ledger:controller is held, but the ledger is unlicensed, so /roles does not return it.
+    const fetchMock = stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, roles: ['core:member', 'ledger:controller'] }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'PATCH /api/core/v1/users/usr_grace/roles': () => ({ body: {} }),
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit roles for grace@acme.test' }))
+    await user.click(screen.getByRole('checkbox', { name: /Agent/ }))
+    await user.click(screen.getByRole('button', { name: 'Save roles' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/core/v1/users/usr_grace/roles',
+        expect.objectContaining({ body: JSON.stringify({ add: ['tickets:agent'], remove: [] }) }),
+      ),
+    )
+  })
+
+  it('explains a refused change in words and shows the real roles again', async () => {
+    let saved = false
+    stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, roles: ['core:admin'] }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'PATCH /api/core/v1/users/usr_grace/roles': () => {
+        saved = true
+        return { status: 409, body: { problemCode: 'last_admin' } }
+      },
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit roles for grace@acme.test' }))
+    await user.click(screen.getByRole('checkbox', { name: /Administrator/ }))
+    await user.click(screen.getByRole('button', { name: 'Save roles' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/nobody else active could manage users/i)
+    expect(saved).toBe(true)
+    expect(screen.getByRole('cell', { name: 'Administrator' })).toBeInTheDocument()
   })
 
   it('is read-only without core.user.manage', async () => {
@@ -117,14 +148,13 @@ describe('users page', () => {
       'GET /api/core/v1/auth/session': () => ({
         body: { ...admin, permissions: ['core.employee.read', 'core.user.read'] },
       }),
-      'GET /api/core/v1/users': () => ({ body: [{ ...grace, appRoles: { tickets: 'agent' } }] }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, roles: ['tickets:agent'] }] }),
       'GET /api/core/v1/roles': () => ({ body: roles }),
     })
     renderUsers()
 
-    expect(await screen.findByText('grace@acme.test')).toBeInTheDocument()
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
-    expect(screen.getByRole('cell', { name: 'agent' })).toBeInTheDocument()
+    expect(await screen.findByRole('cell', { name: 'Agent' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Edit roles/ })).not.toBeInTheDocument()
   })
 
   it('reloads the session after changing your own roles, so the shell matches them', async () => {
@@ -133,18 +163,18 @@ describe('users page', () => {
       'GET /api/core/v1/auth/session': () => {
         sessionCalls += 1
         // The second call is the reload: the server ends the session because the roles changed.
-        return sessionCalls === 1
-          ? { body: admin }
-          : { status: 401, body: { problemCode: 'role_changed' } }
+        return sessionCalls === 1 ? { body: admin } : { status: 401, body: { problemCode: 'role_changed' } }
       },
-      'GET /api/core/v1/users': () => ({ body: [{ ...grace, userId: 'usr_admin', email: 'admin@acme.test' }] }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, userId: 'usr_admin', email: 'admin@acme.test', roles: ['core:admin'] }] }),
       'GET /api/core/v1/roles': () => ({ body: roles }),
-      'PUT /api/core/v1/users/usr_admin/roles': () => ({ body: {} }),
+      'PATCH /api/core/v1/users/usr_admin/roles': () => ({ body: {} }),
     })
     const user = userEvent.setup()
     renderUsers()
 
-    await user.selectOptions(await screen.findByLabelText('Tickets role for admin@acme.test'), 'agent')
+    await user.click(await screen.findByRole('button', { name: 'Edit roles for admin@acme.test' }))
+    await user.click(screen.getByRole('checkbox', { name: /Agent/ }))
+    await user.click(screen.getByRole('button', { name: 'Save roles' }))
 
     await waitFor(() => expect(sessionCalls).toBe(2))
   })

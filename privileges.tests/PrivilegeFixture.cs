@@ -20,6 +20,10 @@ namespace AppPlatform.PrivilegeTests;
 /// </summary>
 public sealed class PrivilegeFixture : IAsyncLifetime
 {
+    /// <summary>The access claim a cookie issued to a <c>core:admin</c> carries, as sign-in records it.</summary>
+    public static readonly string AdminAccess =
+        Auth.Access.Stamp(Auth.Access.Granted([Auth.BuiltInRoles.CoreAdmin], []));
+
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("appplatform")
         .Build();
@@ -175,8 +179,8 @@ public sealed class PrivilegeFixture : IAsyncLifetime
                   'Ada', 'Lovelace', 'ada@acme.test', 'Active', 1, false);
 
         INSERT INTO identity."user"
-          (id, tenant_id, company_id, public_id, email, role, status, employee_id)
-          VALUES ('22222222-2222-2222-2222-222222222222', 1, 1, 'usr_a', 'a@b.c', 'admin',
+          (id, tenant_id, company_id, public_id, email, roles, status, employee_id)
+          VALUES ('22222222-2222-2222-2222-222222222222', 1, 1, 'usr_a', 'a@b.c', '{core:admin}',
                   'Active', '11111111-1111-1111-1111-111111111111');
 
         INSERT INTO identity.session

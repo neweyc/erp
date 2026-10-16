@@ -20,10 +20,10 @@ public static class PermissionEndpointExtensions
 
         // At startup, not per request: a mistyped permission matches nobody, so the endpoint
         // would refuse every caller and the first to notice would be a customer.
-        if (!RoleCatalogue.AllPermissions.Contains(permission))
+        if (!PermissionCatalogue.Names.Contains(permission))
         {
             throw new ArgumentException(
-                $"'{permission}' is granted by no role. Add it to Permissions and RoleCatalogue.",
+                $"'{permission}' is not in the catalogue. Add it to Permissions and PermissionCatalogue.",
                 nameof(permission));
         }
 
@@ -104,7 +104,7 @@ public sealed class PermissionMiddleware(RequestDelegate next, ILogger<Permissio
             // unlicensed app is never granted, and "not licensed" tells an administrator what to
             // fix where "not permitted" would send them to the Users page for nothing.
             var app = Permissions.AppOf(required.Permission);
-            if (app != RoleCatalogue.CoreApp && !caller.LicensedApps.Contains(app))
+            if (app != Permissions.CoreApp && !caller.LicensedApps.Contains(app))
                 return AuthProblem.AppNotLicensed;
 
             return AuthProblem.NotPermitted;

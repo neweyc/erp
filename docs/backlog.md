@@ -248,8 +248,9 @@ ERP will need again.
   decisions are built, the surface is not.
 - **Idle timeout, notifications bell** — `ActivityPolicy` anticipates both; neither is built.
 - **Deactivating a user** from the Users page. `identity.user.status` supports it; no endpoint
-  changes it. Today an administrator can remove someone's app roles, but every account keeps a
-  core role and so its roster access.
+  changes it. Today an administrator can remove all of someone's roles, which leaves them able to
+  sign in and do nothing. When built, deactivation takes the tenant's role-change lock and runs the
+  last-administrator check (docs/permissions.md §6).
 
 ---
 
@@ -649,6 +650,88 @@ ahead of review while Codex was at its usage limit; the review then ran and its 
 Open from the closure: D16.
 
 ## Current cycle
+
+**Cycle 13 — customer-defined roles.** Chris: "tackle customer defined roles while we're here; it is
+an expected feature for any serious ERP type application". Chose: **any number of roles per user**,
+a role may span apps, permissions are the union; **built-in roles stay, locked**; customers may define
+**core** roles too. Cycle 12 committed first (`6192ca2`). Design rewritten first: `docs/permissions.md`.
+**Complete. Independent review (Codex, four rounds) CLOSED: no blocking findings.**
+
+- `packages/auth/Permissions.cs`: `PermissionCatalogue` (every permission with a description, plus
+  the new `core.role.manage`), `BuiltInRoles` (keys `app:name`; a colon where permissions use dots,
+  which also keeps core's source free of `ledger.`/`tickets.` for the banned-string boundary scan),
+  and `Access`: `Granted` (built-in roles plus custom-role permissions, dropping unknown keys,
+  unknown permissions and NULL elements), `Licensed` (core plus licensed apps), `Stamp` (a hash of
+  what is granted, before licensing). One implementation, used by the session evaluator, sign-in and
+  the last-administrator check.
+- `identity.role` (custom roles: name unique per tenant ignoring case, by a `lower(name)` index
+  created in SQL) and `identity.user.roles` replacing `role` and `app_roles`. Three migrations so the
+  database works after each: `AddCustomRoles` (add and backfill), `AddRolesToSessionContext` (as
+  `ap_owner`; returns `roles` and `role_permissions`, custom roles joined on the user's own tenant),
+  `DropUserRoleColumns`. Dropping in the same release is acceptable only because nothing is
+  deployed. Per-migration and full SQL scripts generated; `database/README.md` lists the `ap_owner`
+  step and its order.
+- core: `PATCH /users/{id}/roles` (`add`/`remove`, so two administrators editing one person both
+  get what they asked for, and a role the page does not list is never erased); `GET /roles` (built-in
+  and custom, with holder counts); `GET /permissions`; `POST /roles`, `PUT /roles/{id}`,
+  `DELETE /roles/{id}` (`core.role.manage`; delete refused while held, `role_in_use`; a role edit
+  keeps permissions held in unlicensed apps). Invitations take `roles`, validated by the same rule.
+  `Features/Roles/RoleRules.cs` holds the rules every one of these shares.
+- The last-administrator rule is now "some active user can still manage users", by permission, so a
+  custom role granting `core.user.manage` counts, and editing a role that stops granting it is
+  checked too. It refuses only a change from someone to no one.
+- **Every role write takes the tenant's role-change lock first**: assigning, creating, editing,
+  deleting, and inviting. Cycle 12's admin row lock is gone; with the lock it guarded nothing extra.
+- Editing a custom role changes its holders' permissions on their next request, and the access
+  claim (now a hash of permissions) signs them in again so their shell matches.
+- Shell: session carries `roles` (key and name). Users page: each account's roles by name, and a
+  checklist editor that sends only the differences. New Roles page (`core.user.read`): every role,
+  what it allows in words, how many hold it; with `core.role.manage`, new, copy, edit, and a
+  two-click delete. Both scroll inside their container at 390px.
+- Evidence (measured): 757 .NET tests (199 against real PostgreSQL), 30/30 Playwright, UI suites 33
+  shell / 15 tickets / 26 ledger / 8 web-api, all builds clean. New: `RoleDefinitionTests`, rewritten
+  `ChangeUserRolesTests`, `PermissionTests`, and `UserRolesTests` against PostgreSQL. The last covers
+  two admins demoting each other, a second change to one user, a delete racing an in-flight
+  assignment, another tenant's user and role refused, `session_context` ignoring another tenant's
+  role id even when stored by hand, a custom-role edit reaching holders at once, audit and event, and
+  the case-insensitive unique index. In the browser (e2e `employee-invite`), the administrator defines
+  a role on the Roles page, gives it to a member on the Users page, and the member can then add
+  employees; a member cannot define a role. Broken on purpose, each caught: `session_context`
+  without the tenant join; delete without the lock; no licensing filter; unknown permissions not
+  dropped; a role edit without the last-administrator check; invitations skipping role validation.
+- Decided in the design, worth confirming: holders of `core.user.manage` / `core.role.manage` may
+  grant anything, themselves included (no non-escalation rule; open question recorded); a held role
+  cannot be deleted; a role needs at least one permission; custom role names may not reuse a
+  built-in role's name.
+- **Independent review (Codex), round 1 — 1 blocking, 3 optional. All taken.**
+  - BLOCKING: the generated SQL scripts were stale. They were generated before the role keys changed
+    from `core.admin` to `core:admin`, so an upgraded Cycle 12 administrator would have been
+    backfilled with a key that grants nothing, and lost user management. Every test passed because
+    the shared fixture seeds AFTER all migrations, leaving nothing to backfill. Fixed: scripts
+    regenerated; new `CustomRolesUpgradeTests` builds the Cycle 12 schema from the generated script,
+    seeds Cycle 12-shaped users, applies the upgrade, and checks their keys and their permissions
+    through `session_context`. It fails with the stale key restored.
+  - OPTIONAL: a stored NULL role key threw in `RoleRules.GrantedBy`, blocking that user's sign-in
+    and the last-administrator count. Skipped now, and not written back on the next change.
+  - OPTIONAL: `[null]` in `add`, `remove`, `roles` or `permissions` was a 500. Now
+    `validation_failed` (`RoleRules.CleanList`).
+  - OPTIONAL: renaming a role whose permissions are all in an unlicensed app was refused as empty.
+    The non-empty check now runs after the kept permissions are merged.
+  - Evidence after the fixes: 764 .NET tests (200 against real PostgreSQL), 30/30 Playwright.
+- **Round 2 — round-1 fixes confirmed; NO BLOCKING FINDINGS; 2 optional, both taken.**
+  - The backfill could make effective what Cycle 12 ignored: a `core:admin` entry inside `app_roles`
+    (Cycle 12 set the core role from `role` only), and a second entry for one app (Cycle 12 used the
+    first). Now excluded and first-only. The upgrade test seeds both cases.
+  - A NULL element in a custom role's stored permissions stopped the role being edited. Skipped.
+- **Round 3 — round-2 fixes confirmed; NO BLOCKING FINDINGS; 1 optional, taken:** an entry whose role
+  name holds a colon (`ledger:unknown:role`) was Cycle 12's first entry for its app and granted
+  nothing, but the backfill filtered it out first and promoted the next one. The filter now splits at
+  the first colon, as Cycle 12's decoder did. **Round 4** (narrow confirmation of that fix): confirmed,
+  NO BLOCKING FINDINGS; its optional suggestion (seed `""`, `:agent`, `core:` too) taken.
+  **Independent review CLOSED.** Final evidence: 765 .NET tests (200 against real PostgreSQL),
+  30/30 Playwright, UI suites 33 / 15 / 26 / 8, builds clean.
+
+## Previous cycle
 
 **Cycle 12 — IAM: a permission model (D18).** Chris: "work on IAM and a permissions model";
 chose per-app roles fixed in code, and a Users page this cycle. Design written first:

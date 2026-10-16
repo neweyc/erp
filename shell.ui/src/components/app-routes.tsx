@@ -4,6 +4,7 @@ import { APPS, componentFor, visibleApps } from '../lib/apps'
 import { Permissions } from '@app-platform/web-api'
 import { useSession } from './session-provider'
 import { Dashboard } from '../pages/dashboard'
+import { Roles } from '../pages/roles'
 import { Users } from '../pages/users'
 
 /**
@@ -22,7 +23,10 @@ export function AppRoutes() {
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Dashboard />} />
       {session.permissions.includes(Permissions.core.userRead) && (
-        <Route path="/users" element={<Users />} />
+        <>
+          <Route path="/users" element={<Users />} />
+          <Route path="/roles" element={<Roles />} />
+        </>
       )}
 
       {available.map((app) => {

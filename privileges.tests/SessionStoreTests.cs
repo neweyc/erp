@@ -30,7 +30,7 @@ public class SessionStoreTests(PrivilegeFixture fixture)
 
         Assert.NotNull(context);
         Assert.Equal(1, context.TenantId);
-        Assert.Equal("admin", context.Role);
+        Assert.Equal([BuiltInRoles.CoreAdmin], context.Roles);
         Assert.Equal(TenantStatus.Active, context.TenantStatus);
         Assert.True(context.UserActive);
         Assert.Equal(["tickets"], context.LicensedApps);
@@ -47,7 +47,7 @@ public class SessionStoreTests(PrivilegeFixture fixture)
         var context = await ReadAsAsync("ap_tickets_rt", KnownSession);
 
         Assert.NotNull(context);
-        Assert.Equal("admin", context.Role);
+        Assert.Equal([BuiltInRoles.CoreAdmin], context.Roles);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class SessionStoreTests(PrivilegeFixture fixture)
     {
         var context = await ReadAsAsync("ap_core_rt", KnownSession);
 
-        var result = SessionEvaluator.Evaluate(context, "admin", DateTimeOffset.UtcNow);
+        var result = SessionEvaluator.Evaluate(context, PrivilegeFixture.AdminAccess, DateTimeOffset.UtcNow);
 
         Assert.True(result.Succeeded);
         Assert.Equal(1, result.Caller!.TenantId);

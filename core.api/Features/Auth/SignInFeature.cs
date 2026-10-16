@@ -3,6 +3,7 @@ using System.Security.Claims;
 using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
+using AppPlatform.Core.Features.Roles;
 using AppPlatform.Core.Services;
 using AppPlatform.Tenancy;
 using Microsoft.AspNetCore.Authentication;
@@ -16,7 +17,8 @@ public static class SignInFeature
     /// <param name="Access">The access stamp for the cookie; see <see cref="SessionCookie.AccessClaim"/>.</param>
     public record SignInOutcome(Guid? SessionId, string? Access, string? ProblemCode);
 
-    public class SignInCommandHandler(IAuthService auth, IAuditActorScope auditActor, TimeProvider clock)
+    public class SignInCommandHandler(
+        IAuthService auth, IRoleService roles, IAuditActorScope auditActor, TimeProvider clock)
     {
         /// <summary>Matches the tenant-user lifetime in docs/auth-and-access.md.</summary>
         public static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(7);
@@ -64,8 +66,10 @@ public static class SignInFeature
             auth.AddSession(session);
             await auth.SaveAsync(ct);
 
-            return new SignInOutcome(
-                session.Id, AppRoles.AccessStamp(user.Role, AppRoles.Decode(user.AppRoles)), null);
+            // What the user's roles grant now, recorded in the cookie; a later difference ends the
+            // session as role_changed (docs/permissions.md §5). Same rule the session check uses.
+            var customRoles = RoleRules.ByKey(await roles.ListAsync(ct));
+            return new SignInOutcome(session.Id, Access.Stamp(RoleRules.GrantedBy(user.Roles, customRoles)), null);
         }
 
         private static SignInOutcome Failed()
@@ -84,6 +88,7 @@ public static class SignInFeature
                 SignInCommand cmd,
                 HttpContext http,
                 [FromServices] IAuthService auth,
+                [FromServices] IRoleService roles,
                 [FromServices] IBackgroundTenantScope tenantScope,
                 [FromServices] ITenantResolver tenants,
                 [FromServices] IAuditActorScope auditActor,
@@ -99,7 +104,7 @@ public static class SignInFeature
 
                 tenantScope.UseTenant(id);
 
-                var handler = new SignInCommandHandler(auth, auditActor, clock);
+                var handler = new SignInCommandHandler(auth, roles, auditActor, clock);
                 var outcome = await handler.Handle(id, cmd, ct);
 
                 if (outcome.SessionId is not { } sessionId)

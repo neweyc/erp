@@ -68,7 +68,6 @@ public static class SeedE2E
         UserId = null,
         TenantId = tenantId,
         CompanyId = 0,
-        Role = "seed",
     };
 
     /// <summary>

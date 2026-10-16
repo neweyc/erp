@@ -89,7 +89,7 @@ public class ProvisioningTests : IAsyncLifetime
         // without them is an account nobody can sign into.
         Assert.Single(await db.Companies.ToListAsync());
         var admin = Assert.Single(await db.Users.ToListAsync());
-        Assert.Equal("admin", admin.Role);
+        Assert.Equal([Auth.BuiltInRoles.CoreAdmin], admin.Roles);
         Assert.Equal(UserStatus.Invited, admin.Status);
         Assert.Single(await db.Set<Outbox.OutboxMessage>().ToListAsync());
     }
@@ -169,11 +169,11 @@ public class ProvisioningTests : IAsyncLifetime
         Assert.NotNull(context);
         Assert.Equal(Auth.TenantStatus.Active, context.TenantStatus);
         Assert.Equal(row.Id, context.TenantId);
-        Assert.Equal("admin", context.Role);
+        Assert.Equal([Auth.BuiltInRoles.CoreAdmin], context.Roles);
         Assert.True(context.UserActive);
 
         // And it must evaluate to a caller, not merely parse.
-        var result = SessionEvaluator.Evaluate(context, "admin", DateTimeOffset.UtcNow);
+        var result = SessionEvaluator.Evaluate(context, PrivilegeFixture.AdminAccess, DateTimeOffset.UtcNow);
         Assert.True(result.Succeeded, $"session rejected: {result.ProblemCode}");
     }
 
@@ -221,7 +221,7 @@ public class ProvisioningTests : IAsyncLifetime
         // whether the customer can still reach their own data export.
         Assert.Equal(Auth.TenantStatus.Suspended, context!.TenantStatus);
 
-        var result = SessionEvaluator.Evaluate(context, "admin", DateTimeOffset.UtcNow);
+        var result = SessionEvaluator.Evaluate(context, PrivilegeFixture.AdminAccess, DateTimeOffset.UtcNow);
         Assert.True(result.Succeeded);
         Assert.True(result.Caller!.TenantSuspended);
     }

@@ -76,7 +76,6 @@ public class AuditTrailTests(PrivilegeFixture fixture)
         UserId = Ada,
         TenantId = 1,
         CompanyId = 1,
-        Role = "member",
         LicensedApps = ["tickets"],
     };
 
@@ -190,7 +189,9 @@ public class AuditTrailTests(PrivilegeFixture fixture)
             Assert.Equal("provisioning", row.ActorName);
         }
 
-        Assert.Equal("admin", adminRow.Changes.GetProperty("role").GetProperty("new").GetString());
+        Assert.Equal(
+            ["core:admin"],
+            adminRow.Changes.GetProperty("roles").GetProperty("new").EnumerateArray().Select(e => e.GetString()));
     }
 
     [Fact]

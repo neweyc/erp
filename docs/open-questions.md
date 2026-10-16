@@ -74,9 +74,14 @@ remain open; they are not a blanket prohibition on building experiments.
   A member-role user arguably needs names without addresses. Raised by review 2026-09-25; a product
   decision, not a defect. Since the permission model (2026-10-15) the change is small: split
   `core.employee.read` into names and contact details, and grant the second to fewer roles.
-- **Tenant-defined roles.** v1 roles are fixed in code (docs/permissions.md §1). Build custom roles
-  only when a customer asks; endpoints name permissions, so it would change the catalogue's storage,
-  not the features.
+- **Tenant-defined roles: decided and built** (Chris, 2026-10-16, Cycle 13): any number of roles per
+  user, built-in roles locked, customers define their own, core included (docs/permissions.md).
+- **Delegated administration?** Whoever holds `core.user.manage` may grant any role, themselves
+  included, and whoever holds `core.role.manage` may build a role from any licensed permission
+  (docs/permissions.md §6). A "you may only grant what you hold" rule would let a tenant delegate
+  user administration safely, but it cannot coexist with "licensing grants nobody anything" unless
+  the first administrator is exempt. Decide when a customer wants a help desk that resets roles
+  without being able to make itself an accountant.
 - **Is the role matrix right?** The starting matrix in docs/permissions.md §2 was proposed, not
   validated with anyone who runs a ticket queue or a set of books. Cheap to change: one file.
 

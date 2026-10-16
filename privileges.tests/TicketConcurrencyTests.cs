@@ -50,7 +50,6 @@ public class TicketConcurrencyTests(PrivilegeFixture fixture)
         Kind = Auth.PrincipalKind.User,
         TenantId = 1,
         CompanyId = 1,
-        Role = "member",
         LicensedApps = ["tickets"],
     };
 

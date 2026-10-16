@@ -125,7 +125,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var signInDb = Core(signIn, signInActor);
 
         var outcome = await new SignInFeature.SignInCommandHandler(
-            new EFAuthService(signInDb), signInActor, TimeProvider.System)
+            new EFAuthService(signInDb), new EFRoleService(signInDb), signInActor, TimeProvider.System)
             .Handle(tenantId, new(email, password));
 
         Assert.NotNull(outcome.SessionId);
@@ -151,7 +151,9 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var dataSource = NpgsqlDataSource.Create(_connection);
         var context = await new NpgsqlSessionStore(dataSource).FindAsync(sessionId);
 
-        var result = SessionEvaluator.Evaluate(context, context?.Role, DateTimeOffset.UtcNow);
+        // The claim a cookie issued now would carry, so the comparison runs rather than being skipped.
+        var access = context is null ? null : Access.Stamp(Access.Granted(context.Roles, context.RolePermissions));
+        var result = SessionEvaluator.Evaluate(context, access, DateTimeOffset.UtcNow);
         Assert.True(result.Succeeded, $"session rejected: {result.ProblemCode}");
 
         return result.Caller!;

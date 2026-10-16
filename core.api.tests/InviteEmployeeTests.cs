@@ -1,8 +1,10 @@
 using AppPlatform.Api;
+using AppPlatform.Auth;
 using AppPlatform.Core.Data;
 using AppPlatform.Core.Services;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using System.Text.Json;
@@ -14,11 +16,18 @@ public class InviteEmployeeTests
 {
     private readonly Mock<IEmployeeService> _employees = new();
     private readonly Mock<IUserService> _users = new();
+    private readonly Mock<IRoleService> _roles = new();
     private readonly RecordingOutbox _outbox = new();
     private static readonly DateTimeOffset Now = new(2026, 9, 29, 12, 0, 0, TimeSpan.Zero);
 
     private InviteEmployeeCommandHandler Handler()
-        => new(_employees.Object, _users.Object, _outbox, new FakeTimeProvider(Now));
+        => new(_employees.Object, _users.Object, _roles.Object, _outbox, new FakeTimeProvider(Now));
+
+    public InviteEmployeeTests()
+    {
+        _users.Setup(s => s.BeginTransactionAsync(default)).ReturnsAsync(Mock.Of<IDbContextTransaction>());
+        _roles.Setup(s => s.ListAsync(default)).ReturnsAsync([]);
+    }
 
     private void Existing(Employee employee)
         => _employees.Setup(s => s.FindByPublicIdAsync(employee.PublicId, default)).ReturnsAsync(employee);
@@ -31,13 +40,13 @@ public class InviteEmployeeTests
         User? added = null;
         _users.Setup(s => s.Add(It.IsAny<User>())).Callback<User>(u => added = u);
 
-        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new("manager"));
+        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:manager"]));
 
         Assert.True(result.Succeeded);
         Assert.NotNull(added);
         Assert.Equal(employee.Id, added.EmployeeId);
         Assert.Equal(UserStatus.Invited, added.Status);
-        Assert.Equal("manager", added.Role);
+        Assert.Equal(["core:manager"], added.Roles);
     }
 
     [Fact]
@@ -46,7 +55,7 @@ public class InviteEmployeeTests
         var employee = Fake.Employee();
         Existing(employee);
 
-        await Handler().Handle(Fake.Caller(), employee.PublicId, new("member"));
+        await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
 
         var message = Assert.Single(_outbox.Messages);
         Assert.Equal(OutboxTransports.Email, message.Transport);
@@ -70,7 +79,7 @@ public class InviteEmployeeTests
         _users.Setup(s => s.Add(It.IsAny<User>())).Callback<User>(u => user = u);
         _users.Setup(s => s.AddToken(It.IsAny<UserToken>())).Callback<UserToken>(t => token = t);
 
-        await Handler().Handle(Fake.Caller(), employee.PublicId, new("member"));
+        await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
 
         Assert.NotNull(user);
         Assert.NotNull(token);
@@ -96,7 +105,7 @@ public class InviteEmployeeTests
         var employee = Fake.Employee(status: EmployeeStatus.Terminated);
         Existing(employee);
 
-        await Handler().Handle(Fake.Caller(), employee.PublicId, new("member"));
+        await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
 
         _users.Verify(s => s.AddToken(It.IsAny<UserToken>()), Times.Never);
     }
@@ -106,22 +115,10 @@ public class InviteEmployeeTests
     {
         // A ticket id here would otherwise find no employee and return 404, hiding the real
         // mistake: two kinds of id sharing one route parameter.
-        var result = await Handler().Handle(Fake.Caller(), PublicId.New("tkt").ToString(), new("member"));
+        var result = await Handler().Handle(Fake.Caller(), PublicId.New("tkt").ToString(), new(["core:member"]));
 
         Assert.Equal(CommandOutcome.NotFound, result.Outcome);
         _employees.Verify(s => s.FindByPublicIdAsync(It.IsAny<string>(), default), Times.Never);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("superuser")]
-    public async Task An_invalid_role_is_rejected_with_the_valid_values_named(string? role)
-    {
-        var result = await Handler().Handle(Fake.Caller(), Fake.Employee().PublicId, new(role));
-
-        Assert.Equal(CommandOutcome.Invalid, result.Outcome);
-        Assert.Contains("admin", result.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -130,7 +127,7 @@ public class InviteEmployeeTests
         var employee = Fake.Employee(status: EmployeeStatus.Terminated);
         Existing(employee);
 
-        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new("member"));
+        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
 
         Assert.Equal(CoreProblems.EmployeeTerminated, result.ProblemCode);
         Assert.Empty(_outbox.Messages);
@@ -142,7 +139,7 @@ public class InviteEmployeeTests
         var employee = Fake.Employee(email: null!);
         Existing(employee);
 
-        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new("member"));
+        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
 
         Assert.Equal(CommandOutcome.Invalid, result.Outcome);
         Assert.Contains("nowhere to send", result.Message, StringComparison.Ordinal);
@@ -154,9 +151,9 @@ public class InviteEmployeeTests
         var employee = Fake.Employee();
         Existing(employee);
         _users.Setup(s => s.FindByEmployeeAsync(employee.Id, default))
-            .ReturnsAsync(new User { Email = employee.Email!, Role = "member" });
+            .ReturnsAsync(new User { Email = employee.Email!, Roles = [BuiltInRoles.CoreMember] });
 
-        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new("member"));
+        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
 
         Assert.Equal(CoreProblems.EmployeeHasAccount, result.ProblemCode);
         Assert.Empty(_outbox.Messages);
@@ -169,7 +166,7 @@ public class InviteEmployeeTests
         Existing(employee);
         _users.Setup(s => s.EmailInUseAsync(employee.Email!, default)).ReturnsAsync(true);
 
-        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new("member"));
+        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
 
         Assert.Equal(CoreProblems.EmailInUse, result.ProblemCode);
     }
@@ -178,8 +175,80 @@ public class InviteEmployeeTests
     public async Task An_unknown_employee_is_not_found()
     {
         var result = await Handler().Handle(
-            Fake.Caller(), PublicId.New("emp").ToString(), new("member"));
+            Fake.Caller(), PublicId.New("emp").ToString(), new(["core:member"]));
 
         Assert.Equal(CommandOutcome.NotFound, result.Outcome);
+    }
+
+    [Fact]
+    public async Task With_no_roles_named_the_account_is_a_member()
+    {
+        var employee = Fake.Employee();
+        Existing(employee);
+        User? added = null;
+        _users.Setup(s => s.Add(It.IsAny<User>())).Callback<User>(u => added = u);
+
+        await Handler().Handle(Fake.Caller(), employee.PublicId, new(null));
+
+        Assert.Equal([BuiltInRoles.CoreMember], added!.Roles);
+    }
+
+    [Fact]
+    public async Task An_invitation_can_give_several_roles_including_a_custom_one()
+    {
+        var employee = Fake.Employee();
+        Existing(employee);
+        _roles.Setup(s => s.ListAsync(default)).ReturnsAsync([new Role { PublicId = "rol_clerk", Name = "Clerk" }]);
+        User? added = null;
+        _users.Setup(s => s.Add(It.IsAny<User>())).Callback<User>(u => added = u);
+
+        var result = await Handler().Handle(
+            Fake.Caller() with { LicensedApps = ["tickets"] }, employee.PublicId,
+            new(["tickets:requester", "rol_clerk", "core:member"]));
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Equal(["core:member", "rol_clerk", "tickets:requester"], added!.Roles);
+    }
+
+    [Theory]
+    [InlineData("core.owner")]        // not a role
+    [InlineData("rol_unknown")]       // not one of this tenant's roles
+    [InlineData("ledger:controller")] // an app the tenant has not licensed
+    public async Task An_invitation_cannot_give_what_the_Users_page_would_refuse(string key)
+    {
+        var employee = Fake.Employee();
+        Existing(employee);
+
+        var result = await Handler().Handle(
+            Fake.Caller() with { LicensedApps = ["tickets"] }, employee.PublicId, new([key]));
+
+        Assert.Equal(CoreProblems.ValidationFailed, result.ProblemCode);
+        _users.Verify(s => s.Add(It.IsAny<User>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task A_null_role_key_is_a_validation_failure_not_a_crash()
+    {
+        var employee = Fake.Employee();
+        Existing(employee);
+
+        var result = await Handler().Handle(Fake.Caller(), employee.PublicId, new([null]));
+
+        Assert.Equal(CoreProblems.ValidationFailed, result.ProblemCode);
+    }
+
+    [Fact]
+    public async Task Inviting_takes_the_role_change_lock_before_reading_roles()
+    {
+        // So a custom role named here cannot be deleted before the account is saved holding it.
+        var order = new List<string>();
+        var employee = Fake.Employee();
+        Existing(employee);
+        _users.Setup(s => s.LockRoleChangesAsync(default)).Callback(() => order.Add("lock")).Returns(Task.CompletedTask);
+        _roles.Setup(s => s.ListAsync(default)).Callback(() => order.Add("roles")).ReturnsAsync([]);
+
+        await Handler().Handle(Fake.Caller(), employee.PublicId, new(["core:member"]));
+
+        Assert.Equal(["lock", "roles"], order);
     }
 }

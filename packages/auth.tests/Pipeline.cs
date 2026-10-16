@@ -41,7 +41,7 @@ internal static class Pipeline
         string path = "/api/tickets/v1/tickets",
         string method = "GET",
         Guid? sessionId = null,
-        string? ticketRole = "admin",
+        string? ticketRole = null,
         string? csrfHeader = null,
         string? csrfCookie = null,
         StubSessionStore? store = null,
@@ -68,7 +68,7 @@ internal static class Pipeline
                         if (sessionId is { } id)
                         {
                             var claims = new List<Claim> { new(SessionCookie.SessionIdClaim, id.ToString()) };
-                            if (ticketRole is not null) claims.Add(new Claim(SessionCookie.AccessClaim, ticketRole));
+                            claims.Add(new Claim(SessionCookie.AccessClaim, ticketRole ?? Build.AdminAccess));
                             context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
                         }
                         await next();

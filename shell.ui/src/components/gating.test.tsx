@@ -52,8 +52,10 @@ function session(overrides: Partial<Session> = {}): Session {
   return {
     userId: 'usr_1',
     email: 'ada@acme.test',
-    role: 'member',
-    appRoles: { tickets: 'requester' },
+    roles: [
+      { key: 'core:member', name: 'Member' },
+      { key: 'tickets:requester', name: 'Requester' },
+    ],
     permissions: ['core.employee.read', 'tickets.ticket.read', 'tickets.ticket.create'],
     tenantName: 'Acme',
     licensedApps: ['tickets'],
@@ -118,7 +120,7 @@ describe('entitlement gating', () => {
   })
 
   it('hides a licensed app from someone with no role in it, and never fetches it', async () => {
-    renderAt('/tickets', session({ appRoles: {}, permissions: ['core.employee.read'] }))
+    renderAt('/tickets', session({ roles: [{ key: 'core:member', name: 'Member' }], permissions: ['core.employee.read'] }))
 
     expect(await screen.findByText('Page not found')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Tickets' })).not.toBeInTheDocument()
@@ -133,10 +135,22 @@ describe('entitlement gating', () => {
     )
   })
 
-  it('shows Users in the nav only with core.user.read', async () => {
-    renderAt('/dashboard', session())
+  it('shows Users and Roles in the nav only with core.user.read', async () => {
+    const { unmount } = renderAt('/dashboard', session())
     await screen.findByRole('link', { name: 'Dashboard' })
     expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Roles' })).not.toBeInTheDocument()
+    unmount()
+
+    renderAt('/dashboard', session({ permissions: ['core.employee.read', 'core.user.read'] }))
+    expect(await screen.findByRole('link', { name: 'Users' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Roles' })).toBeInTheDocument()
+  })
+
+  it('has no Roles route without core.user.read', async () => {
+    renderAt('/roles', session())
+
+    expect(await screen.findByText('Page not found')).toBeInTheDocument()
   })
 
   it('tells the reader an app may simply not be enabled, rather than leaving a bare 404', async () => {

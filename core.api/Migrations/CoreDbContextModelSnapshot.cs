@@ -218,6 +218,58 @@ namespace AppPlatform.Core.Migrations
                     b.ToTable("employee", "core");
                 });
 
+            modelBuilder.Entity("AppPlatform.Core.Data.Role", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.PrimitiveCollection<string[]>("Permissions")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("permissions");
+
+                    b.Property<string>("PublicId")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)")
+                        .HasColumnName("public_id");
+
+                    b.Property<int>("TenantId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_role");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_role_public_id");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_role_tenant_id");
+
+                    b.ToTable("role", "identity");
+                });
+
             modelBuilder.Entity("AppPlatform.Core.Data.Session", b =>
                 {
                     b.Property<Guid>("Id")
@@ -334,11 +386,6 @@ namespace AppPlatform.Core.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("access_version");
 
-                    b.PrimitiveCollection<string[]>("AppRoles")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("app_roles");
-
                     b.Property<int>("CompanyId")
                         .HasColumnType("integer")
                         .HasColumnName("company_id");
@@ -364,11 +411,10 @@ namespace AppPlatform.Core.Migrations
                         .HasColumnType("character varying(34)")
                         .HasColumnName("public_id");
 
-                    b.Property<string>("Role")
+                    b.PrimitiveCollection<string[]>("Roles")
                         .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("role");
+                        .HasColumnType("text[]")
+                        .HasColumnName("roles");
 
                     b.Property<string>("Status")
                         .IsRequired()

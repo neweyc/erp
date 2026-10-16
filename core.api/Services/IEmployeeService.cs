@@ -35,22 +35,14 @@ public interface IUserService
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Locks the tenant's ACTIVE administrators (<c>FOR UPDATE</c>) until the current transaction
-    /// ends, and returns their ids. A caller about to remove an administrator holds this while it
-    /// checks that another remains. Role changes are already serialized by
-    /// <see cref="LockRoleChangesAsync"/>; this row lock also stops any OTHER write to an
-    /// administrator (a future deactivation, say) from landing between the check and the commit.
-    /// Must run inside <see cref="BeginTransactionAsync"/>, after <see cref="LockRoleChangesAsync"/>.
-    /// </summary>
-    Task<List<Guid>> LockActiveAdminsAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Takes the tenant's role-change lock until the current transaction ends. Every role change
-    /// takes it FIRST, before reading anything, so changes in one tenant run strictly one after
-    /// another: each reads the admins and the target user only after the previous one committed.
-    /// One lock per tenant, rather than row locks in some order, because the set of rows a change
-    /// needs (the admins) can itself be changed by the change before it, and no row order can be
-    /// agreed for rows a waiter has not seen yet. Must run inside <see cref="BeginTransactionAsync"/>.
+    /// Takes the tenant's role-change lock until the current transaction ends. EVERY role write
+    /// (assigning, creating, editing, deleting a role) takes it FIRST, before reading anything, so
+    /// role writes in one tenant run strictly one after another and each reads what the previous
+    /// one committed. One lock per tenant, rather than row locks in some order, because the rows a
+    /// check depends on (who can manage users) are changed by the very writes being serialized,
+    /// and no row order can be agreed for rows a waiter has not seen yet. Any future write that
+    /// can take access away (deactivation, termination) must take it too. Must run inside
+    /// <see cref="BeginTransactionAsync"/>. docs/permissions.md §6.
     /// </summary>
     Task LockRoleChangesAsync(CancellationToken ct = default);
 

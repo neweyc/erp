@@ -126,13 +126,16 @@ test('the administrator gives themselves a tickets role on the Users page', asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth === window.innerWidth)).toBe(true)
   await page.setViewportSize({ width: 1280, height: 800 })
 
-  await page.getByLabel(`Tickets role for ${ADMIN_EMAIL}`).selectOption('agent')
+  await page.getByRole('button', { name: `Edit roles for ${ADMIN_EMAIL}` }).click()
+  await page.getByRole('checkbox', { name: /^Agent/ }).check()
+  await page.getByRole('button', { name: 'Save roles' }).click()
 
   // Your own roles changed, so the session ends and the sign-in page says why.
   await expect(page.getByText('Your permissions changed. Please sign in again.')).toBeVisible()
   await signIn()
-  // Back on the Users page it was on, now showing the role it gave itself.
-  await expect(page.getByLabel(`Tickets role for ${ADMIN_EMAIL}`)).toHaveValue('agent')
+  // Back on the Users page it was on, now showing the role it gave itself alongside its own.
+  await expect(page.getByRole('row', { name: new RegExp(ADMIN_EMAIL) }).getByRole('cell', { name: 'Administrator, Agent' }))
+    .toBeVisible()
   await expect(page.getByRole('link', { name: 'Tickets' })).toBeVisible()
 
   // And the API agrees, on a fresh session.

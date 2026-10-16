@@ -5,7 +5,7 @@ public class SessionEvaluatorTests
     [Fact]
     public void A_valid_session_produces_a_user_caller()
     {
-        var result = SessionEvaluator.Evaluate(Build.Session(), "admin", Build.Now);
+        var result = SessionEvaluator.Evaluate(Build.Session(), Build.AdminAccess, Build.Now);
 
         Assert.True(result.Succeeded);
         var caller = result.Caller!;
@@ -19,25 +19,25 @@ public class SessionEvaluatorTests
     [Fact]
     public void An_unknown_session_id_is_invalid()
         => Assert.Equal(AuthProblem.SessionInvalid,
-            SessionEvaluator.Evaluate(null, "admin", Build.Now).ProblemCode);
+            SessionEvaluator.Evaluate(null, Build.AdminAccess, Build.Now).ProblemCode);
 
     [Fact]
     public void A_revoked_session_is_rejected()
         => Assert.Equal(AuthProblem.SessionRevoked,
             SessionEvaluator.Evaluate(
-                Build.Session(revokedAt: Build.Now.AddMinutes(-1)), "admin", Build.Now).ProblemCode);
+                Build.Session(revokedAt: Build.Now.AddMinutes(-1)), Build.AdminAccess, Build.Now).ProblemCode);
 
     [Fact]
     public void A_deactivated_user_is_rejected()
         => Assert.Equal(AuthProblem.UserDeactivated,
-            SessionEvaluator.Evaluate(Build.Session(userActive: false), "admin", Build.Now).ProblemCode);
+            SessionEvaluator.Evaluate(Build.Session(userActive: false), Build.AdminAccess, Build.Now).ProblemCode);
 
     [Fact]
     public void A_role_change_invalidates_the_ticket_immediately()
     {
         // The whole point of revalidating per request: a cookie issued to an admin must
         // stop working the moment they are demoted, not when it expires.
-        var result = SessionEvaluator.Evaluate(Build.Session(role: "member"), "admin", Build.Now);
+        var result = SessionEvaluator.Evaluate(Build.Session(roles: [BuiltInRoles.CoreMember]), Build.AdminAccess, Build.Now);
 
         Assert.Equal(AuthProblem.RoleChanged, result.ProblemCode);
     }
@@ -46,7 +46,7 @@ public class SessionEvaluatorTests
     public void An_expired_session_is_invalid()
         => Assert.Equal(AuthProblem.SessionInvalid,
             SessionEvaluator.Evaluate(
-                Build.Session(absoluteExpiry: Build.Now.AddSeconds(-1)), "admin", Build.Now).ProblemCode);
+                Build.Session(absoluteExpiry: Build.Now.AddSeconds(-1)), Build.AdminAccess, Build.Now).ProblemCode);
 
     [Fact]
     public void Expiry_is_inclusive_at_the_boundary()
@@ -54,7 +54,7 @@ public class SessionEvaluatorTests
         // A session whose absolute expiry is exactly now is over. Using > rather than >=
         // leaves a one-tick window that is untestable in production and trivially wrong here.
         var result = SessionEvaluator.Evaluate(
-            Build.Session(absoluteExpiry: Build.Now), "admin", Build.Now);
+            Build.Session(absoluteExpiry: Build.Now), Build.AdminAccess, Build.Now);
 
         Assert.Equal(AuthProblem.SessionInvalid, result.ProblemCode);
     }
@@ -62,7 +62,7 @@ public class SessionEvaluatorTests
     [Fact]
     public void Outstanding_mfa_is_rejected()
         => Assert.Equal(AuthProblem.MfaRequired,
-            SessionEvaluator.Evaluate(Build.Session(mfaSatisfied: false), "admin", Build.Now).ProblemCode);
+            SessionEvaluator.Evaluate(Build.Session(mfaSatisfied: false), Build.AdminAccess, Build.Now).ProblemCode);
 
     [Theory]
     [InlineData(29, true)]
@@ -72,7 +72,7 @@ public class SessionEvaluatorTests
     {
         var result = SessionEvaluator.Evaluate(
             Build.Session(idleTimeoutMinutes: 30, lastSeenAt: Build.Now.AddMinutes(-minutesIdle)),
-            "admin", Build.Now);
+            Build.AdminAccess, Build.Now);
 
         Assert.Equal(shouldSucceed, result.Succeeded);
         if (!shouldSucceed) Assert.Equal(AuthProblem.SessionIdleTimeout, result.ProblemCode);
@@ -85,7 +85,7 @@ public class SessionEvaluatorTests
         // their next request.
         var result = SessionEvaluator.Evaluate(
             Build.Session(idleTimeoutMinutes: null, lastSeenAt: Build.Now.AddDays(-3)),
-            "admin", Build.Now);
+            Build.AdminAccess, Build.Now);
 
         Assert.True(result.Succeeded);
     }
@@ -94,7 +94,7 @@ public class SessionEvaluatorTests
     public void A_retired_tenant_fails_authentication()
         => Assert.Equal(AuthProblem.TenantRetired,
             SessionEvaluator.Evaluate(
-                Build.Session(status: TenantStatus.Retired), "admin", Build.Now).ProblemCode);
+                Build.Session(status: TenantStatus.Retired), Build.AdminAccess, Build.Now).ProblemCode);
 
     [Fact]
     public void A_suspended_tenant_still_authenticates_and_is_flagged()
@@ -103,7 +103,7 @@ public class SessionEvaluatorTests
         // and the data export a suspended customer is promised would have no authenticated
         // caller left to authorize.
         var result = SessionEvaluator.Evaluate(
-            Build.Session(status: TenantStatus.Suspended), "admin", Build.Now);
+            Build.Session(status: TenantStatus.Suspended), Build.AdminAccess, Build.Now);
 
         Assert.True(result.Succeeded);
         Assert.True(result.Caller!.TenantSuspended);
@@ -116,7 +116,7 @@ public class SessionEvaluatorTests
         // someone whose access was revoked invites them to simply sign in again.
         var result = SessionEvaluator.Evaluate(
             Build.Session(revokedAt: Build.Now.AddDays(-1), absoluteExpiry: Build.Now.AddDays(-1)),
-            "admin", Build.Now);
+            Build.AdminAccess, Build.Now);
 
         Assert.Equal(AuthProblem.SessionRevoked, result.ProblemCode);
     }

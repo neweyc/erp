@@ -22,16 +22,14 @@ public class User : IAuditable
     public string PublicId { get; set; } = "";
 
     public required string Email { get; set; }
-    /// <summary>The core role. Its permissions are in <c>RoleCatalogue</c> (packages/auth).</summary>
-    public required string Role { get; set; }
-
     /// <summary>
-    /// One <c>app:role</c> entry per app, e.g. <c>tickets:agent</c>. A column rather than a table so
-    /// a role change is an ordinary audited update of this row. Written only by
-    /// ChangeUserRolesFeature, which keeps it to one entry per app. Replace the array rather than
-    /// mutating it, so the change is plainly a new value. See docs/permissions.md §3.
+    /// The keys of the roles this user holds: built-in (<c>ledger:controller</c>) or custom (a role's
+    /// <c>rol_…</c> public id). A column rather than a table so a change of roles is an ordinary
+    /// audited update of this row. Written by ChangeUserRolesFeature (and set once at invitation and
+    /// provisioning). Replace the array rather than mutating it, so the change is plainly a new
+    /// value. See docs/permissions.md §3.
     /// </summary>
-    public string[] AppRoles { get; set; } = [];
+    public string[] Roles { get; set; } = [];
 
     /// <summary>
     /// Advanced by every role change; it numbers the <c>user.roles_changed</c> events.

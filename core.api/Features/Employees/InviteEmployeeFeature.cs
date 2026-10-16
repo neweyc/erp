@@ -1,6 +1,7 @@
 using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
+using AppPlatform.Core.Features.Roles;
 using AppPlatform.Core.Services;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
@@ -18,18 +19,16 @@ namespace AppPlatform.Core.Features.Employees;
 /// </summary>
 public static class InviteEmployeeFeature
 {
-    public record InviteEmployeeCommand(string? Role);
+    /// <param name="Roles">Role keys to give the account, built-in or custom. Defaults to <c>core:member</c>.</param>
+    public record InviteEmployeeCommand(List<string?>? Roles);
 
     public class InviteEmployeeCommandHandler(
         IEmployeeService employees,
         IUserService users,
+        IRoleService roles,
         IOutbox outbox,
         TimeProvider clock)
     {
-        /// <summary>The core roles; app roles are given afterwards on the Users page.</summary>
-        private static readonly string[] Roles =
-            RoleCatalogue.RolesIn(RoleCatalogue.CoreApp).Select(r => r.Name).ToArray();
-
         public async Task<CommandResult> Handle(
             Caller caller, string employeePublicId, InviteEmployeeCommand cmd,
             CancellationToken ct = default)
@@ -40,14 +39,23 @@ public static class InviteEmployeeFeature
             if (!PublicId.TryParse(employeePublicId, "emp", out _))
                 return CommandResult.NotFound(CoreProblems.NotFound, "That is not an employee id.");
 
-            var role = cmd.Role?.Trim().ToLowerInvariant();
-            if (role is null || !Roles.Contains(role))
+            if (RoleRules.CleanList(cmd.Roles ?? [BuiltInRoles.CoreMember]) is not { } cleaned)
+                return CommandResult.Invalid(CoreProblems.ValidationFailed, "Role keys cannot be empty.");
+            var requested = cleaned.Order(StringComparer.Ordinal).ToArray();
+
+            // Giving roles is a role write, so it takes the tenant's role-change lock like the
+            // others: a custom role named here cannot be deleted before this account is saved
+            // holding it (docs/permissions.md §6).
+            await using var transaction = await users.BeginTransactionAsync(ct);
+            await users.LockRoleChangesAsync(ct);
+
+            var customRoles = RoleRules.ByKey(await roles.ListAsync(ct));
+            foreach (var key in requested)
             {
-                // Names the valid values, which beats a bare framework 400 the caller has to
-                // guess at.
-                return CommandResult.Invalid(
-                    CoreProblems.ValidationFailed,
-                    $"Role must be one of: {string.Join(", ", Roles)}.");
+                // The same rule as changing roles later, so an invitation cannot grant what the
+                // Users page would refuse.
+                if (RoleRules.CannotAssign(key, customRoles, caller.LicensedApps) is { } problem)
+                    return CommandResult.Invalid(CoreProblems.ValidationFailed, problem);
             }
 
             var employee = await employees.FindByPublicIdAsync(employeePublicId, ct);
@@ -87,7 +95,7 @@ public static class InviteEmployeeFeature
                 PublicId = PublicId.New("usr").ToString(),
                 CompanyId = employee.CompanyId,
                 Email = employee.Email,
-                Role = role,
+                Roles = requested,
                 Status = UserStatus.Invited,
                 EmployeeId = employee.Id,
             };
@@ -110,6 +118,7 @@ public static class InviteEmployeeFeature
                 payload: $$"""{"kind":"invite","userId":"{{user.PublicId}}","token":"{{plaintext}}"}""");
 
             await employees.SaveAsync(ct);
+            await transaction.CommitAsync(ct);
 
             return CommandResult.Ok(new { userId = user.PublicId, email = user.Email });
         }
@@ -125,17 +134,18 @@ public static class InviteEmployeeFeature
                 [FromServices] ICallerContext callerContext,
                 [FromServices] IEmployeeService employees,
                 [FromServices] IUserService users,
+                [FromServices] IRoleService roles,
                 [FromServices] IOutbox outbox,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new InviteEmployeeCommandHandler(employees, users, outbox, clock);
+                var handler = new InviteEmployeeCommandHandler(employees, users, roles, outbox, clock);
                 var result = await handler.Handle(callerContext.Require(), employeeId, cmd, ct);
                 return result.CreateIResult();
             })
             .RequireAuthorization()
             // core.user.manage, the same permission that changes roles: an invitation grants any
-            // core role, admin included, to whoever holds the address. Open to anyone else, a member
+            // role, administrator included, to whoever holds the address. Open to anyone else, a member
             // could create an employee at an address they control, invite it as admin, and accept.
             .RequirePermission(Permissions.Core.UserManage);
     }

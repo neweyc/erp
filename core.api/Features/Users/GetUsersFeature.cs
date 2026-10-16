@@ -8,9 +8,8 @@ namespace AppPlatform.Core.Features.Users;
 /// <summary>The Users page: every account in the tenant, with its status and roles.</summary>
 public static class GetUsersFeature
 {
-    /// <param name="AppRoles">App name to role name; an app with no entry grants this user nothing in it.</param>
-    public record UserModel(
-        string UserId, string Email, string Status, string Role, IReadOnlyDictionary<string, string> AppRoles);
+    /// <param name="Roles">Role keys; the page names them from <c>GET /roles</c>.</param>
+    public record UserModel(string UserId, string Email, string Status, IReadOnlyList<string> Roles);
 
     public class GetUsersQueryHandler(IUserService users)
     {
@@ -19,7 +18,7 @@ public static class GetUsersFeature
             var rows = await users.ListAsync(ct);
 
             return CommandResult.Ok(rows.Select(u => new UserModel(
-                u.PublicId, u.Email, u.Status.ToString(), u.Role, AppRoles.Decode(u.AppRoles))).ToList());
+                u.PublicId, u.Email, u.Status.ToString(), u.Roles)).ToList());
         }
     }
 

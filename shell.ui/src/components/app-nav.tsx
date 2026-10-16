@@ -24,9 +24,14 @@ export function AppNav() {
           </li>
         ))}
         {session.permissions.includes(Permissions.core.userRead) && (
-          <li>
-            <NavLink to="/users">Users</NavLink>
-          </li>
+          <>
+            <li>
+              <NavLink to="/users">Users</NavLink>
+            </li>
+            <li>
+              <NavLink to="/roles">Roles</NavLink>
+            </li>
+          </>
         )}
       </ul>
     </nav>

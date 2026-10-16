@@ -1,4 +1,3 @@
-using AppPlatform.Auth;
 using AppPlatform.Core.Data;
 using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -67,31 +66,15 @@ public class EFUserService(CoreDbContext db, ITenantProvider tenant) : IUserServ
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default)
         => db.Database.BeginTransactionAsync(ct);
 
-    public async Task<List<Guid>> LockActiveAdminsAsync(CancellationToken ct = default)
-    {
-        // Raw SQL because EF has no FOR UPDATE, and raw SQL applies no query filter — so the tenant
-        // is bound explicitly, from the same ambient scope the filter uses.
-        //
-        // Ordered by id so that callers take the row locks in a consistent order. Role changes
-        // never contend here, because they already hold the tenant's role-change lock.
-        var tenantId = tenant.TenantId
-            ?? throw new InvalidOperationException("Cannot lock administrators without a tenant scope.");
-
-        return await db.Database.SqlQuery<Guid>($"""
-            SELECT id AS "Value" FROM identity."user"
-            WHERE tenant_id = {tenantId} AND role = {RoleCatalogue.Admin} AND status = 'Active'
-            ORDER BY id
-            FOR UPDATE
-            """).ToListAsync(ct);
-    }
-
     public async Task LockRoleChangesAsync(CancellationToken ct = default)
     {
         var tenantId = tenant.TenantId
             ?? throw new InvalidOperationException("Cannot lock role changes without a tenant scope.");
 
         // A transaction-scoped advisory lock, keyed by tenant: released at commit or rollback, and
-        // a change in one tenant never waits for another tenant's. Same pattern as KeyRing.
+        // a change in one tenant never waits for another tenant's. Same pattern as KeyRing. Raw
+        // SQL because EF has no advisory locks; it reads and writes no rows, so the missing query
+        // filter does not matter, and the tenant is bound into the key explicitly.
         await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({RoleChangeLockKey(tenantId)}))", ct);
     }
 

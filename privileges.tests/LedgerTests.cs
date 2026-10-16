@@ -75,7 +75,7 @@ public class LedgerTests(PrivilegeFixture fixture)
     private static Auth.Caller Caller(Books books) => new()
     {
         PrincipalId = Ada, Kind = Auth.PrincipalKind.User, UserId = Ada,
-        TenantId = books.TenantId, CompanyId = books.CompanyId, Role = "admin", LicensedApps = ["ledger"],
+        TenantId = books.TenantId, CompanyId = books.CompanyId, LicensedApps = ["ledger"],
     };
 
     private async Task<string> AccountAsync(Books books, string code, string type, string? companyPublicId = null)

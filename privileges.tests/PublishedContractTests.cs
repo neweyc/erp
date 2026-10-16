@@ -77,12 +77,12 @@ public class PublishedContractTests(PrivilegeFixture fixture)
         Assert.Equal(
             [
                 "session_id", "user_id", "tenant_id", "company_id", "tenant_status",
-                "role", "user_active", "mfa_satisfied", "last_seen_at",
+                "user_active", "mfa_satisfied", "last_seen_at",
                 "absolute_expiry", "revoked_at", "employee_id",
                 "licensed_apps", "idle_timeout_minutes",
-                // Appended, never inserted: the store reads by name, but appending keeps every
-                // older column where any positional reader would expect it.
-                "app_roles",
+                // Cycle 13 replaced role and app_roles with these (docs/permissions.md §3). The store
+                // reads by name, so position does not matter to it; appending keeps it obvious.
+                "roles", "role_permissions",
             ],
             columns);
     }

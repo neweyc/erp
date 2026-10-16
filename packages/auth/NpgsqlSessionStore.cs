@@ -32,8 +32,9 @@ public sealed class NpgsqlSessionStore(NpgsqlDataSource dataSource) : ISessionSt
             TenantId = reader.GetInt32(reader.GetOrdinal("tenant_id")),
             CompanyId = reader.GetInt32(reader.GetOrdinal("company_id")),
             TenantStatus = ParseStatus(reader.GetString(reader.GetOrdinal("tenant_status"))),
-            Role = reader.GetString(reader.GetOrdinal("role")),
-            AppRoles = AppRoles.Decode(reader.GetFieldValue<string?[]>(reader.GetOrdinal("app_roles"))),
+            // string?[]: a text[] can hold NULL elements, and Access skips them rather than throwing.
+            Roles = reader.GetFieldValue<string?[]>(reader.GetOrdinal("roles")),
+            RolePermissions = reader.GetFieldValue<string?[]>(reader.GetOrdinal("role_permissions")),
             UserActive = reader.GetBoolean(reader.GetOrdinal("user_active")),
             MfaSatisfied = reader.GetBoolean(reader.GetOrdinal("mfa_satisfied")),
             LastSeenAt = reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("last_seen_at")),

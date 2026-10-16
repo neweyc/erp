@@ -12,6 +12,7 @@ export const Permissions = {
     employeeCreate: 'core.employee.create',
     userRead: 'core.user.read',
     userManage: 'core.user.manage',
+    roleManage: 'core.role.manage',
   },
   tickets: {
     ticketRead: 'tickets.ticket.read',

@@ -1,5 +1,6 @@
 using AppPlatform.Audit;
 using AppPlatform.Api;
+using AppPlatform.Auth;
 using AppPlatform.Core.Data;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
@@ -111,7 +112,7 @@ public static class ProvisionTenantFeature
                 PublicId = PublicId.New("usr").ToString(),
                 CompanyId = company.Id,
                 Email = email,
-                Role = "admin",
+                Roles = [BuiltInRoles.CoreAdmin],
                 Status = UserStatus.Invited,
             };
             db.Users.Add(admin);

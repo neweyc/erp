@@ -8,7 +8,7 @@ public class SuspensionPolicyTests
         Kind = PrincipalKind.User,
         TenantId = 1,
         CompanyId = 1,
-        Role = "admin",
+        
         TenantSuspended = suspended,
     };
 

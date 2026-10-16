@@ -29,6 +29,7 @@ public class CoreDbContext(
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Role> Roles => Set<Role>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<UserToken> UserTokens => Set<UserToken>();
@@ -97,7 +98,6 @@ public class CoreDbContext(
             e.ToTable("user", IdentitySchema);
             e.HasKey(x => x.Id);
             e.Property(x => x.Email).HasMaxLength(320);
-            e.Property(x => x.Role).HasMaxLength(50);
             e.Property(x => x.PasswordHash).HasMaxLength(200);
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.Ignore(x => x.Active);
@@ -118,6 +118,23 @@ public class CoreDbContext(
                 .HasForeignKey(x => new { x.TenantId, x.EmployeeId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Role>(e =>
+        {
+            e.ToTable("role", IdentitySchema);
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(Role.NameMaxLength);
+            e.Property(x => x.Description).HasMaxLength(Role.DescriptionMaxLength);
+            e.HasPublicId("rol");
+
+            e.HasIndex(x => x.TenantId);
+
+            // Names are unique per tenant IGNORING CASE: "Clerk" and "clerk" would be
+            // indistinguishable on the Users page. EF cannot model an index on lower(name), so the
+            // AddCustomRoles migration creates ix_role_tenant_id_lower_name in SQL. All role writes
+            // run under the tenant's role-change lock, so the handler's own check is what refuses a
+            // duplicate; the index is the backstop for anything that skips the lock.
         });
 
         modelBuilder.Entity<UserToken>(e =>

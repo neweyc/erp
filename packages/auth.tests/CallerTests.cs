@@ -10,7 +10,7 @@ public class CallerTests
         Kind = PrincipalKind.ApiKey,
         TenantId = 1,
         CompanyId = 1,
-        Role = "integration",
+        
         Scopes = ["tickets:read"],
     };
 
@@ -21,7 +21,7 @@ public class CallerTests
         var caller = new Caller
         {
             PrincipalId = userId, Kind = PrincipalKind.User, UserId = userId,
-            TenantId = 1, CompanyId = 1, Role = "admin",
+            TenantId = 1, CompanyId = 1, 
         };
 
         Assert.Equal(userId, caller.RequireUserId());
@@ -49,7 +49,7 @@ public class CallerTests
         asUser.SetCaller(new Caller
         {
             PrincipalId = user, Kind = PrincipalKind.User, UserId = user,
-            TenantId = 1, CompanyId = 1, Role = "admin",
+            TenantId = 1, CompanyId = 1, 
         });
 
         var key = Key();

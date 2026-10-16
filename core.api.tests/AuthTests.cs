@@ -15,21 +15,27 @@ public class AuthTests
     private static readonly DateTimeOffset Now = new(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
 
     private readonly Mock<IAuthService> _auth = new();
+    private readonly Mock<IRoleService> _roles = new();
     private readonly AmbientTenantProvider _tenant = new();
     private readonly FakeTimeProvider _clock = new(Now);
 
     private readonly AmbientAuditActor _actor = new();
 
+    public AuthTests()
+    {
+        _roles.Setup(r => r.ListAsync(default)).ReturnsAsync([]);
+    }
+
     private AcceptInviteFeature.AcceptInviteCommandHandler Accept()
         => new(_auth.Object, _tenant, _actor, _clock);
 
-    private SignInFeature.SignInCommandHandler SignIn() => new(_auth.Object, _actor, _clock);
+    private SignInFeature.SignInCommandHandler SignIn() => new(_auth.Object, _roles.Object, _actor, _clock);
 
     private (UserToken Token, string Plaintext, User User) Invited(
         DateTimeOffset? expiresAt = null, DateTimeOffset? usedAt = null)
     {
         var (plaintext, hash) = TokenGenerator.Create();
-        var user = new User { Email = "ada@acme.test", Role = "admin", Status = UserStatus.Invited };
+        var user = new User { Email = "ada@acme.test", Roles = [BuiltInRoles.CoreAdmin], Status = UserStatus.Invited };
         var token = new UserToken
         {
             TenantId = 1,
@@ -130,7 +136,7 @@ public class AuthTests
     {
         var user = new User
         {
-            Email = "ada@acme.test", Role = "admin", Status = UserStatus.Active,
+            Email = "ada@acme.test", Roles = [BuiltInRoles.CoreAdmin], Status = UserStatus.Active,
             PasswordHash = PasswordHasher.Hash("correct horse battery"),
         };
         _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync(user);
@@ -140,15 +146,15 @@ public class AuthTests
         var outcome = await SignIn().Handle(1, new("Ada@Acme.test", "correct horse battery"));
 
         Assert.NotNull(outcome.SessionId);
-        // No app roles yet, so the cookie's access stamp is the core role alone.
-        Assert.Equal("admin", outcome.Access);
+        // The cookie records what the roles grant, by the same rule every request checks.
+        Assert.Equal(Access.Stamp(Access.Granted([BuiltInRoles.CoreAdmin], [])), outcome.Access);
         Assert.Equal(Now.AddDays(7), added!.AbsoluteExpiry);
     }
 
     [Fact]
     public async Task An_invited_account_cannot_sign_in_before_accepting()
     {
-        var user = new User { Email = "ada@acme.test", Role = "admin", Status = UserStatus.Invited };
+        var user = new User { Email = "ada@acme.test", Roles = [BuiltInRoles.CoreAdmin], Status = UserStatus.Invited };
         _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync(user);
 
         // An invitation that already worked as a login would make the invitation meaningless.
@@ -165,7 +171,7 @@ public class AuthTests
     {
         var user = new User
         {
-            Email = "ada@acme.test", Role = "admin", Status = UserStatus.Active,
+            Email = "ada@acme.test", Roles = [BuiltInRoles.CoreAdmin], Status = UserStatus.Active,
             PasswordHash = PasswordHasher.Hash("correct horse battery"),
         };
         _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync(user);
@@ -182,14 +188,68 @@ public class AuthTests
         // tenant saw whichever tenant the database returned first. Found by the second-tenant e2e.
         var caller = Fake.Caller() with { TenantId = 7 };
         _auth.Setup(a => a.FindUserAsync(caller.UserId!.Value, default))
-            .ReturnsAsync(new User { Email = "grace@other.test", Role = "admin" });
+            .ReturnsAsync(new User { Email = "grace@other.test", Roles = [BuiltInRoles.CoreAdmin] });
         _auth.Setup(a => a.TenantNameAsync(It.IsAny<int>(), default)).ReturnsAsync("E2E Ltd");
         _auth.Setup(a => a.TenantNameAsync(7, default)).ReturnsAsync("Other Ltd");
 
-        var result = await new GetSessionFeature.GetSessionQueryHandler(_auth.Object).Handle(caller);
+        var result = await new GetSessionFeature.GetSessionQueryHandler(_auth.Object, _roles.Object).Handle(caller);
 
         var session = Assert.IsType<GetSessionFeature.SessionModel>(result.Value);
         Assert.Equal("Other Ltd", session.TenantName);
+    }
+
+    [Fact]
+    public async Task The_sign_in_access_claim_includes_custom_role_permissions()
+    {
+        // Otherwise editing a custom role would not change the claim, and its holders' screens
+        // would keep offering what they can no longer do.
+        var clerk = new Role { PublicId = "rol_clerk", Name = "Clerk", Permissions = [Permissions.Ledger.Read] };
+        _roles.Setup(r => r.ListAsync(default)).ReturnsAsync([clerk]);
+        var user = new User
+        {
+            Email = "ada@acme.test", Roles = [BuiltInRoles.CoreMember, "rol_clerk"], Status = UserStatus.Active,
+            PasswordHash = PasswordHasher.Hash("correct horse battery"),
+        };
+        _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync(user);
+
+        var outcome = await SignIn().Handle(1, new("ada@acme.test", "correct horse battery"));
+
+        Assert.Equal(
+            Access.Stamp(Access.Granted([BuiltInRoles.CoreMember], [Permissions.Ledger.Read])),
+            outcome.Access);
+    }
+
+    [Fact]
+    public async Task A_stored_null_role_key_does_not_stop_sign_in()
+    {
+        _roles.Setup(r => r.ListAsync(default)).ReturnsAsync([new Role { PublicId = "rol_clerk", Name = "Clerk" }]);
+        var user = new User
+        {
+            Email = "ada@acme.test", Roles = [null!, BuiltInRoles.CoreMember], Status = UserStatus.Active,
+            PasswordHash = PasswordHasher.Hash("correct horse battery"),
+        };
+        _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync(user);
+
+        var outcome = await SignIn().Handle(1, new("ada@acme.test", "correct horse battery"));
+
+        Assert.NotNull(outcome.SessionId);
+    }
+
+    [Fact]
+    public async Task The_session_names_each_role_held_and_omits_keys_that_are_not_roles()
+    {
+        var caller = Fake.Caller() with { Roles = [BuiltInRoles.CoreAdmin, "rol_clerk", "rol_gone"] };
+        _auth.Setup(a => a.FindUserAsync(caller.UserId!.Value, default))
+            .ReturnsAsync(new User { Email = "ada@acme.test" });
+        _roles.Setup(r => r.ListAsync(default))
+            .ReturnsAsync([new Role { PublicId = "rol_clerk", Name = "Clerk" }]);
+
+        var result = await new GetSessionFeature.GetSessionQueryHandler(_auth.Object, _roles.Object).Handle(caller);
+
+        var session = Assert.IsType<GetSessionFeature.SessionModel>(result.Value);
+        Assert.Equal(
+            [new("core:admin", "Administrator"), new("rol_clerk", "Clerk")],
+            session.Roles);
     }
 
     [Fact]
@@ -209,7 +269,7 @@ public class AuthTests
     {
         var user = new User
         {
-            Email = "ada@acme.test", Role = "admin", Status = UserStatus.Active,
+            Email = "ada@acme.test", Roles = [BuiltInRoles.CoreAdmin], Status = UserStatus.Active,
             PasswordHash = PasswordHasher.Hash("correct horse battery"),
         };
         _auth.Setup(a => a.FindByEmailAsync("ada@acme.test", default)).ReturnsAsync(user);

@@ -16,7 +16,6 @@ internal static class Fake
         UserId = Guid.NewGuid(),
         TenantId = 1,
         CompanyId = 1,
-        Role = "member",
         LicensedApps = licensedApps.Length == 0 ? ["tickets"] : licensedApps,
     };
 
