@@ -16,7 +16,7 @@ const admin: Session = {
   tenantSuspended: false,
 }
 
-const grace = { userId: 'usr_grace', email: 'grace@acme.test', status: 'Active', roles: ['core:member'] }
+const grace = { userId: 'usr_grace', email: 'grace@acme.test', status: 'Active', roles: ['core:member'], invitation: null }
 
 function role(key: string, name: string, builtIn = true) {
   return { key, name, description: `${name} things.`, builtIn, permissions: [], holders: 0 }
@@ -138,9 +138,13 @@ describe('users page', () => {
     await user.click(screen.getByRole('checkbox', { name: /Administrator/ }))
     await user.click(screen.getByRole('button', { name: 'Save roles' }))
 
+    // Said inside the dialog, which stays open so the choices made are not lost.
     expect(await screen.findByRole('alert')).toHaveTextContent(/nobody else active could manage users/i)
     expect(saved).toBe(true)
-    expect(screen.getByRole('cell', { name: 'Administrator' })).toBeInTheDocument()
+
+    // Behind it, the list shows what the server holds, not what was picked.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByRole('cell', { name: 'Administrator' })).toBeInTheDocument()
   })
 
   it('is read-only without core.user.manage', async () => {
@@ -177,5 +181,119 @@ describe('users page', () => {
     await user.click(screen.getByRole('button', { name: 'Save roles' }))
 
     await waitFor(() => expect(sessionCalls).toBe(2))
+  })
+
+  it('deactivates only on a second, explicit click', async () => {
+    const fetchMock = stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [grace] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'POST /api/core/v1/users/usr_grace/deactivate': () => ({ body: {} }),
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    await user.click(await screen.findByRole('button', { name: 'Deactivate grace@acme.test' }))
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/core/v1/users/usr_grace/deactivate', expect.anything())
+
+    await user.click(screen.getByRole('button', { name: 'Confirm: deactivate grace@acme.test' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/core/v1/users/usr_grace/deactivate',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    expect(await screen.findByText(/deactivated and signed out/)).toBeInTheDocument()
+  })
+
+  it('offers no way to deactivate yourself', async () => {
+    stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, userId: 'usr_admin', email: 'admin@acme.test' }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+    })
+    renderUsers()
+
+    await screen.findByRole('button', { name: 'Edit roles for admin@acme.test' })
+    expect(screen.queryByRole('button', { name: /Deactivate/ })).not.toBeInTheDocument()
+  })
+
+  it('explains why the last administrator cannot be deactivated', async () => {
+    stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, roles: ['core:admin'] }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'POST /api/core/v1/users/usr_grace/deactivate': () => ({ status: 409, body: { problemCode: 'last_admin' } }),
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    await user.click(await screen.findByRole('button', { name: 'Deactivate grace@acme.test' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm: deactivate grace@acme.test' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/nobody else active could manage users/i)
+  })
+
+  it('reactivates a deactivated account', async () => {
+    const fetchMock = stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, status: 'Deactivated' }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'POST /api/core/v1/users/usr_grace/reactivate': () => ({ body: {} }),
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    expect(await screen.findByRole('cell', { name: 'Deactivated' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Deactivate/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reactivate grace@acme.test' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/core/v1/users/usr_grace/reactivate',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+  })
+
+  it('says when an invitation email failed, and resends it', async () => {
+    const invited = {
+      ...grace,
+      status: 'Invited',
+      invitation: { delivery: 'failed', expiresAt: '2026-10-24T09:00:00Z', expired: false },
+    }
+    const fetchMock = stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [invited] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'POST /api/core/v1/users/usr_grace/invitation': () => ({ body: {} }),
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    expect(await screen.findByRole('cell', { name: 'Invited: email could not be delivered' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Resend invitation to grace@acme.test' }))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/core/v1/users/usr_grace/invitation',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    expect(await screen.findByText(/new invitation is on its way/)).toBeInTheDocument()
+  })
+
+  it('says when an invitation link has expired', async () => {
+    stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({
+        body: [{ ...grace, status: 'Invited', invitation: { delivery: 'delivered', expiresAt: '2026-10-01T09:00:00Z', expired: true } }],
+      }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+    })
+    renderUsers()
+
+    expect(await screen.findByRole('cell', { name: 'Invited: link expired' })).toBeInTheDocument()
   })
 })

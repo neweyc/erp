@@ -19,7 +19,7 @@ public static class DeleteRoleFeature
         public async Task<CommandResult> Handle(Caller caller, string rolePublicId, CancellationToken ct = default)
         {
             if (!PublicId.TryParse(rolePublicId, "rol", out _))
-                return CommandResult.NotFound(CoreProblems.NotFound, "That is not one of your organisation's roles.");
+                return CommandResult.NotFound(CoreProblems.NotFound, "That is not one of your organization's roles.");
 
             // Under the lock, so nobody can be given the role between the check and the delete.
             await using var transaction = await users.BeginTransactionAsync(ct);

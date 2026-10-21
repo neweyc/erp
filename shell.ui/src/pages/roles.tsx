@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Check, Copy, Lock, Pencil, Plus, Trash, Users } from 'lucide-react'
 import { api, ApiError, Permissions } from '@app-platform/web-api'
+import {
+  Alert, Badge, Button, Card, CardFooter, Checkbox, CheckboxRow, ConfirmDialog, Dialog, DialogBody, DialogFooter,
+  Field, Input, Loading, PageHeader, PageStack,
+} from '@app-platform/ui-kit'
 import { useSession } from '../components/session-provider'
 import { appTitle, type PermissionRow, type RoleRow, roleGroups } from '../lib/roles'
 
@@ -30,7 +35,7 @@ interface Draft {
 
 /**
  * The roles a user can be given and what each allows (docs/permissions.md). Built-in roles are the
- * same in every organisation and cannot be changed; the organisation can add its own, start one as a
+ * same in every organization and cannot be changed; the organization can add its own, start one as a
  * copy of any role, and edit or delete its own. Anyone with core.user.read sees the page; changing
  * anything needs core.role.manage, and the API enforces both.
  */
@@ -40,8 +45,10 @@ export function Roles() {
   const [permissions, setPermissions] = useState<readonly PermissionRow[]>([])
   const [loading, setLoading] = useState(true)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [deleting, setDeleting] = useState<string | null>(null)
+  /** The role whose Delete button was clicked: the confirming dialog is open for it. */
+  const [deleting, setDeleting] = useState<RoleRow | null>(null)
   const [saving, setSaving] = useState(false)
+  /** A failure while the editor is open is shown inside it; any other on the page. */
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -68,21 +75,9 @@ export function Roles() {
   const canManage = session.permissions.includes(Permissions.core.roleManage)
   const describe = (name: string) => permissions.find((p) => p.name === name)?.description ?? name
 
-  function startNew() {
-    setDraft({ roleKey: null, name: '', description: '', permissions: new Set() })
-  }
-
-  function startCopy(role: RoleRow) {
-    setDraft({
-      roleKey: null,
-      name: `Copy of ${role.name}`,
-      description: role.description,
-      permissions: new Set(role.permissions),
-    })
-  }
-
-  function startEdit(role: RoleRow) {
-    setDraft({ roleKey: role.key, name: role.name, description: role.description, permissions: new Set(role.permissions) })
+  function open(next: Draft) {
+    setError(null)
+    setDraft(next)
   }
 
   function togglePermission(name: string) {
@@ -102,7 +97,6 @@ export function Roles() {
     try {
       await request()
       setDraft(null)
-      setDeleting(null)
       if (affectsMe) {
         await refreshSession()
         return
@@ -135,128 +129,206 @@ export function Roles() {
     )
   }
 
-  if (loading) return <p role="status">Loading roles…</p>
+  function deleteRole(role: RoleRow) {
+    setDeleting(null)
+    void write(() => api(`/api/core/v1/roles/${role.key}`, { method: 'DELETE' }), false)
+  }
+
+  if (loading) return <Loading>Loading roles…</Loading>
 
   const apps = [...new Set(permissions.map((p) => p.app))]
 
   return (
-    <main>
-      <h1>Roles</h1>
-      {error && <p role="alert">{error}</p>}
-      {canManage && !draft && (
-        <p>
-          <button type="button" onClick={startNew}>
-            New role
-          </button>
-        </p>
-      )}
+    <PageStack>
+      <PageHeader
+        title="Roles"
+        description="A role is a named set of permissions. Built-in roles are the same everywhere; your organization can add its own."
+        actions={
+          canManage && (
+            <Button
+              variant="primary"
+              onClick={() => open({ roleKey: null, name: '', description: '', permissions: new Set() })}
+            >
+              <Plus /> New role
+            </Button>
+          )
+        }
+      />
 
-      {draft && (
-        <form
-          aria-label={draft.roleKey === null ? 'New role' : `Edit ${draft.name}`}
-          onSubmit={(e) => {
-            e.preventDefault()
-            saveDraft()
-          }}
-        >
-          <h2>{draft.roleKey === null ? 'New role' : 'Edit role'}</h2>
-          <label style={{ display: 'block' }}>
-            Name{' '}
-            <input
-              value={draft.name}
-              maxLength={100}
-              required
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            />
-          </label>
-          <label style={{ display: 'block' }}>
-            Description{' '}
-            <input
-              value={draft.description}
-              maxLength={500}
-              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-            />
-          </label>
-          {apps.map((app) => (
-            <fieldset key={app}>
-              <legend>{appTitle(app)}</legend>
-              {permissions
-                .filter((p) => p.app === app)
-                .map((p) => (
-                  <label key={p.name} style={{ display: 'block' }}>
-                    <input
-                      type="checkbox"
-                      checked={draft.permissions.has(p.name)}
-                      onChange={() => togglePermission(p.name)}
-                    />{' '}
-                    {p.description}
-                  </label>
-                ))}
-            </fieldset>
-          ))}
-          <button type="submit" disabled={saving}>
-            Save role
-          </button>{' '}
-          <button type="button" disabled={saving} onClick={() => setDraft(null)}>
-            Cancel
-          </button>
-        </form>
-      )}
+      {error && !draft && <Alert tone="danger">{error}</Alert>}
 
       {roleGroups(roles).map((group) => (
-        <section key={group.title}>
-          <h2>{group.title}</h2>
-          {group.roles.map((role) => (
-            <article key={role.key} aria-label={role.name}>
-              <h3>
-                {role.name}
-                {role.builtIn ? ' (built-in)' : ''}
-              </h3>
-              {role.description && <p>{role.description}</p>}
-              <p>
-                Held by {role.holders} {role.holders === 1 ? 'person' : 'people'}.
-              </p>
-              <ul>
-                {role.permissions.map((name) => (
-                  <li key={name}>{describe(name)}</li>
-                ))}
-              </ul>
-              {canManage && (
-                <p>
-                  <button type="button" disabled={saving} onClick={() => startCopy(role)} aria-label={`Copy ${role.name}`}>
-                    Copy
-                  </button>
-                  {!role.builtIn && (
-                    <>
-                      {' '}
-                      <button type="button" disabled={saving} onClick={() => startEdit(role)} aria-label={`Edit ${role.name}`}>
-                        Edit
-                      </button>{' '}
-                      {deleting === role.key ? (
-                        // A second click, not a browser confirm(): a native dialog blocks the page
-                        // and cannot be styled or tested like the rest of it.
-                        <button
-                          type="button"
+        <section key={group.title} aria-label={group.title} className="grid gap-3">
+          <h2 className="text-sm font-medium text-muted-foreground">{group.title}</h2>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {group.roles.map((role) => (
+              <Card key={role.key} className="flex flex-col">
+                <article aria-label={role.name} className="flex flex-1 flex-col">
+                  <div className="flex flex-1 flex-col gap-3 p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="font-semibold tracking-tight">{role.name}</h3>
+                      {role.builtIn ? (
+                        <Badge tone="neutral">
+                          <Lock /> Built-in
+                        </Badge>
+                      ) : (
+                        <Badge tone="brand">Custom</Badge>
+                      )}
+                    </div>
+                    {role.description && <p className="-mt-1 text-sm text-muted-foreground">{role.description}</p>}
+                    <ul className="grid gap-1.5 text-sm">
+                      {role.permissions.map((name) => (
+                        <li key={name} className="flex items-start gap-2">
+                          <Check className="mt-0.5 size-4 shrink-0 text-success" />
+                          <span>{describe(name)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <CardFooter className="flex-nowrap gap-1 py-2">
+                    <p className="mr-auto flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                      <Users className="size-3.5 shrink-0" />
+                      Held by {role.holders} {role.holders === 1 ? 'person' : 'people'}.
+                    </p>
+                    {canManage && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           disabled={saving}
+                          aria-label={`Copy ${role.name}`}
                           onClick={() =>
-                            void write(() => api(`/api/core/v1/roles/${role.key}`, { method: 'DELETE' }), false)
+                            open({
+                              roleKey: null,
+                              name: `Copy of ${role.name}`,
+                              description: role.description,
+                              permissions: new Set(role.permissions),
+                            })
                           }
                         >
-                          Confirm: delete {role.name}
-                        </button>
-                      ) : (
-                        <button type="button" disabled={saving} onClick={() => setDeleting(role.key)} aria-label={`Delete ${role.name}`}>
-                          Delete
-                        </button>
-                      )}
-                    </>
-                  )}
-                </p>
-              )}
-            </article>
-          ))}
+                          <Copy /> Copy
+                        </Button>
+                        {!role.builtIn && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={saving}
+                              aria-label={`Edit ${role.name}`}
+                              onClick={() =>
+                                open({
+                                  roleKey: role.key,
+                                  name: role.name,
+                                  description: role.description,
+                                  permissions: new Set(role.permissions),
+                                })
+                              }
+                            >
+                              <Pencil /> Edit
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              disabled={saving}
+                              aria-label={`Delete ${role.name}`}
+                              title="Delete"
+                              onClick={() => setDeleting(role)}
+                            >
+                              <Trash />
+                            </Button>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </CardFooter>
+                </article>
+              </Card>
+            ))}
+          </div>
         </section>
       ))}
-    </main>
+
+      {draft && (
+        <Dialog
+          open
+          onOpenChange={(isOpen) => !isOpen && setDraft(null)}
+          // Holds a part-made role: a stray click outside must not discard it.
+          dismissible={false}
+          title={draft.roleKey === null ? 'New role' : 'Edit role'}
+          description="Choose what holders of this role may do. They get it the next time they sign in."
+          size="lg"
+        >
+          <form
+            aria-label={draft.roleKey === null ? 'New role' : `Edit ${draft.name}`}
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={(e) => {
+              e.preventDefault()
+              saveDraft()
+            }}
+          >
+            <DialogBody className="grid gap-5">
+              {error && <Alert tone="danger">{error}</Alert>}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Name" htmlFor="role-name">
+                  <Input
+                    id="role-name"
+                    value={draft.name}
+                    maxLength={100}
+                    required
+                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  />
+                </Field>
+                <Field label="Description" htmlFor="role-description">
+                  <Input
+                    id="role-description"
+                    value={draft.description}
+                    maxLength={500}
+                    onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                  />
+                </Field>
+              </div>
+              {apps.map((app) => (
+                <fieldset key={app} className="grid gap-1">
+                  <legend className="mb-1.5 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                    {appTitle(app)}
+                  </legend>
+                  {permissions
+                    .filter((p) => p.app === app)
+                    .map((p) => (
+                      <CheckboxRow
+                        key={p.name}
+                        control={
+                          <Checkbox checked={draft.permissions.has(p.name)} onChange={() => togglePermission(p.name)} />
+                        }
+                        title={p.description}
+                      />
+                    ))}
+                </fieldset>
+              ))}
+            </DialogBody>
+            <DialogFooter>
+              <Button disabled={saving} onClick={() => setDraft(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" disabled={saving}>
+                {saving ? 'Saving…' : 'Save role'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Dialog>
+      )}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(isOpen) => !isOpen && setDeleting(null)}
+        title={`Delete ${deleting?.name ?? ''}?`}
+        description="The role is removed for good. It can be deleted only while nobody holds it."
+        confirmLabel="Delete role"
+        confirmAccessibleName={deleting ? `Confirm: delete ${deleting.name}` : undefined}
+        busy={saving}
+        onConfirm={() => deleting && deleteRole(deleting)}
+      />
+    </PageStack>
   )
 }

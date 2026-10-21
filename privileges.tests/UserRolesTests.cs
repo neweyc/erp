@@ -2,6 +2,7 @@ using AppPlatform.Api;
 using AppPlatform.Audit;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
+using AppPlatform.Core.Features.Auth;
 using AppPlatform.Core.Features.Roles;
 using AppPlatform.Core.Features.Users;
 using AppPlatform.Core.Services;
@@ -13,9 +14,10 @@ using Npgsql;
 namespace AppPlatform.PrivilegeTests;
 
 /// <summary>
-/// Roles against real PostgreSQL, as core's runtime role (docs/permissions.md): role writes in a
-/// tenant run one at a time under the tenant's role-change lock, a change reaches the session
-/// function every service authenticates through, and a custom role never reaches across tenants.
+/// Roles and account status against real PostgreSQL, as core's runtime role (docs/permissions.md):
+/// access changes in a tenant (role writes, deactivation, accepting an invitation) run one at a time
+/// under the tenant's role-change lock, a change reaches the session function every service
+/// authenticates through, and a custom role never reaches across tenants.
 /// </summary>
 [Collection(nameof(PrivilegeCollection))]
 public class UserRolesTests(PrivilegeFixture fixture)
@@ -367,6 +369,235 @@ public class UserRolesTests(PrivilegeFixture fixture)
 
         // Another tenant may use the same name.
         await AddCustomRoleAsync(await SeedAsync(), "Clerk", "{core.employee.read}");
+    }
+
+    // ---- Deactivation, reactivation and invitations ----
+
+    private static Task<CommandResult> DeactivateAsync(CoreDbContext db, int tenantId, string userPublicId)
+        => new DeactivateUserFeature.DeactivateUserCommandHandler(
+                Users(db, tenantId), new EFRoleService(db), new Outbox.Outbox(db, TimeProvider.System), TimeProvider.System)
+            .Handle(Admin(tenantId), userPublicId);
+
+    [Fact]
+    public async Task Deactivation_waits_for_a_role_change_and_then_sees_it()
+    {
+        var seeded = await SeedAsync();
+
+        // A role write has demoted the first admin and not committed.
+        var (held, heldTransaction) = await HoldLockAsync(seeded.TenantId,
+            $"UPDATE identity.\"user\" SET roles = '{{core:member}}' WHERE id = '{seeded.FirstAdmin}'");
+        await using var _ = held;
+
+        await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+        var deactivate = DeactivateAsync(db, seeded.TenantId, seeded.SecondAdminPublicId);
+
+        await Task.Delay(BlockedFor);
+        Assert.False(deactivate.IsCompleted, "deactivation should be waiting for the role-change lock");
+
+        await heldTransaction.CommitAsync();
+
+        // Counting before the demotion committed, it would have seen two admins and gone ahead.
+        Assert.Equal(CoreProblems.LastAdmin, (await deactivate).ProblemCode);
+        await using var check = await OpenAsync();
+        Assert.Equal("Active", await Scalar(check,
+            $"SELECT status FROM identity.\"user\" WHERE id = '{seeded.SecondAdmin}'"));
+    }
+
+    [Fact]
+    public async Task Deactivation_ends_sessions_at_once_and_reactivation_does_not_revive_them()
+    {
+        var seeded = await SeedAsync();
+        var (member, memberPublicId) = await AddUserAsync(seeded, "{core:member}");
+        // A password, so reactivation makes the account active rather than invited again.
+        await fixture.ExecuteAsync($"UPDATE identity.\"user\" SET password_hash = 'hash' WHERE id = '{member}'");
+        var sessionId = await AddSessionAsync(seeded.TenantId, member);
+        Assert.True((await ReadSessionAsTicketsAsync(sessionId)).UserActive);
+
+        await using (var db = Core(seeded.TenantId, seeded.FirstAdmin))
+            Assert.True((await DeactivateAsync(db, seeded.TenantId, memberPublicId)).Succeeded);
+
+        var deactivated = await ReadSessionAsTicketsAsync(sessionId);
+        Assert.False(deactivated.UserActive);
+        Assert.NotNull(deactivated.RevokedAt);
+
+        await using (var db = Core(seeded.TenantId, seeded.FirstAdmin))
+        {
+            var result = await new ReactivateUserFeature.ReactivateUserCommandHandler(
+                    Users(db, seeded.TenantId), new EFEmployeeService(db), new Outbox.Outbox(db, TimeProvider.System))
+                .Handle(Admin(seeded.TenantId), memberPublicId);
+            Assert.True(result.Succeeded, result.Message);
+        }
+
+        // The account is back; the old cookie is not. A cookie copied before deactivation stays dead.
+        var reactivated = await ReadSessionAsTicketsAsync(sessionId);
+        Assert.True(reactivated.UserActive);
+        Assert.NotNull(reactivated.RevokedAt);
+
+        await using var check = await OpenAsync();
+        Assert.Equal(2L, await Scalar(check,
+            "SELECT count(*) FROM core.outbox_event " +
+            $"WHERE aggregate_public_id = '{memberPublicId}' AND event_type IN ('user.deactivated', 'user.reactivated')"));
+        Assert.Equal(2L, await Scalar(check,
+            $"SELECT count(*) FROM core.audit_log WHERE entity_id = '{memberPublicId}' AND actor_id = '{seeded.FirstAdmin}'"));
+    }
+
+    [Fact]
+    public async Task A_sign_in_waits_for_a_deactivation_in_progress_and_is_then_refused()
+    {
+        var seeded = await SeedAsync();
+        var (member, _) = await AddUserAsync(seeded, "{core:member}");
+        string email;
+        await using (var connection = await OpenAsync())
+            email = (string)(await Scalar(connection, $"SELECT email FROM identity.\"user\" WHERE id = '{member}'"))!;
+        await fixture.ExecuteAsync(
+            $"UPDATE identity.\"user\" SET password_hash = '{PasswordHasher.Hash("correct horse battery")}' WHERE id = '{member}'");
+
+        // A deactivation holds the lock and has not committed.
+        var (held, heldTransaction) = await HoldLockAsync(seeded.TenantId,
+            $"UPDATE identity.\"user\" SET status = 'Deactivated' WHERE id = '{member}'");
+        await using var _ = held;
+
+        var tenant = new AmbientTenantProvider();
+        tenant.UseTenant(seeded.TenantId);
+        var actor = new AmbientAuditActor();
+        await using var db = new CoreDbContext(
+            new DbContextOptionsBuilder<CoreDbContext>()
+                .UseNpgsql(fixture.ConnectionStringAs("ap_core_rt"))
+                .UseSnakeCaseNamingConvention().Options,
+            tenant, actor, TimeProvider.System);
+        var signIn = new SignInFeature.SignInCommandHandler(
+                new EFAuthService(db), new EFUserService(db, tenant), new EFRoleService(db), actor, TimeProvider.System)
+            .Handle(seeded.TenantId, new(email, "correct horse battery"));
+
+        await Task.Delay(BlockedFor);
+        Assert.False(signIn.IsCompleted, "sign-in should be waiting for the role-change lock");
+
+        await heldTransaction.CommitAsync();
+
+        // Reading the account without the lock, it would have seen Active and created a session the
+        // deactivation never revoked, which would work again after reactivation.
+        var outcome = await signIn;
+        Assert.Null(outcome.SessionId);
+        await using var check = await OpenAsync();
+        Assert.Equal(0L, await Scalar(check, $"SELECT count(*) FROM identity.session WHERE user_id = '{member}'"));
+    }
+
+    [Fact]
+    public async Task A_deactivation_waits_for_a_sign_in_in_progress_and_revokes_its_session()
+    {
+        var seeded = await SeedAsync();
+        var (member, memberPublicId) = await AddUserAsync(seeded, "{core:member}");
+
+        // A sign-in holds the lock SHARED and has created its session, not yet committed.
+        var signIn = await OpenAsync();
+        await using var __ = signIn;
+        var signInTransaction = await signIn.BeginTransactionAsync();
+        await using (var lockCommand = new NpgsqlCommand("SELECT pg_advisory_xact_lock_shared(hashtext(@key))", signIn))
+        {
+            lockCommand.Parameters.AddWithValue("key", EFUserService.RoleChangeLockKey(seeded.TenantId));
+            await lockCommand.ExecuteScalarAsync();
+        }
+        var sessionId = Guid.NewGuid();
+        await Scalar(signIn,
+            "INSERT INTO identity.session (id, tenant_id, user_id, mfa_satisfied, created_at, last_seen_at, absolute_expiry) " +
+            $"VALUES ('{sessionId}', {seeded.TenantId}, '{member}', true, now(), now(), now() + interval '1 day')");
+
+        await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+        var deactivate = DeactivateAsync(db, seeded.TenantId, memberPublicId);
+
+        await Task.Delay(BlockedFor);
+        Assert.False(deactivate.IsCompleted, "deactivation should wait for the sign-in holding the lock");
+
+        await signInTransaction.CommitAsync();
+        Assert.True((await deactivate).Succeeded);
+
+        // The session committed first, so the deactivation found it and revoked it.
+        Assert.NotNull((await ReadSessionAsTicketsAsync(sessionId)).RevokedAt);
+    }
+
+    [Fact]
+    public async Task An_invitation_accepted_while_the_account_is_being_deactivated_is_refused()
+    {
+        var seeded = await SeedAsync();
+        var (invited, _) = await AddUserAsync(seeded, "{core:member}", status: "Invited");
+        var (token, plaintext) = InvitationToken.Issue(invited, DateTimeOffset.UtcNow);
+        await using (var db = Core(seeded.TenantId, seeded.FirstAdmin))
+        {
+            db.UserTokens.Add(token);
+            await db.SaveChangesAsync();
+        }
+
+        // An administrator's deactivation holds the lock and has not committed.
+        var (held, heldTransaction) = await HoldLockAsync(seeded.TenantId,
+            $"UPDATE identity.\"user\" SET status = 'Deactivated' WHERE id = '{invited}'");
+        await using var _ = held;
+
+        var tenant = new AmbientTenantProvider();
+        var actor = new AmbientAuditActor();
+        await using var acceptDb = new CoreDbContext(
+            new DbContextOptionsBuilder<CoreDbContext>()
+                .UseNpgsql(fixture.ConnectionStringAs("ap_core_rt"))
+                .UseSnakeCaseNamingConvention().Options,
+            tenant, actor, TimeProvider.System);
+        var accept = new AcceptInviteFeature.AcceptInviteCommandHandler(
+                new EFAuthService(acceptDb), new EFUserService(acceptDb, tenant), tenant, actor, TimeProvider.System)
+            .Handle(new(plaintext, "correct horse battery"));
+
+        await Task.Delay(BlockedFor);
+        Assert.False(accept.IsCompleted, "acceptance should be waiting for the role-change lock");
+
+        await heldTransaction.CommitAsync();
+
+        // Reading the account before the lock, it would have seen Invited and set it Active over
+        // the deactivation.
+        Assert.Equal(AuthProblems.InvalidToken, (await accept).ProblemCode);
+        await using var check = await OpenAsync();
+        Assert.Equal("Deactivated|true", await Scalar(check,
+            $"SELECT status || '|' || (password_hash IS NULL) FROM identity.\"user\" WHERE id = '{invited}'"));
+    }
+
+    [Fact]
+    public async Task The_users_list_reports_the_email_that_carried_the_newest_link()
+    {
+        var seeded = await SeedAsync();
+        var (invited, invitedPublicId) = await AddUserAsync(seeded, "{core:member}", status: "Invited");
+
+        async Task ResendAsync()
+        {
+            await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+            var result = await new ResendInvitationFeature.ResendInvitationCommandHandler(
+                    Users(db, seeded.TenantId), new EFEmployeeService(db), new Outbox.Outbox(db, TimeProvider.System),
+                    TimeProvider.System)
+                .Handle(Admin(seeded.TenantId), invitedPublicId);
+            Assert.True(result.Succeeded, result.Message);
+        }
+
+        async Task<string> DeliveryAsync()
+        {
+            await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+            var listed = await new GetUsersFeature.GetUsersQueryHandler(Users(db, seeded.TenantId), TimeProvider.System)
+                .Handle(Admin(seeded.TenantId));
+            return Assert.IsType<List<GetUsersFeature.UserModel>>(listed.Value)
+                .Single(u => u.UserId == invitedPublicId).Invitation!.Delivery;
+        }
+
+        await ResendAsync();
+        await ResendAsync();
+        await using var connection = await OpenAsync();
+        var newestMessage = (Guid)(await Scalar(connection,
+            $"SELECT message_id FROM identity.user_token WHERE user_id = '{invited}' ORDER BY created_at DESC LIMIT 1"))!;
+
+        // The OLDER email failed, and its row looks newer (interleaved resends commit in either
+        // order). Matching by time or address would report "failed"; the newest link's own email
+        // is still pending.
+        await Scalar(connection,
+            "UPDATE core.outbox_message SET status = 'Dead', created_at = now() + interval '1 minute' " +
+            $"WHERE id <> '{newestMessage}' AND destination = (SELECT email FROM identity.\"user\" WHERE id = '{invited}')");
+        Assert.Equal("pending", await DeliveryAsync());
+
+        // Its email pruned, the newest link's delivery is unknown, not the older failure.
+        await Scalar(connection, $"DELETE FROM core.outbox_message WHERE id = '{newestMessage}'");
+        Assert.Equal("unknown", await DeliveryAsync());
     }
 
     private async Task<Guid> AddSessionAsync(int tenantId, Guid userId)

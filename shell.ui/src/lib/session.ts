@@ -2,7 +2,7 @@ import { api } from '@app-platform/web-api'
 
 /** A role the user holds, for display. Never used to decide what to show — see permissions. */
 export interface SessionRole {
-  /** `core:admin` for a built-in role, `rol_…` for one of the organisation's own. */
+  /** `core:admin` for a built-in role, `rol_…` for one of the organization's own. */
   readonly key: string
   readonly name: string
 }

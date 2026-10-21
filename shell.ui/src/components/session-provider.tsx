@@ -26,7 +26,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSession(null)
       // Carried through so the sign-in page can say WHICH thing happened. A generic "please
       // sign in" cannot distinguish an expired session from a revoked one from an
-      // organisation on hold, and each needs a different next step from the reader.
+      // organization on hold, and each needs a different next step from the reader.
       setProblemCode(error instanceof ApiError ? error.problemCode : 'unknown')
     } finally {
       setLoading(false)

@@ -28,6 +28,8 @@ describe('app registry', () => {
     const app: AppDefinition = {
       id: 'unlicensed',
       name: 'Unlicensed',
+      description: 'An app this tenant has not licensed.',
+      icon: () => null,
       path: '/unlicensed',
       permission: Permissions.tickets.ticketRead,
       load,
@@ -60,7 +62,7 @@ describe('app registry', () => {
   })
 
   it('gates every app on one of its own permissions', () => {
-    // An app gated on another app's permission would appear or vanish with the wrong licence.
+    // An app gated on another app's permission would appear or vanish with the wrong license.
     // That every permission is granted by some role is checked on the .NET side
     // (PermissionTests, PermissionCatalogueTests).
     for (const app of APPS) expect(app.permission.startsWith(`${app.id}.`)).toBe(true)

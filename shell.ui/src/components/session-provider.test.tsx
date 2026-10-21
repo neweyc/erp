@@ -32,7 +32,7 @@ describe('session provider', () => {
     renderWith({ ok: false, status: 401, json: async () => ({ problemCode: 'session_idle_timeout' }) })
 
     // A generic "please sign in" cannot distinguish an expired session from a revoked one from
-    // an organisation on hold — and each needs a different next step from the reader.
+    // an organization on hold — and each needs a different next step from the reader.
     expect(await screen.findByText('signed out: session_idle_timeout')).toBeInTheDocument()
   })
 

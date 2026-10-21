@@ -310,9 +310,10 @@ first commit.
   combine permissions, never invent them. Endpoints declare `.RequirePermission(...)`, enforced by
   middleware with 403 `not_permitted`; **handlers never check permissions or compare role names.**
   An authenticated endpoint that declares nothing is refused at runtime and fails
-  `PermissionCoverageTests`. Licensing an app grants nobody a role in it. **Every role write takes
-  the tenant's role-change lock first** (`IUserService.LockRoleChangesAsync`), and so must any
-  future write that can take access away. Permission names are mirrored in
+  `PermissionCoverageTests`. Licensing an app grants nobody a role in it. **Every access change
+  takes the tenant's role-change lock first** (`IUserService.LockRoleChangesAsync`): role writes,
+  deactivation, reactivation and accepting an invitation; sign-in takes it shared. So must any future
+  write that can take access away. Permission names are mirrored in
   `packages/web-api/src/permissions.ts`, kept in step by `PermissionCatalogueTests`.
 - `identity.user.employee_id` links an account to a core employee. It is what makes
   termination cut access, and it gates all self-service.
@@ -413,6 +414,13 @@ You have now written these twice (redshift -> EMS). A third copy is the bad outc
   a reference the customer can quote; the detail stays in that service's own log. Bounded,
   rate-limited per fingerprint, never blocks or throws. `app.UseErrorFeed()` goes FIRST.
 
+- `packages/ui-kit` — the component kit every page and app builds from: Tailwind v4 theme tokens
+  (`theme.css`, light and dark, colours named by role, never raw), shadcn-style components over Radix,
+  `DataTable` (TanStack), `Dialog` (`dismissible` is a **required** prop; height capped in `svh`),
+  `ConfirmDialog`, `PageHeader`, `EmptyState`. Native `<select>` and checkbox stay native, styled. The
+  shell's `index.css` must `@source` every package that uses kit classes, or its styling silently
+  disappears from the build. Inter is served from this origin, never a font CDN.
+
 **Not built.** Declared here because the shape is decided, not because it exists. Do not write
 code that assumes one of these is available — check first.
 
@@ -420,7 +428,6 @@ code that assumes one of these is available — check first.
   the app's own `stored_file` table. Never touch the filesystem from feature code.
 - `packages/email` — a real `IEmailService` transport. Today `packages/outbox` ships
   `FileEmailTransport`, a capture-to-disk substitute gated out of Production.
-- `packages/ui-kit` — shadcn components, DataTable, dialogs, form primitives.
 
 **Append-only rows** (`IAppendOnly`, packages/tenancy) — a posted journal line, an audit entry. The
 code refuses to modify or delete one; its table is also listed in `02-grants.sql`, which removes
@@ -563,6 +570,9 @@ URL including the cloud metadata address.
   commercial risk, and control lasting costs. No validated customer demand is established. Product uncertainty
   does not lower the quality or security bar for real customer use.
 
+- **Product text is American English** (Chris, 2026-10-21): "organization", "color", "license",
+  "-ize". That covers everything a customer reads: UI, API messages, emails, permission descriptions.
+  Stable codes (`mfa_not_enrolled`) are never renamed for spelling.
 - Chris applies SQL to live databases manually — write or generate scripts, never execute
   against a live DB.
 - Commit only when asked.

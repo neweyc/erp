@@ -467,6 +467,10 @@ namespace AppPlatform.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at");
 
+                    b.Property<Guid?>("MessageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("message_id");
+
                     b.Property<string>("Purpose")
                         .IsRequired()
                         .HasMaxLength(20)

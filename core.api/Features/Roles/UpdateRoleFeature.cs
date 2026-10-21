@@ -23,7 +23,7 @@ public static class UpdateRoleFeature
             Caller caller, string rolePublicId, RoleDefinitionCommand cmd, CancellationToken ct = default)
         {
             if (!PublicId.TryParse(rolePublicId, "rol", out _))
-                return CommandResult.NotFound(CoreProblems.NotFound, "That is not one of your organisation's roles.");
+                return CommandResult.NotFound(CoreProblems.NotFound, "That is not one of your organization's roles.");
 
             await using var transaction = await users.BeginTransactionAsync(ct);
             await users.LockRoleChangesAsync(ct);

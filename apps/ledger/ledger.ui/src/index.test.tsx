@@ -130,7 +130,7 @@ describe('ledger app', () => {
       { accountId: 'acct_cash', amountMinor: 1250 },
       { accountId: 'acct_sales', amountMinor: -1250 },
     ])
-    // The same submission retried: the server must be able to recognise it and not post twice.
+    // The same submission retried: the server must be able to recognize it and not post twice.
     expect(retry!.body.idempotencyKey).toBe(first!.body.idempotencyKey)
   })
 

@@ -1,5 +1,7 @@
 import { Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Link, Navigate, Route, Routes } from 'react-router-dom'
+import { Compass } from 'lucide-react'
+import { Button, Card, EmptyState, Loading } from '@app-platform/ui-kit'
 import { APPS, componentFor, visibleApps } from '../lib/apps'
 import { Permissions } from '@app-platform/web-api'
 import { useSession } from './session-provider'
@@ -40,7 +42,7 @@ export function AppRoutes() {
               // The fallback is what the reader sees while the app's bundle downloads. It is
               // deliberately plain: a spinner that appears for 80ms on a fast connection reads
               // as a flicker, not as progress.
-              <Suspense fallback={<p role="status">Loading {app.name}…</p>}>
+              <Suspense fallback={<Loading>Loading {app.name}…</Loading>}>
                 <Component permissions={session.permissions} />
               </Suspense>
             }
@@ -55,13 +57,23 @@ export function AppRoutes() {
 
 function NotFound({ licensedCount }: { licensedCount: number }) {
   return (
-    <section>
-      <h1>Page not found</h1>
-      {licensedCount < APPS.length && (
-        // Said plainly rather than left as a bare 404: a reader who was sent a link to an app
-        // their organisation has not licensed should learn that, not conclude the link is broken.
-        <p>Some applications are not enabled for your organisation.</p>
-      )}
-    </section>
+    <Card>
+      <EmptyState
+        icon={Compass}
+        title="Page not found"
+        headingLevel={1}
+        action={
+          <Button asChild variant="outline" size="sm">
+            <Link to="/dashboard">Back to the dashboard</Link>
+          </Button>
+        }
+      >
+        {licensedCount < APPS.length
+          ? // Said plainly rather than left as a bare 404: a reader who was sent a link to an app
+            // their organization has not licensed should learn that, not conclude the link is broken.
+            'Some applications are not enabled for your organization.'
+          : 'There is nothing at this address.'}
+      </EmptyState>
+    </Card>
   )
 }

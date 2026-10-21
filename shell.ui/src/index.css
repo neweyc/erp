@@ -1,0 +1,12 @@
+/*
+ * The whole product's stylesheet. Tailwind generates only the classes it finds in the sources
+ * listed here, so a package whose components use classes MUST be listed, or its styling silently
+ * disappears from the build.
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@app-platform/ui-kit/theme.css';
+
+@source '../../packages/ui-kit/src';
+@source '../../apps/tickets/tickets.ui/src';
+@source '../../apps/ledger/ledger.ui/src';

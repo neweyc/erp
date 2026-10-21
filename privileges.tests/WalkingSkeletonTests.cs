@@ -114,7 +114,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var db = Core(tenant, actor);
 
         var accepted = await new AcceptInviteFeature.AcceptInviteCommandHandler(
-            new EFAuthService(db), tenant, actor, TimeProvider.System)
+            new EFAuthService(db), new EFUserService(db, tenant), tenant, actor, TimeProvider.System)
             .Handle(new(await Task.FromResult(TokenFor(tenantId)), password));
 
         Assert.True(accepted.Succeeded, accepted.Message);
@@ -125,7 +125,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var signInDb = Core(signIn, signInActor);
 
         var outcome = await new SignInFeature.SignInCommandHandler(
-            new EFAuthService(signInDb), new EFRoleService(signInDb), signInActor, TimeProvider.System)
+            new EFAuthService(signInDb), new EFUserService(signInDb, signIn), new EFRoleService(signInDb), signInActor, TimeProvider.System)
             .Handle(tenantId, new(email, password));
 
         Assert.NotNull(outcome.SessionId);
@@ -274,7 +274,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var db = Core(tenant, actor);
 
         var second = await new AcceptInviteFeature.AcceptInviteCommandHandler(
-            new EFAuthService(db), tenant, actor, TimeProvider.System)
+            new EFAuthService(db), new EFUserService(db, tenant), tenant, actor, TimeProvider.System)
             .Handle(new(token, "a different password"));
 
         // A link that still works after use is a permanent way in for anyone who saw the email.

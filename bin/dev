@@ -6,7 +6,7 @@
 # key ring, captured mail.
 #
 #   bin/dev setup                              once: check tools, build, settings, database
-#   bin/dev operator create <email>            once: an operator (prints the MFA secret, once)
+#   bin/dev operator create <email>            once: an operator (prints the MFA QR code and secret, once)
 #   bin/dev up                                 start everything in the background
 #   bin/dev tenant create "<name>" <email>     a tenant with Tickets and Ledger, and its admin's invitation
 #   bin/dev invite-link [email]                the newest invitation link (for that address)
@@ -34,7 +34,9 @@ OPERATOR_JAR="$LOCAL/operator.jar"
 
 DB_CONTAINER="app-platform-dev-db"
 DB_VOLUME="app-platform-dev-data"
-DB_PORT=5433
+# 5433, not 5432, to miss a PostgreSQL you may already run. If something else holds 5433 too, set
+# DEV_DB_PORT for the first 'bin/dev setup': the container and dev.env keep the port from then on.
+DB_PORT="${DEV_DB_PORT:-5433}"
 
 # Written into the database once setup has finished every step, so a setup that failed half way
 # is recognised as unfinished rather than skipped next time.
@@ -396,7 +398,7 @@ cmd_down() {
 cmd_status() {
   local service port state
   if container_running; then
-    echo "database   running (port $DB_PORT)"
+    echo "database   running ($(docker port "$DB_CONTAINER" 5432/tcp | head -n 1))"
   else
     echo "database   stopped"
   fi
@@ -451,13 +453,13 @@ cmd_operator() {
       printf '%s\n' "$password" | operator_command create-platform-user "$email"
       # Remembered so 'tenant create' and 'status' know who the operator is.
       set_setting OPERATOR_EMAIL "$email"
-      say "add the MFA secret above to your authenticator app now: it is not shown again."
+      say "scan the QR code above with your authenticator app now (or enter the secret): it is not shown again."
       ;;
     reset)
       [ -n "${OPERATOR_EMAIL:-}" ] || die "no operator yet: bin/dev operator create <email>"
       operator_command reset-platform-user-mfa "$OPERATOR_EMAIL"
       rm -f "$OPERATOR_JAR"
-      say "add the new MFA secret above to your authenticator app, replacing the old one."
+      say "scan the new QR code above with your authenticator app, replacing the old entry."
       ;;
     *) die "usage: bin/dev operator create <email> | bin/dev operator reset" ;;
   esac

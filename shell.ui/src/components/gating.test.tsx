@@ -23,6 +23,8 @@ vi.mock('../lib/apps', async () => {
     {
       id: 'tickets',
       name: 'Tickets',
+      description: 'Tickets.',
+      icon: () => null,
       path: '/tickets',
       permission: 'tickets.ticket.read',
       load: async () => {
@@ -157,7 +159,7 @@ describe('entitlement gating', () => {
     renderAt('/tickets', session({ licensedApps: [] }))
 
     expect(
-      await screen.findByText(/not enabled for your organisation/i),
+      await screen.findByText(/not enabled for your organization/i),
     ).toBeInTheDocument()
   })
 })

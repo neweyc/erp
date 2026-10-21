@@ -92,11 +92,13 @@ export default defineConfig({
     { name: 'rate-limit', testMatch: /rate-limit\.spec\.mjs/, dependencies: ['isolation'] },
     // D17: an employee invited by the admin accepts and signs in. Needs the admin accepted.
     { name: 'employee-invite', testMatch: /employee-invite\.spec\.mjs/, dependencies: ['license'] },
+    // Resending an invitation, deactivating and reactivating, through the Users page.
+    { name: 'user-lifecycle', testMatch: /user-lifecycle\.spec\.mjs/, dependencies: ['license'] },
     // The restore drill backs up everything the projects above wrote, so it runs after all of them.
     {
       name: 'restore',
       testMatch: /restore\.spec\.mjs/,
-      dependencies: ['journey', 'guards', 'isolation', 'ledger', 'employee-invite'],
+      dependencies: ['journey', 'guards', 'isolation', 'ledger', 'employee-invite', 'user-lifecycle'],
     },
   ],
   timeout: 30_000,

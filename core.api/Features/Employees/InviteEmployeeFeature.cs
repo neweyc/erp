@@ -112,10 +112,11 @@ public static class InviteEmployeeFeature
             // the commit is how a recipient ends up holding a link to an invitation that does not
             // exist; committing before queueing is how an invite is created that nobody is ever
             // told about. All three rows go in one transaction.
-            outbox.AddMessage(
+            var message = outbox.AddMessage(
                 OutboxTransports.Email,
                 destination: user.Email,
-                payload: $$"""{"kind":"invite","userId":"{{user.PublicId}}","token":"{{plaintext}}"}""");
+                payload: InvitationToken.EmailPayload(user.PublicId, plaintext));
+            token.MessageId = message.Id;
 
             await employees.SaveAsync(ct);
             await transaction.CommitAsync(ct);

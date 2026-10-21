@@ -55,7 +55,7 @@ public static class CompanyResolver
         return companies.Count switch
         {
             1 => new(companies[0], null),
-            0 => new(null, CommandResult.Invalid(LedgerProblems.CompanyNotFound, "This organisation has no company.")),
+            0 => new(null, CommandResult.Invalid(LedgerProblems.CompanyNotFound, "This organization has no company.")),
             _ => new(null, CommandResult.Invalid(LedgerProblems.CompanyRequired, "Say which company's books.")),
         };
     }

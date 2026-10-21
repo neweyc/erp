@@ -5,6 +5,7 @@ using AppPlatform.Core.Data;
 using AppPlatform.Core.Features.Auth;
 using AppPlatform.Core.Services;
 using AppPlatform.Tenancy;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 
@@ -16,6 +17,7 @@ public class AuthTests
 
     private readonly Mock<IAuthService> _auth = new();
     private readonly Mock<IRoleService> _roles = new();
+    private readonly Mock<IUserService> _users = new();
     private readonly AmbientTenantProvider _tenant = new();
     private readonly FakeTimeProvider _clock = new(Now);
 
@@ -24,12 +26,13 @@ public class AuthTests
     public AuthTests()
     {
         _roles.Setup(r => r.ListAsync(default)).ReturnsAsync([]);
+        _users.Setup(u => u.BeginTransactionAsync(default)).ReturnsAsync(Mock.Of<IDbContextTransaction>());
     }
 
     private AcceptInviteFeature.AcceptInviteCommandHandler Accept()
-        => new(_auth.Object, _tenant, _actor, _clock);
+        => new(_auth.Object, _users.Object, _tenant, _actor, _clock);
 
-    private SignInFeature.SignInCommandHandler SignIn() => new(_auth.Object, _roles.Object, _actor, _clock);
+    private SignInFeature.SignInCommandHandler SignIn() => new(_auth.Object, _users.Object, _roles.Object, _actor, _clock);
 
     private (UserToken Token, string Plaintext, User User) Invited(
         DateTimeOffset? expiresAt = null, DateTimeOffset? usedAt = null)
@@ -64,6 +67,39 @@ public class AuthTests
         Assert.Equal(UserStatus.Active, user.Status);
         Assert.True(PasswordHasher.Verify("correct horse battery", user.PasswordHash));
         Assert.Equal(Now, token.UsedAt);
+    }
+
+    [Fact]
+    public async Task Accepting_takes_the_tenants_access_lock_before_reading_the_account()
+    {
+        var (_, plaintext, _) = Invited();
+        var order = new List<string>();
+        _users.Setup(u => u.LockRoleChangesAsync(default)).Callback(() => order.Add("lock")).Returns(Task.CompletedTask);
+        _auth.Setup(a => a.FindUserAsync(It.IsAny<Guid>(), default)).Callback(() => order.Add("read"))
+            .ReturnsAsync((Guid id, CancellationToken _) => new User { Id = id, Email = "ada@acme.test", Status = UserStatus.Invited });
+
+        await Accept().Handle(new(plaintext, "correct horse battery"));
+
+        // Read after the lock, so a deactivation that commits first is seen (docs/permissions.md §6).
+        Assert.Equal(["lock", "read"], order);
+    }
+
+    [Theory]
+    [InlineData(UserStatus.Deactivated)]
+    [InlineData(UserStatus.Active)]
+    public async Task Only_an_invited_account_can_accept(UserStatus status)
+    {
+        var (token, plaintext, user) = Invited();
+        user.Status = status;
+
+        var result = await Accept().Handle(new(plaintext, "correct horse battery"));
+
+        // A deactivated person's unused link must not reactivate them, and a spare link (an
+        // invitation sent twice) must not reset an active account's password.
+        Assert.Equal(AuthProblems.InvalidToken, result.ProblemCode);
+        Assert.Equal(status, user.Status);
+        Assert.Null(user.PasswordHash);
+        Assert.Null(token.UsedAt);
     }
 
     [Fact]

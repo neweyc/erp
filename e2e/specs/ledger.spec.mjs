@@ -41,7 +41,7 @@ test('the ledger, end to end in the browser', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign in' }).click()
 
   // Licensed, so it is in the nav — and its code is fetched only now.
-  await page.getByRole('link', { name: 'Ledger' }).click()
+  await page.getByRole('navigation').getByRole('link', { name: 'Ledger' }).click()
   await expect(page.getByRole('heading', { name: 'Ledger', level: 1 })).toBeVisible()
 
   // A CHART OF ACCOUNTS.
@@ -50,7 +50,7 @@ test('the ledger, end to end in the browser', async ({ page }) => {
     await page.getByLabel('Name', { exact: true }).fill(name)
     await page.getByLabel('Type').selectOption(type)
     await page.getByRole('button', { name: 'Add account' }).click()
-    await expect(page.getByRole('list', { name: 'Accounts' })).toContainText(`${code} — ${name}`)
+    await expect(page.getByRole('table', { name: 'Accounts' }).getByRole('row', { name: new RegExp(`${code}.*${name}`) })).toBeVisible()
   }
 
   // POST — balanced, so the button enables.

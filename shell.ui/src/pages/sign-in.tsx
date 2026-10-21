@@ -1,18 +1,21 @@
 import { useState } from 'react'
+import { Alert, Button, Field, Input } from '@app-platform/ui-kit'
 import { api, ApiError } from '../lib/session'
 import { useSession } from '../components/session-provider'
+import { AuthLayout } from '../components/auth-layout'
 
 /**
  * Wording per problem code. A single "please sign in again" cannot tell an expired session from
- * a revoked one from an organisation on hold, and each needs a different next step.
+ * a revoked one from an organization on hold, and each needs a different next step.
  */
 const EXPLANATION: Record<string, string> = {
+  signed_out: 'You have signed out.',
   session_invalid: 'Your session has expired. Please sign in again.',
   session_revoked: 'You were signed out. Sign in again to continue.',
   session_idle_timeout: 'You were signed out after a period of inactivity.',
   role_changed: 'Your permissions changed. Please sign in again.',
   user_deactivated: 'This account is no longer active. Contact your administrator.',
-  tenant_retired: 'This organisation’s account has been closed.',
+  tenant_retired: 'This organization’s account has been closed.',
   invalid_credentials: 'That email address and password do not match.',
 }
 
@@ -47,37 +50,42 @@ export function SignIn() {
   const reason = !error && problemCode ? EXPLANATION[problemCode] : null
 
   return (
-    <main>
-      <h1>Sign in</h1>
-      {reason && <p role="status">{reason}</p>}
+    <AuthLayout
+      title="Sign in"
+      description="Welcome back. Sign in to your organization."
+      footer="New here? Open the invitation link from your email to set your password."
+    >
+      {reason && <Alert tone="info">{reason}</Alert>}
 
-      <form onSubmit={submit}>
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+      <form onSubmit={submit} className="grid gap-4">
+        <Field label="Email" htmlFor="email">
+          <Input
+            id="email"
+            type="email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </Field>
 
-        <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        <Field label="Password" htmlFor="password">
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </Field>
 
-        {error && <p role="alert">{error}</p>}
+        {error && <Alert tone="danger">{error}</Alert>}
 
-        <button type="submit" disabled={submitting}>
+        <Button type="submit" variant="primary" disabled={submitting} className="mt-1 w-full">
           {submitting ? 'Signing in…' : 'Sign in'}
-        </button>
+        </Button>
       </form>
-    </main>
+    </AuthLayout>
   )
 }

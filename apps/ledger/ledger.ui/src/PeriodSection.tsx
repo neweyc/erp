@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { CalendarCheck, Lock } from 'lucide-react'
+import { Button, Card, CardContent, CardHeader, Field, Input } from '@app-platform/ui-kit'
 import type { Period } from './api'
 
 /**
@@ -24,24 +26,46 @@ export function PeriodSection({
   }
 
   return (
-    <section aria-labelledby="period-heading">
-      <h2 id="period-heading">Closed periods</h2>
+    <Card>
+      <section aria-labeledby="period-heading">
+        <CardHeader id="period-heading" title="Closed periods" description="Nothing can be posted on or before a closed date." />
+        <CardContent className="grid gap-4">
+          <ul className="grid gap-2">
+            {periods.map((p) => (
+              <li key={p.companyId} className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
+                {p.closedThrough ? (
+                  <Lock className="size-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <CalendarCheck className="size-4 shrink-0 text-muted-foreground" />
+                )}
+                <span className="min-w-0">
+                  <span className="font-medium">{p.companyName}</span>:{' '}
+                  <span className="whitespace-nowrap">
+                    {p.closedThrough ? `closed through ${p.closedThrough}` : 'no period closed yet'}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
 
-      {periods.map((p) => (
-        <p key={p.companyId}>
-          {p.companyName}: {p.closedThrough ? `closed through ${p.closedThrough}` : 'no period closed yet'}
-        </p>
-      ))}
-
-      {onClose && (
-        <form onSubmit={submit} aria-label="Close the books">
-          <label htmlFor="close-through">Close through</label>
-          <input id="close-through" type="date" value={through} onChange={(e) => setThrough(e.target.value)} required />
-          {/* Said before the click: there is no reopen. */}
-          <button type="submit" disabled={submitting || through === ''}>Close the books</button>
-          <p>Closing is permanent. Corrections to a closed period are posted in an open one.</p>
-        </form>
-      )}
-    </section>
+          {onClose && (
+            <form onSubmit={submit} aria-label="Close the books" className="grid gap-3 border-t pt-4">
+              <div className="flex flex-wrap items-end gap-2">
+                <Field label="Close through" htmlFor="close-through" className="min-w-40 flex-1">
+                  <Input id="close-through" type="date" value={through} onChange={(e) => setThrough(e.target.value)} required />
+                </Field>
+                <Button type="submit" disabled={submitting || through === ''}>
+                  <Lock /> Close the books
+                </Button>
+              </div>
+              {/* Said before the click: there is no reopen. */}
+              <p className="text-xs text-muted-foreground">
+                Closing is permanent. Corrections to a closed period are posted in an open one.
+              </p>
+            </form>
+          )}
+        </CardContent>
+      </section>
+    </Card>
   )
 }

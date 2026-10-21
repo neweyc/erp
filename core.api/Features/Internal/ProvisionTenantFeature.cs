@@ -128,10 +128,11 @@ public static class ProvisionTenantFeature
 
             // Staged, then committed with everything else. Sending first and committing after
             // is how a recipient ends up holding a link to a tenant that does not exist.
-            new Outbox.Outbox(db, clock).AddMessage(
+            var message = new Outbox.Outbox(db, clock).AddMessage(
                 OutboxTransports.Email,
                 destination: email,
-                payload: $$"""{"kind":"tenant_admin_invite","userId":"{{admin.PublicId}}","token":"{{plaintext}}"}""");
+                payload: Services.InvitationToken.TenantAdminEmailPayload(admin.PublicId, plaintext));
+            token.MessageId = message.Id;
 
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);

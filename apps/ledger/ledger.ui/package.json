@@ -5,13 +5,17 @@
   "type": "module",
   "main": "./src/index.tsx",
   "types": "./src/index.tsx",
-  "exports": { ".": "./src/index.tsx" },
+  "exports": {
+    ".": "./src/index.tsx"
+  },
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
   },
   "dependencies": {
-    "@app-platform/web-api": "*"
+    "@app-platform/ui-kit": "*",
+    "@app-platform/web-api": "*",
+    "lucide-react": "1.52.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

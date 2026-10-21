@@ -30,7 +30,7 @@ public static class RoleRules
         string key, IReadOnlyDictionary<string, Role> customRoles, IReadOnlyCollection<string> licensedApps)
     {
         if (BuiltInRoles.IsCustomKey(key))
-            return customRoles.ContainsKey(key) ? null : $"'{key}' is not one of your organisation's roles.";
+            return customRoles.ContainsKey(key) ? null : $"'{key}' is not one of your organization's roles.";
 
         if (BuiltInRoles.Find(key) is not { } builtIn)
             return $"'{key}' is not a role.";
@@ -38,7 +38,7 @@ public static class RoleRules
         // A built-in role in an unlicensed app would grant nothing today, and something
         // unexpected on the day the app is licensed, long after whoever chose it has forgotten.
         if (builtIn.App != Permissions.CoreApp && !licensedApps.Contains(builtIn.App))
-            return $"Your organisation has not licensed {builtIn.App}, so its roles cannot be given.";
+            return $"Your organization has not licensed {builtIn.App}, so its roles cannot be given.";
 
         return null;
     }
@@ -140,7 +140,7 @@ public static class RoleRules
             // assigning a built-in role there. One the role already holds is not "added".
             var app = Permissions.AppOf(permission);
             if (app != Permissions.CoreApp && !licensedApps.Contains(app) && !held.Contains(permission))
-                return Invalid($"Your organisation has not licensed {app}, so its permissions cannot be added.");
+                return Invalid($"Your organization has not licensed {app}, so its permissions cannot be added.");
         }
 
         // Kept: what the role holds in apps the tenant no longer licenses. The editor shows only

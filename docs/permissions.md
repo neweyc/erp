@@ -183,10 +183,32 @@ rows a check depends on (who can manage users) are themselves changed by the wri
 serialized, so no row order can be agreed in advance. Cycle 12's review found exactly that
 deadlock.
 
-Other writes to a user, such as accepting an invitation or a password rehash, take no lock and write
-other columns, so a role change never makes them fail. Accepting an invitation can only *add* an
-active user. Any future write that can *remove* one, such as deactivation or termination, **must
-take the same lock** and run the same check.
+Deactivating and reactivating an account, and **accepting an invitation**, take the same lock:
+each changes whether a user is active, which is what the check counts. Acceptance needs it for a
+second reason: without it, an administrator could deactivate an invited account between acceptance
+reading it and saving it, and the save would set it active again. **Sign-in** takes it in shared mode,
+from reading the account until its new session commits: sign-ins never wait for each other, but a
+deactivation waits for those in progress and so revokes their sessions too, and a sign-in that starts
+during a deactivation waits and is then refused. Other writes to a user, such as a
+password rehash, take no lock and write other columns, so a role change never makes them fail. Any
+future write that can remove an active user, such as termination, **must take the same lock** and
+run the same check.
+
+### Deactivating and reactivating an account
+
+Requiring `core.user.manage`:
+
+- `POST /api/core/v1/users/{userId}/deactivate`. The account stops working at once: session
+  revalidation refuses an inactive user, and its sessions are also **revoked**, so a cookie copied
+  before deactivation stays dead if the account is reactivated. It keeps its roles. An invitation not
+  yet accepted stops working too, because only an **invited** account can accept one.
+- Refused with `last_admin` if no other active user could then manage users, and with
+  `cannot_deactivate_self` for the caller's own account: another administrator does it deliberately.
+- `POST /api/core/v1/users/{userId}/reactivate`. The account comes back with its roles. One that never
+  accepted its invitation (no password) comes back **invited**, not active. Refused with
+  `employee_terminated` if its linked employee is terminated, so it cannot quietly undo a termination.
+- Both are no-ops when already done. Each change is audited and emits `user.deactivated` or
+  `user.reactivated`, numbered by the user's access version.
 
 ### Who may grant what
 
@@ -204,6 +226,16 @@ in case a customer needs delegated administration.
 - Provisioning gives the first user `core:admin`.
 - `POST …/employees/{id}/invite` takes `roles` (role keys, default `["core:member"]`), validated as
   for assignment, and requires `core.user.manage`.
+- `POST /api/core/v1/users/{userId}/invitation` (`core.user.manage`) sends an invited person a fresh
+  link, for an email that never arrived or a link that expired. Refused with `not_invited` for any
+  other account, and `employee_terminated` as inviting is. Earlier links are left alone, not revoked:
+  whichever is used first activates the account, and the rest are refused from then on because only
+  an invited account can accept. Revoking them would race someone accepting an older link. No domain
+  event: the account does not change; the token row and the email are the record.
+- `GET /users` gives an invited account's newest invitation: the delivery status of the email that
+  carried that link (`user_token.message_id`; `pending`, `delivered`, `failed`, or `unknown` once the
+  outbox has pruned it) and when its link expires. That is
+  what an administrator needs to decide whether to resend (CLAUDE.md, the outbox section).
 
 ## 8. The shell
 
@@ -213,9 +245,11 @@ in case a customer needs delegated administration.
   by `PermissionCatalogueTests`. Descriptions come from `GET /permissions`, so they have one source.
 - An app's registry entry names the permission needed to see it; app components receive the
   caller's permissions and hide what the user cannot do. Hiding is a convenience; the API enforces.
-- **Users** page (`core.user.read`): each account with its roles. With `core.user.manage`, an
+- **Users** page (`core.user.read`): each account with its roles, and for an invited account how its
+  invitation is doing ("email could not be delivered", "link expired"). With `core.user.manage`, an
   editor lists every assignable role as a checkbox, with its description, and saves the
-  differences as `add`/`remove`.
+  differences as `add`/`remove`; and each account can be deactivated (on a second click; never your
+  own), reactivated, or, while invited, sent a new invitation.
 - **Roles** page (`core.user.read`): built-in and custom roles, what each grants, and how many
   people hold each. With `core.role.manage`: create a role, start one as a copy of any role, and edit
   or delete custom roles. The permission checklist is grouped by app and shows each description.
@@ -230,7 +264,9 @@ for both kinds of principal, as `docs/integration.md` requires.
 
 - Delegated administration, that is, a non-escalation rule (§6).
 - Row-level rules (§4).
-- Deactivating a user from the Users page. When built, it takes the role-change lock (§6).
+- Terminating an employee, which will deactivate the linked account under the same lock (§6).
+- Recording who resent an invitation. Tokens are not audited entities, so the resend leaves a token
+  row and an email but no actor.
 - Operator roles in the platform console.
 - Narrowing roster fields by permission, such as hiding email addresses from members. Still open,
   and now a small change: split `core.employee.read`.

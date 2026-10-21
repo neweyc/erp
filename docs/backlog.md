@@ -237,7 +237,6 @@ ERP will need again.
 - **A real email transport.** The outbox worker is built and delivers through
   `FileEmailTransport`, which is a local capture substitute gated to non-production. A real
   transport (SMTP/HTTP API) does not exist.
-- **Resend invitation.** If delivery dead-letters there is no way to reissue without SQL.
 - **Operator MFA polish (M3):** step-up re-authentication for destructive operator actions
   (docs/auth-and-access.md §8), and web enrolment/recovery UX. Enforcement itself is Cycle 10.
 - **Backup and restore, Stage 2; key recovery.** Stage 1 (scripts and an automated drill) is
@@ -247,10 +246,8 @@ ERP will need again.
 - **Webhooks, public API, API keys.** Designed in `docs/integration.md`; the three irreversible
   decisions are built, the surface is not.
 - **Idle timeout, notifications bell** — `ActivityPolicy` anticipates both; neither is built.
-- **Deactivating a user** from the Users page. `identity.user.status` supports it; no endpoint
-  changes it. Today an administrator can remove all of someone's roles, which leaves them able to
-  sign in and do nothing. When built, deactivation takes the tenant's role-change lock and runs the
-  last-administrator check (docs/permissions.md §6).
+- **Terminating an employee.** Will deactivate the linked account under the role-change lock, as
+  `DeactivateUserFeature` does; reactivation and resending already refuse a terminated employee.
 
 ---
 
@@ -650,6 +647,113 @@ ahead of review while Codex was at its usage limit; the review then ran and its 
 Open from the closure: D16.
 
 ## Current cycle
+
+**Cycle 15 — the UI kit and a professional shell.** Chris, on first running the platform locally:
+"yikes, the ui is really bad", then "do the ui-kit cycle. We need this to look outstandingly
+professional." Every page so far was unstyled browser-default HTML: no stylesheet, no Tailwind, no
+components, although CLAUDE.md names shadcn/ui and TanStack Table and lists `packages/ui-kit` as
+not built. **Complete. Focused self-review; no independent review (no security, data or concurrency
+change: sign-out calls the existing endpoint).**
+
+Built:
+- `packages/ui-kit` (`@app-platform/ui-kit`): Tailwind v4 theme (colour tokens defined once, light
+  and dark), Inter served locally (no font CDN), and shadcn-style components over Radix where a
+  primitive earns it: button, field/input/select/checkbox, card, badge, alert, table and a TanStack
+  `DataTable` (sorting, filtering), dialog and alert dialog, dropdown menu, page header, empty state.
+  Native `<select>` and checkbox stay native (styled): keyboard, mobile and assistive technology
+  behaviour for free.
+- The shell frame: a sidebar with the organisation, the apps from the registry (which gains an
+  icon) and administration; a user menu with the theme choice and **sign out** (the endpoint existed,
+  no button did); a mobile top bar with a slide-in menu. Signed-out pages on a centred card.
+- Every page moved onto the kit: dashboard, sign-in, accept invitation, users, roles, tickets, ledger.
+- Rules kept and enforced: wide content scrolls in its own container (no horizontal page scroll at
+  390px, checked in the browser for every page); a dialog states `dismissible` explicitly (a required
+  prop) and caps its height in `svh`; accessible names unchanged, so tests keep finding things by
+  role and label.
+- Decided along the way:
+  - Failures inside a dialog are shown in the dialog, which stays open, so the choices made survive.
+  - Deactivating a user and deleting a role confirm in an alert dialog instead of a second click.
+  - A decorated cell (role chips, a status badge and its detail) gets its words as its accessible
+    name (`meta.cellLabel`), because browsers and the test DOM join adjacent elements differently.
+  - The theme script is a file (`public/theme-init.js`), not inline, so a future strict CSP allows it.
+  - Dependencies pinned exactly, each at least two weeks old (133 packages checked); TanStack Table
+    stays on 8.x.
+- Evidence (measured): UI suites 43 shell (was 39) / 14 ui-kit (new) / 15 tickets / 26 ledger /
+  8 web-api; every workspace builds (`tsc -b`, `vite build`); Playwright 31/31. The browser specs
+  changed only where the UI did: nav links scoped to the navigation (a dashboard tile also links to
+  each app), the admin's email scoped to `<main>` (the account menu shows it too), the chart of
+  accounts read as a table. New tests: non-dismissible dialogs survive Escape, close from their own
+  button, cap height in `svh`; the confirm dialog's accessible name; DataTable sorting, search and
+  empty state; sign-out and the theme choice; a source scan that every form dialog in the shell and
+  the apps passes `dismissible={false}`. Broken on purpose, each caught: the Escape guard removed;
+  a form dialog made dismissible (the scan names the file). Every page was screenshotted at 1440px
+  and at 390px, light and dark, against fixtures; no horizontal scroll at 390px.
+- Not done: `npm audit` reports advisories in Vite 7.3.6 and Vitest 3.2.7 (development tooling only,
+  present before this cycle); upgrading Vitest to 4 is its own change.
+
+## Previous cycle
+
+**Cycle 14 — the account lifecycle.** Chris: "start the user lifecycle cycle", after Cycle 13 was
+committed (`bd41280`) and pushed. Closes two dead ends an administrator met: no way to deactivate
+someone (removing every role still let them sign in), and no way to resend an invitation whose
+email failed or whose link expired (only SQL could).
+**Complete. Independent review (Codex, two rounds) CLOSED: no blocking findings.**
+
+- `POST /users/{id}/deactivate` and `/reactivate` (`core.user.manage`). Deactivation takes the
+  tenant's role-change lock, runs the last-administrator check, refuses your own account
+  (`cannot_deactivate_self`), keeps the roles, and **revokes** the sessions as well as refusing them,
+  so reactivation never revives a copied cookie. Reactivation restores `Active`, or `Invited` for an
+  account that never set a password; refused for a terminated employee. Both audited, with events.
+- `POST /users/{id}/invitation` (`core.user.manage`): a fresh link and email in one save, for
+  invited accounts only (`not_invited`). Earlier links are left alone; see the next point.
+- **Found while designing: accepting an invitation did not check the account's status.** A
+  deactivated person holding an unused link could have reactivated themselves, and a spare link
+  (an invitation sent twice) could have reset an active account's password. Acceptance now requires
+  an **invited** account, and takes the role-change lock before reading it, so a deactivation
+  committing at the same moment is seen rather than overwritten.
+- `GET /users` gives an invited account's newest invitation: delivery status from the outbox
+  (matched by the payload's `kind` with jsonb containment; only status columns are read, never the
+  link) and its expiry. Invitation payloads are now built in one place, `InvitationToken`.
+- Users page: status in words for invitations, "Resend invitation", "Deactivate" with a second
+  confirming click (not shown for yourself), "Reactivate". Fits 390px.
+- Evidence before review (measured): 795 .NET tests (204 against real PostgreSQL), 31/31 Playwright, UI suites 39
+  shell / 15 tickets / 26 ledger / 8 web-api, all builds clean. New: `UserLifecycleTests` (unit);
+  in `UserRolesTests` against PostgreSQL, deactivation waiting for a role change and then refusing
+  the last administrator, sessions ending at once and staying dead after reactivation (with audit and
+  events), an invitation accepted while the account is being deactivated being refused, and the
+  users list reporting a resent invitation while ignoring a later non-invitation email to the same
+  address. The real database caught a bug no unit test could: the outbox payload is `jsonb`, so the
+  first version's text prefix match failed. New e2e `user-lifecycle`: delivery shown, resend in the
+  browser, accept with the new link while the old one is refused, deactivate (live session 401,
+  sign-in refused), reactivate (sign-in works, old session still 401). Broken on purpose, each caught:
+  acceptance without the lock; acceptance without the status check; deactivation without the lock;
+  no session revocation; no `kind` filter; no last-administrator check.
+- Decided, worth confirming: you cannot deactivate yourself; a resend leaves earlier links working
+  until the account is accepted; who resent an invitation is not recorded (tokens are not audited).
+- **Independent review (Codex), round 1: 1 blocking, 2 optional. All taken.**
+  - BLOCKING: a sign-in in flight during a deactivation could create a session the deactivation
+    never saw. Refused while the account was deactivated, it would have worked again after
+    reactivation, breaking the "a copied cookie stays dead" promise. Fixed: sign-in holds the
+    tenant's role-change lock in SHARED mode from reading the account until its session commits
+    (`IUserService.ShareRoleChangeLockAsync`), so sign-ins never wait for each other, only for an
+    access change. Real-PostgreSQL tests both ways: a sign-in waits for a deactivation in progress and
+    is refused; a deactivation waits for a sign-in in progress and revokes its session. Removing the
+    lock fails the first.
+  - OPTIONAL: delivery status was matched to the newest link by address and time, so an older failed
+    email (kept 90 days) could be reported for a newer delivered one (pruned after 7), and interleaved
+    resends could swap. Fixed: `identity.user_token.message_id` records the email that carried each
+    link (migration `AddUserTokenMessageId`, additive, nullable, applied as the migration role; scripts
+    generated), and only that message's status is read. Tested against PostgreSQL with the older
+    failure dated later, then with the newer email pruned (`unknown`, not `failed`).
+  - OPTIONAL: the browser test's "old session stays dead" check reused a context whose cookie the
+    first 401 had already deleted, so it proved nothing. Now replays the saved cookie in a fresh
+    context and expects `session_revoked`.
+  - Evidence after the fixes: 798 .NET tests, 31/31 Playwright.
+- **Round 2** (narrow check of the three fixes, including deadlock and starvation with the shared
+  lock, rollback of a failed sign-in, tenant scoping of the outbox read, and the migration): NO
+  BLOCKING FINDINGS, nothing optional. **Independent review CLOSED.**
+
+## Previous cycle
 
 **Cycle 13 — customer-defined roles.** Chris: "tackle customer defined roles while we're here; it is
 an expected feature for any serious ERP type application". Chose: **any number of roles per user**,

@@ -72,7 +72,7 @@ public static class PermissionCatalogue
         new(Permissions.Core.EmployeeCreate, "Add employees"),
         new(Permissions.Core.UserRead, "See accounts, their roles, and the roles defined"),
         new(Permissions.Core.UserManage, "Invite people and change anyone's roles"),
-        new(Permissions.Core.RoleManage, "Create, edit and delete the organisation's own roles"),
+        new(Permissions.Core.RoleManage, "Create, edit and delete the organization's own roles"),
 
         new(Permissions.Tickets.TicketRead, "See tickets"),
         new(Permissions.Tickets.TicketCreate, "Raise tickets"),

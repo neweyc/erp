@@ -47,8 +47,8 @@ public static class ChangeUserRolesFeature
             //  - the last-administrator check below still holds when the change commits;
             //  - a role cannot be deleted between being checked here and being saved on the user;
             //  - a second change to the same user applies on top of the first, not over it.
-            // Other writes to the user (accepting an invitation, a password rehash) do not take the
-            // lock and write other columns, so a role change never makes them fail.
+            // Deactivation and accepting an invitation take it too. Other writes to the user (a
+            // password rehash) do not, and write other columns, so a role change never makes them fail.
             await using var transaction = await users.BeginTransactionAsync(ct);
             await users.LockRoleChangesAsync(ct);
 

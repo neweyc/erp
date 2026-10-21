@@ -248,7 +248,7 @@ describe('tickets app', () => {
     expect(screen.queryByLabelText('New ticket')).not.toBeInTheDocument()
   })
 
-  it('falls back to something honest for an unrecognised problem code', () => {
+  it('falls back to something honest for an unrecognized problem code', () => {
     // A code with no entry must not surface the raw code to a reader.
     expect(explain('some_new_code_from_a_newer_api')).toBe('Something went wrong. Please try again.')
     expect(TICKET_PROBLEMS['already_closed']).toBeTruthy()

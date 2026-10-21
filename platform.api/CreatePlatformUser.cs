@@ -4,6 +4,7 @@ using AppPlatform.Platform.Auth;
 using AppPlatform.Ids;
 using AppPlatform.Platform.Data;
 using Microsoft.EntityFrameworkCore;
+using QRCoder;
 
 namespace AppPlatform.Platform;
 
@@ -104,9 +105,30 @@ public static class CreatePlatformUser
     /// reset-platform-user-mfa. The terminal's scrollback holds it until cleared.
     /// </summary>
     internal static string SecretNotice(string email, string secret)
-        => $"{SecretLinePrefix}{secret}\n" +
-           $"Authenticator link: {Totp.ProvisioningUri(OperatorMfa.Issuer, email, secret)}\n" +
-           "Add it to an authenticator app now. It is not shown again.";
+    {
+        var link = Totp.ProvisioningUri(OperatorMfa.Issuer, email, secret);
+        return $"{SecretLinePrefix}{secret}\n" +
+               $"Authenticator link: {link}\n" +
+               "Scan this with an authenticator app, or enter the secret above by hand:\n" +
+               QrCode(link) +
+               "Add it to an authenticator app now. It is not shown again.";
+    }
+
+    /// <summary>
+    /// The link as a QR code drawn in text, two rows per line with half-block characters. Drawn in
+    /// explicit black on white: many authenticator apps cannot read a code with its colours
+    /// swapped, which is what a dark terminal's own colours would produce. Rendered here, never by
+    /// an online QR service: the link IS the secret.
+    /// </summary>
+    private static string QrCode(string link)
+    {
+        using var generator = new QRCodeGenerator();
+        using var data = generator.CreateQrCode(link, QRCodeGenerator.ECCLevel.L);
+        var lines = new AsciiQRCode(data).GetGraphicSmall(drawQuietZones: true, invert: true).Split('\n');
+
+        const string blackOnWhite = "\u001b[30;107m", reset = "\u001b[0m";
+        return string.Concat(lines.Where(line => line.Length > 0).Select(line => $"{blackOnWhite}{line}{reset}\n"));
+    }
 
     /// <summary>Scripts (the e2e harness) read the secret from the line starting with this.</summary>
     internal const string SecretLinePrefix = "MFA secret (shown once): ";

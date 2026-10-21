@@ -1,5 +1,9 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { CircleCheck } from 'lucide-react'
+import { Alert, Button, Field, Input } from '@app-platform/ui-kit'
 import { api, ApiError } from '../lib/session'
+import { AuthLayout } from '../components/auth-layout'
 
 /** Must match the server's rule; the server is authoritative and re-checks it. */
 const MINIMUM_PASSWORD_LENGTH = 12
@@ -43,51 +47,51 @@ export function AcceptInvite() {
 
   if (accepted) {
     return (
-      <main>
-        <h1>Invitation accepted</h1>
+      <AuthLayout title="Invitation accepted" description="Your password is set. You can now sign in.">
         {/*
           Deliberately not signed in automatically. Accepting proves the person holds the link;
           signing in proves they know the password they just chose, which is what every later
           session is authenticated against.
         */}
-        <p>Your password is set. You can now sign in.</p>
-        <a href="/">Go to sign in</a>
-      </main>
+        <div className="flex justify-center">
+          <CircleCheck className="size-10 text-success" />
+        </div>
+        <Button asChild variant="primary" className="w-full">
+          <Link to="/">Go to sign in</Link>
+        </Button>
+      </AuthLayout>
     )
   }
 
   if (!token) {
     return (
-      <main>
-        <h1>Invitation</h1>
-        <p role="alert">This invitation link is missing its token. Use the link from your email.</p>
-      </main>
+      <AuthLayout title="Invitation">
+        <Alert tone="danger">This invitation link is missing its token. Use the link from your email.</Alert>
+      </AuthLayout>
     )
   }
 
   return (
-    <main>
-      <h1>Accept your invitation</h1>
-      <p>Choose a password to finish setting up your account.</p>
+    <AuthLayout title="Accept your invitation" description="Choose a password to finish setting up your account.">
+      <form onSubmit={submit} className="grid gap-4">
+        <Field label="Password" htmlFor="password" hint={`At least ${MINIMUM_PASSWORD_LENGTH} characters.`}>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            minLength={MINIMUM_PASSWORD_LENGTH}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </Field>
 
-      <form onSubmit={submit}>
-        <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="new-password"
-          minLength={MINIMUM_PASSWORD_LENGTH}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        {error && <Alert tone="danger">{error}</Alert>}
 
-        {error && <p role="alert">{error}</p>}
-
-        <button type="submit" disabled={submitting}>
+        <Button type="submit" variant="primary" disabled={submitting} className="mt-1 w-full">
           {submitting ? 'Setting your password…' : 'Accept invitation'}
-        </button>
+        </Button>
       </form>
-    </main>
+    </AuthLayout>
   )
 }

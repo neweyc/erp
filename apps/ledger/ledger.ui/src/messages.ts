@@ -5,7 +5,7 @@
 export const LEDGER_PROBLEMS: Record<string, string> = {
   validation_failed: 'Check the details and try again.',
   not_found: 'That entry no longer exists. Reload the page.',
-  company_not_found: 'Your organisation has no company set up.',
+  company_not_found: 'Your organization has no company set up.',
   company_required: 'Choose which company’s books to use.',
   duplicate_account_code: 'An account with that code already exists.',
   account_not_found: 'One of the accounts no longer exists. Reload the page.',
@@ -18,7 +18,7 @@ export const LEDGER_PROBLEMS: Record<string, string> = {
   // Reached only if roles changed while the page was open; otherwise the action is hidden.
   not_permitted: 'Your ledger role does not allow that. Ask an administrator if you need it.',
   concurrent_change: 'Someone else changed this at the same moment. Try again.',
-  app_not_licensed: 'Your organisation does not have the Ledger app enabled.',
+  app_not_licensed: 'Your organization does not have the Ledger app enabled.',
   csrf_failed: 'Your session needs refreshing. Reload the page and try again.',
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, Permissions, type AppProps } from '@app-platform/web-api'
+import { Alert, Loading, PageHeader, PageStack } from '@app-platform/ui-kit'
 import {
   closePeriod, createAccount, listAccounts, listEntries, listPeriods, postEntry, reverseEntry, trialBalance,
   type Account, type Entry, type Period, type TrialBalance,
@@ -82,41 +83,54 @@ export default function LedgerApp({ permissions }: AppProps) {
     return false
   }
 
-  if (loading) return <p role="status">Loading the ledger…</p>
+  if (loading) return <Loading>Loading the ledger…</Loading>
+
+  const canPost = can(Permissions.ledger.entryPost)
 
   return (
-    <main>
-      <h1>Ledger</h1>
-
-      {error && <p role="alert">{error}</p>}
-
-      <PeriodSection
-        periods={periods}
-        onClose={can(Permissions.ledger.periodClose) ? (through) => run(() => closePeriod(through)) : null}
+    <PageStack>
+      <PageHeader
+        title="Ledger"
+        description="Double-entry books: every entry balances, posted entries are corrected by reversal, and a closed period stays closed."
       />
 
-      <AccountsSection
-        accounts={accounts}
-        onCreate={
-          can(Permissions.ledger.accountCreate)
-            ? (code, name, type) => run(() => createAccount(code, name, type))
-            : null
-        }
-      />
+      {error && <Alert tone="danger">{error}</Alert>}
 
-      {can(Permissions.ledger.entryPost) && (
-        <PostEntryForm
-          accounts={accounts}
-          onPost={(date, memo, currency, lines, key) => run(() => postEntry(date, memo, currency, lines, key))}
-        />
-      )}
+      {/* Two columns on a wide screen: the work (posting, the journal) on the left, the state of the
+          books (balances, accounts, periods) on the right. One column on a phone, work first. */}
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+        <div className="grid min-w-0 content-start gap-6">
+          {canPost && (
+            <PostEntryForm
+              accounts={accounts}
+              onPost={(date, memo, currency, lines, key) => run(() => postEntry(date, memo, currency, lines, key))}
+            />
+          )}
 
-      <JournalSection
-        entries={entries}
-        onReverse={can(Permissions.ledger.entryReverse) ? (entryId) => run(() => reverseEntry(entryId)) : null}
-      />
+          <JournalSection
+            entries={entries}
+            onReverse={can(Permissions.ledger.entryReverse) ? (entryId) => run(() => reverseEntry(entryId)) : null}
+          />
+        </div>
 
-      <TrialBalanceSection balance={balance} asOf={asOf} onAsOfChange={setAsOf} />
-    </main>
+        <div className="grid min-w-0 content-start gap-6">
+          <TrialBalanceSection balance={balance} asOf={asOf} onAsOfChange={setAsOf} />
+
+          <AccountsSection
+            accounts={accounts}
+            onCreate={
+              can(Permissions.ledger.accountCreate)
+                ? (code, name, type) => run(() => createAccount(code, name, type))
+                : null
+            }
+          />
+
+          <PeriodSection
+            periods={periods}
+            onClose={can(Permissions.ledger.periodClose) ? (through) => run(() => closePeriod(through)) : null}
+          />
+        </div>
+      </div>
+    </PageStack>
   )
 }

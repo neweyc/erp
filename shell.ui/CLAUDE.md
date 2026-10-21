@@ -40,7 +40,10 @@ invite acceptance, password reset — still get the help provider.
 - **Dialogs**: `dismissible={false}` on anything holding a part-filled form (a backdrop
   click otherwise discards entry with no undo). Height capped in `svh`, never `vh` —
   `vh` measures the viewport behind mobile browser chrome and puts the submit button
-  out of reach on a phone. A test scans every form dialog for both.
+  out of reach on a phone. `src/dialog-rules.test.ts` scans every form dialog in the shell and
+  the apps for `dismissible={false}`; the `svh` cap lives in the kit's `Dialog` and is tested there.
+- **Pages render no `<main>`.** The shell frame owns the one `<main>`; a page starts with the kit's
+  `PageHeader`, whose title is the page's only `h1`.
 - Idle-timeout warning is measured against the **wall clock**, so a laptop that slept
   counts as idle for the time it slept.
 

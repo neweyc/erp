@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { Loading } from '@app-platform/ui-kit'
 import { AppRoutes } from './components/app-routes'
 import { AppShell } from './components/app-shell'
 import { SessionProvider, useSession } from './components/session-provider'
@@ -22,7 +23,7 @@ function SignedOutRoutes() {
 function Authenticated() {
   const { session, loading } = useSession()
 
-  if (loading) return <p role="status">Loading…</p>
+  if (loading) return <Loading className="min-h-svh justify-center">Loading…</Loading>
   if (!session) return <SignedOutRoutes />
 
   return (

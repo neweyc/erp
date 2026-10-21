@@ -18,7 +18,7 @@ does, and the way to do any step by hand. After the prerequisites in Part 1:
 
 ```bash
 bin/dev setup                                   # build, settings, database (safe to re-run)
-bin/dev operator create you@example.com         # asks for a password; prints the MFA secret ONCE
+bin/dev operator create you@example.com         # asks for a password; prints the MFA QR code ONCE
 bin/dev up                                      # database + four APIs + shell, in the background
 bin/dev tenant create "Acme Fire" admin@acme.test
                                                 # asks for the operator password and a current code,
@@ -56,6 +56,8 @@ by the process listening on each port.
 | shell | **http://localhost:5173** | The app you open in the browser. It forwards `/api/core`, `/api/tickets` and `/api/ledger` to the APIs above |
 
 Port 5433, not 5432, so it cannot collide with a PostgreSQL you may already run.
+If 5433 is taken as well, run the first setup as `DEV_DB_PORT=5434 bin/dev setup`; the container
+and `.local/dev.env` keep that port from then on.
 
 The API ports are fixed: the shell's proxy (`shell.ui/vite.config.ts`) expects them. The browser
 test suite (`e2e/`) uses the **same** API ports with its own database, so stop your local services
@@ -182,8 +184,10 @@ printf '%s\n' "$OPERATOR_PASSWORD" | \
   dotnet run --project platform.api --no-launch-profile -- create-platform-user you@example.com
 ```
 
-It prints an **MFA secret** and an `otpauth://` link, **once**. Add it to your authenticator app now,
-using the app's "enter a setup key" option with the secret, account `you@example.com`, time-based.
+It prints an **MFA secret**, its `otpauth://` link and the same link as a **QR code**, **once**. Scan
+the QR code with your authenticator app now. If the terminal window is too small to show it whole,
+widen it, or use the app's "enter a setup key" option with the secret, account `you@example.com`,
+time-based.
 The platform stores it only encrypted; if you lose it, see Troubleshooting.
 
 ## Part 6 — First run: start everything, then create a tenant

@@ -37,10 +37,12 @@ jobs:
       # `build` is `tsc -b` in every workspace, and it is what type-checks the TEST files. vitest
       # never type-checks, so running only the tests would let a type error in a spec reach main.
       - run: npm run build --workspace @app-platform/web-api
+      - run: npm run build --workspace @app-platform/ui-kit
       - run: npm run build --workspace @app-platform/tickets-ui
       - run: npm run build --workspace @app-platform/ledger-ui
       - run: npm run build --workspace @app-platform/shell
       - run: npm run test --workspace @app-platform/web-api
+      - run: npm run test --workspace @app-platform/ui-kit
       - run: npm run test --workspace @app-platform/tickets-ui
       - run: npm run test --workspace @app-platform/ledger-ui
       - run: npm run test --workspace @app-platform/shell

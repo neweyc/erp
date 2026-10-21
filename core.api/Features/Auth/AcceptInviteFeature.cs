@@ -19,7 +19,7 @@ public static class AcceptInviteFeature
     public record AcceptInviteCommand(string? Token, string? Password);
 
     public class AcceptInviteCommandHandler(
-        IAuthService auth, IBackgroundTenantScope tenantScope, IAuditActorScope auditActor,
+        IAuthService auth, IUserService users, IBackgroundTenantScope tenantScope, IAuditActorScope auditActor,
         TimeProvider clock)
     {
         /// <summary>
@@ -51,10 +51,21 @@ public static class AcceptInviteFeature
             // tenant without the caller having said which one they are.
             tenantScope.UseTenant(token.TenantId);
 
+            // Accepting activates an account, so it waits its turn behind any access change in
+            // the tenant (docs/permissions.md §6). Without the lock, an administrator could
+            // deactivate this account between the read below and the save, and the save would
+            // set it active again.
+            await using var transaction = await users.BeginTransactionAsync(ct);
+            await users.LockRoleChangesAsync(ct);
+
             // By the token's user id, not by an address the caller supplied: the token is the
             // only thing here that has been authenticated.
             var user = await auth.FindUserAsync(token.UserId, ct);
-            if (user is null)
+
+            // Only an account still waiting for its invitation can accept one. A deactivated
+            // account's links stop working, and an active account's spare links (an invitation
+            // sent twice) cannot reset its password. Same message as a bad token, for the same reason.
+            if (user is null || user.Status != UserStatus.Invited)
                 return CommandResult.Invalid(AuthProblems.InvalidToken, "This invitation link is not valid.");
 
             // The person accepting is the actor: the token has just authenticated them, and there
@@ -69,6 +80,7 @@ public static class AcceptInviteFeature
             token.UsedAt = clock.GetUtcNow();
 
             await auth.SaveAsync(ct);
+            await transaction.CommitAsync(ct);
 
             return CommandResult.Ok(new { email = user.Email });
         }
@@ -81,12 +93,13 @@ public static class AcceptInviteFeature
             async (
                 AcceptInviteCommand cmd,
                 [FromServices] IAuthService auth,
+                [FromServices] IUserService users,
                 [FromServices] IBackgroundTenantScope tenantScope,
                 [FromServices] IAuditActorScope auditActor,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new AcceptInviteCommandHandler(auth, tenantScope, auditActor, clock);
+                var handler = new AcceptInviteCommandHandler(auth, users, tenantScope, auditActor, clock);
                 return (await handler.Handle(cmd, ct)).CreateIResult();
             })
             // Anonymous by necessity: the person has no session yet, and the token is what

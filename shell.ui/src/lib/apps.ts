@@ -1,5 +1,6 @@
 import type { ComponentType, LazyExoticComponent } from 'react'
 import { lazy } from 'react'
+import { BookOpen, Ticket } from 'lucide-react'
 import { Permissions, type AppProps, type Permission } from '@app-platform/web-api'
 
 /**
@@ -14,6 +15,10 @@ export interface AppDefinition {
   /** Matches the entitlement name the platform grants. */
   readonly id: string
   readonly name: string
+  /** One line saying what the app is for, on the dashboard's card for it. */
+  readonly description: string
+  /** Shown beside the name in the navigation and on the dashboard. */
+  readonly icon: ComponentType<{ className?: string }>
   /** Route prefix. Every route the app owns lives under it. */
   readonly path: string
   /**
@@ -37,6 +42,8 @@ export const APPS: readonly AppDefinition[] = [
   {
     id: 'tickets',
     name: 'Tickets',
+    description: 'Raise, assign and close requests for help.',
+    icon: Ticket,
     path: '/tickets',
     permission: Permissions.tickets.ticketRead,
     load: () => import('@app-platform/tickets-ui'),
@@ -44,6 +51,8 @@ export const APPS: readonly AppDefinition[] = [
   {
     id: 'ledger',
     name: 'Ledger',
+    description: 'Post journal entries, read the trial balance, close the books.',
+    icon: BookOpen,
     path: '/ledger',
     permission: Permissions.ledger.read,
     load: () => import('@app-platform/ledger-ui'),

@@ -136,7 +136,7 @@ test('the administrator gives themselves a tickets role on the Users page', asyn
   // Back on the Users page it was on, now showing the role it gave itself alongside its own.
   await expect(page.getByRole('row', { name: new RegExp(ADMIN_EMAIL) }).getByRole('cell', { name: 'Administrator, Agent' }))
     .toBeVisible()
-  await expect(page.getByRole('link', { name: 'Tickets' })).toBeVisible()
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Tickets' })).toBeVisible()
 
   // And the API agrees, on a fresh session.
   const tenant = await signInAsTenantAdmin(TICKETS)

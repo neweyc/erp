@@ -11,6 +11,10 @@ namespace AppPlatform.Core.Services;
 /// The caller adds the returned row to its context and puts the plaintext in the staged email,
 /// committing both in ONE save with the invited account. The row holds only a hash; the plaintext
 /// exists in the email and in that outbox payload until the outbox prunes it.
+///
+/// The email payloads are built here too, so the three paths that send one cannot drift. Set the
+/// token's <see cref="UserToken.MessageId"/> to the staged message's id: it is how the Users page
+/// reports that email's delivery.
 /// </summary>
 public static class InvitationToken
 {
@@ -35,4 +39,15 @@ public static class InvitationToken
 
         return (row, plaintext);
     }
+
+    /// <summary>The email inviting someone into an organisation that already exists.</summary>
+    public static string EmailPayload(string userPublicId, string plaintext)
+        => Payload("invite", userPublicId, plaintext);
+
+    /// <summary>The email inviting a new organisation's first administrator.</summary>
+    public static string TenantAdminEmailPayload(string userPublicId, string plaintext)
+        => Payload("tenant_admin_invite", userPublicId, plaintext);
+
+    private static string Payload(string kind, string userPublicId, string plaintext)
+        => $$"""{"kind":"{{kind}}","userId":"{{userPublicId}}","token":"{{plaintext}}"}""";
 }

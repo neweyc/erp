@@ -1,4 +1,5 @@
 using AppPlatform.Core.Data;
+using AppPlatform.Outbox;
 using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,9 @@ public class EFEmployeeService(CoreDbContext db) : IEmployeeService
     // bypass the tenant query filter entirely.
     public Task<Employee?> FindByPublicIdAsync(string publicId, CancellationToken ct = default)
         => db.Employees.FirstOrDefaultAsync(e => e.PublicId == publicId && !e.Deleted, ct);
+
+    public Task<Employee?> FindByIdAsync(Guid id, CancellationToken ct = default)
+        => db.Employees.FirstOrDefaultAsync(e => e.Id == id && !e.Deleted, ct);
 
     public Task<bool> EmailInUseAsync(string email, CancellationToken ct = default)
         => db.Employees.AnyAsync(e => e.Email == email && !e.Deleted, ct);
@@ -61,6 +65,20 @@ public class EFUserService(CoreDbContext db, ITenantProvider tenant) : IUserServ
 
     public void Add(User user) => db.Users.Add(user);
 
+    public Task<List<Session>> ListLiveSessionsAsync(Guid userId, CancellationToken ct = default)
+        => db.Sessions.Where(s => s.UserId == userId && s.RevokedAt == null).ToListAsync(ct);
+
+    public Task<List<UserToken>> ListInvitationTokensAsync(IReadOnlyCollection<Guid> userIds, CancellationToken ct = default)
+        => db.UserTokens.Where(t => t.Purpose == TokenPurpose.Invite && userIds.Contains(t.UserId)).ToListAsync(ct);
+
+    public Task<List<InvitationEmail>> ListInvitationEmailsAsync(
+        IReadOnlyCollection<Guid> messageIds, CancellationToken ct = default)
+        // Only the status leaves the database: the payload holds the plaintext link.
+        => db.Set<OutboxMessage>()
+            .Where(m => messageIds.Contains(m.Id))
+            .Select(m => new InvitationEmail(m.Id, m.Status))
+            .ToListAsync(ct);
+
     public void AddToken(UserToken token) => db.UserTokens.Add(token);
 
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default)
@@ -76,6 +94,15 @@ public class EFUserService(CoreDbContext db, ITenantProvider tenant) : IUserServ
         // SQL because EF has no advisory locks; it reads and writes no rows, so the missing query
         // filter does not matter, and the tenant is bound into the key explicitly.
         await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({RoleChangeLockKey(tenantId)}))", ct);
+    }
+
+    public async Task ShareRoleChangeLockAsync(CancellationToken ct = default)
+    {
+        var tenantId = tenant.TenantId
+            ?? throw new InvalidOperationException("Cannot lock role changes without a tenant scope.");
+
+        // The shared form of the lock above, on the same key.
+        await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock_shared(hashtext({RoleChangeLockKey(tenantId)}))", ct);
     }
 
     /// <summary>Public so the real-PostgreSQL tests can hold the same lock the handler takes.</summary>

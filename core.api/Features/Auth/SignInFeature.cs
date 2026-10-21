@@ -18,7 +18,7 @@ public static class SignInFeature
     public record SignInOutcome(Guid? SessionId, string? Access, string? ProblemCode);
 
     public class SignInCommandHandler(
-        IAuthService auth, IRoleService roles, IAuditActorScope auditActor, TimeProvider clock)
+        IAuthService auth, IUserService users, IRoleService roles, IAuditActorScope auditActor, TimeProvider clock)
     {
         /// <summary>Matches the tenant-user lifetime in docs/auth-and-access.md.</summary>
         public static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(7);
@@ -30,6 +30,13 @@ public static class SignInFeature
 
             if (string.IsNullOrWhiteSpace(email) || string.IsNullOrEmpty(cmd.Password))
                 return Failed();
+
+            // Held, shared, from reading the account until the session is committed, so a deactivation
+            // cannot run in between and miss the session this creates (IUserService.ShareRoleChangeLockAsync).
+            // Shared, so sign-ins never wait for each other, only for an access change in progress.
+            // Taken for unknown addresses too, so it does not make them answer faster.
+            await using var transaction = await users.BeginTransactionAsync(ct);
+            await users.ShareRoleChangeLockAsync(ct);
 
             var user = await auth.FindByEmailAsync(email, ct);
 
@@ -67,9 +74,13 @@ public static class SignInFeature
             await auth.SaveAsync(ct);
 
             // What the user's roles grant now, recorded in the cookie; a later difference ends the
-            // session as role_changed (docs/permissions.md §5). Same rule the session check uses.
+            // session as role_changed (docs/permissions.md §5). Same rule the session check uses,
+            // read under the lock so it matches the roles the session starts with.
             var customRoles = RoleRules.ByKey(await roles.ListAsync(ct));
-            return new SignInOutcome(session.Id, Access.Stamp(RoleRules.GrantedBy(user.Roles, customRoles)), null);
+            var access = Access.Stamp(RoleRules.GrantedBy(user.Roles, customRoles));
+
+            await transaction.CommitAsync(ct);
+            return new SignInOutcome(session.Id, access, null);
         }
 
         private static SignInOutcome Failed()
@@ -88,6 +99,7 @@ public static class SignInFeature
                 SignInCommand cmd,
                 HttpContext http,
                 [FromServices] IAuthService auth,
+                [FromServices] IUserService users,
                 [FromServices] IRoleService roles,
                 [FromServices] IBackgroundTenantScope tenantScope,
                 [FromServices] ITenantResolver tenants,
@@ -104,7 +116,7 @@ public static class SignInFeature
 
                 tenantScope.UseTenant(id);
 
-                var handler = new SignInCommandHandler(auth, roles, auditActor, clock);
+                var handler = new SignInCommandHandler(auth, users, roles, auditActor, clock);
                 var outcome = await handler.Handle(id, cmd, ct);
 
                 if (outcome.SessionId is not { } sessionId)

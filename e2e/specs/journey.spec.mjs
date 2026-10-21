@@ -26,7 +26,7 @@ test.describe('walking skeleton', () => {
   test('create, assign and close a ticket entirely through the UI', async ({ page }) => {
     await signIn(page)
 
-    await page.getByRole('link', { name: 'Tickets' }).click()
+    await page.getByRole('navigation').getByRole('link', { name: 'Tickets' }).click()
     await expect(page.getByRole('heading', { name: 'Tickets', level: 1 })).toBeVisible()
 
     // CREATE — through the form, not a fetch. A fetch from the page proves the API works; it does
@@ -60,7 +60,7 @@ test.describe('walking skeleton', () => {
 
   test('a closed ticket cannot be reassigned or closed again from the UI', async ({ page }) => {
     await signIn(page)
-    await page.getByRole('link', { name: 'Tickets' }).click()
+    await page.getByRole('navigation').getByRole('link', { name: 'Tickets' }).click()
 
     const title = `Already handled ${Date.now()}`
     await page.getByLabel('New ticket').fill(title)
@@ -91,10 +91,10 @@ test.describe('walking skeleton', () => {
     // The dashboard names the tenant, which means the session endpoint answered and the cookie
     // survived the round trip.
     await expect(page.getByRole('heading', { name: 'E2E Ltd' })).toBeVisible()
-    await expect(page.getByText(ADMIN_EMAIL)).toBeVisible()
+    await expect(page.getByRole('main').getByText(ADMIN_EMAIL)).toBeVisible()
 
     // Licensed, so it is in the nav. The bundle is fetched only on navigation.
-    await expect(page.getByRole('link', { name: 'Tickets' })).toBeVisible()
+    await expect(page.getByRole('navigation').getByRole('link', { name: 'Tickets' })).toBeVisible()
   })
 
   test('the csrf token issued at sign-in is usable for a mutation', async ({ page, request }) => {

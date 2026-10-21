@@ -78,6 +78,10 @@ public static class CoreProblems
     public const string RoleNameTaken = "role_name_taken";
     /// <summary>A role cannot be deleted while anyone holds it.</summary>
     public const string RoleInUse = "role_in_use";
+    /// <summary>An administrator cannot deactivate their own account; another one must.</summary>
+    public const string CannotDeactivateSelf = "cannot_deactivate_self";
+    /// <summary>Only an account that has not yet accepted its invitation can be sent one again.</summary>
+    public const string NotInvited = "not_invited";
     /// <summary>Re-exported from the permission check, so a handler refusing something itself uses the same code.</summary>
     public const string NotPermitted = AuthProblem.NotPermitted;
 

@@ -32,13 +32,14 @@ public class User : IAuditable
     public string[] Roles { get; set; } = [];
 
     /// <summary>
-    /// Advanced by every role change; it numbers the <c>user.roles_changed</c> events.
+    /// Advanced by every change to the user's access (roles, deactivation, reactivation); it numbers
+    /// the <c>user.roles_changed</c>, <c>user.deactivated</c> and <c>user.reactivated</c> events.
     ///
     /// Deliberately NOT a concurrency token. EF puts a token in the WHERE clause of EVERY update to
-    /// the row, so an invitation accepted while an administrator changed the user's roles would
-    /// match no row and fail. Role changes are serialized instead by a per-tenant advisory lock,
-    /// taken before anything is read (ChangeUserRolesFeature), which leaves other writes to the
-    /// user unaffected.
+    /// the row, so a password rehash at sign-in while an administrator changed the user's roles
+    /// would match no row and fail. Access changes are serialized instead by a per-tenant advisory
+    /// lock, taken before anything is read (ChangeUserRolesFeature), which leaves other writes to
+    /// the user unaffected.
     /// </summary>
     public long AccessVersion { get; set; } = 1;
 
