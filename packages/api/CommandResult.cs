@@ -78,6 +78,8 @@ public static class CoreProblems
     public const string LastAdmin = "last_admin";
     /// <summary>Another of the tenant's roles already has that name (ignoring case).</summary>
     public const string RoleNameTaken = "role_name_taken";
+    /// <summary>A department (among its siblings), job title or location already has that name, ignoring case.</summary>
+    public const string CatalogNameTaken = "catalog_name_taken";
     /// <summary>A role cannot be deleted while anyone holds it.</summary>
     public const string RoleInUse = "role_in_use";
     /// <summary>An administrator cannot deactivate their own account; another one must.</summary>

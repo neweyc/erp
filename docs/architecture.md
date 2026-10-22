@@ -50,7 +50,7 @@ also why the enforcement here is not optional.
 ## 3. How apps share data
 
 Each project owns a schema. Core publishes **versioned read views** — `core_v1.employee`,
-`core_v1.department`, `core_v1.company`, `core_v1.job_title` — and an app may map its own
+`core_v1.department`, `core_v1.company`, `core_v1.job_title`, `core_v1.location` — and an app may map its own
 schema plus those views and nothing else. No app writes an employee; writes go through
 core's API.
 

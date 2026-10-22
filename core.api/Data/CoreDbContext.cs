@@ -28,6 +28,9 @@ public class CoreDbContext(
 
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<Employee> Employees => Set<Employee>();
+    public DbSet<Department> Departments => Set<Department>();
+    public DbSet<JobTitle> JobTitles => Set<JobTitle>();
+    public DbSet<Location> Locations => Set<Location>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
@@ -85,6 +88,78 @@ public class CoreDbContext(
 
             // Carries the tenant, so the database refuses an employee pointed at another
             // tenant's company rather than merely making it unlikely.
+            e.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.CompanyId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id });
+
+            // Placements carry the tenant like every reference here, so the database itself refuses
+            // an employee placed in another tenant's department. Restrict: a catalog row is never
+            // deleted, only deactivated.
+            e.HasOne<Department>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.DepartmentId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<JobTitle>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.JobTitleId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Location>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.LocationId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasAlternateKey(x => new { x.TenantId, x.Id });
+        });
+
+        // The catalogs. Names are unique ignoring case (a department's among its siblings); EF cannot
+        // model an index on lower(name), so the AddCatalogs migration creates those in SQL. Catalog
+        // writes run under the tenant's catalog lock, so the handlers' own checks are what refuse a
+        // duplicate; the indexes are the backstop for anything that skips the lock.
+        modelBuilder.Entity<Department>(e =>
+        {
+            e.ToTable("department", Schema);
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(Department.NameMaxLength);
+            e.HasPublicId("dept");
+            e.HasIndex(x => x.TenantId);
+
+            e.HasOne<Company>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.CompanyId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id });
+
+            // The parent is in the same tenant, enforced here and not only by the handler.
+            e.HasOne<Department>()
+                .WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.ParentId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasAlternateKey(x => new { x.TenantId, x.Id });
+        });
+
+        modelBuilder.Entity<JobTitle>(e =>
+        {
+            e.ToTable("job_title", Schema);
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(JobTitle.NameMaxLength);
+            e.HasPublicId("title");
+            e.HasIndex(x => x.TenantId);
+            e.HasAlternateKey(x => new { x.TenantId, x.Id });
+        });
+
+        modelBuilder.Entity<Location>(e =>
+        {
+            e.ToTable("location", Schema);
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(Location.NameMaxLength);
+            e.HasPublicId("loc");
+            e.HasIndex(x => x.TenantId);
+
             e.HasOne<Company>()
                 .WithMany()
                 .HasForeignKey(x => new { x.TenantId, x.CompanyId })

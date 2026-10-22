@@ -52,6 +52,7 @@ owner's rights and 99-verify reports it if that owner is not `ap_owner`:
 | core | `AddSessionsAndIdentityV1` | `identity_v1` functions (it also creates the session table, so the whole migration runs as `ap_owner`) |
 | core | `AddAppRolesToSessionContext` | recreates `identity_v1.session_context` with `app_roles`, and restores its grants |
 | core | `AddRolesToSessionContext` | recreates `identity_v1.session_context` with `roles` and `role_permissions`, and restores its grants. Apply it between `AddCustomRoles` and `DropUserRoleColumns`: the old function reads the columns the second drops |
+| core | `AddCatalogViews` | the `core_v1.department`, `core_v1.job_title` and `core_v1.location` views, and `core_v1.employee` recreated with each employee's placement. Apply it after `AddCatalogs`, which creates the tables they read |
 | platform | `AddErrorFeedPublishedFunction` | `platform_v1.record_error`; kept separate from `AddErrorFeed`, the table |
 
 Every other migration is applied as its service's `ap_<schema>_migrate` role. A new migration that

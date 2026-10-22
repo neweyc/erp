@@ -8,8 +8,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace AppPlatform.Core.Features.Employees;
 
 /// <summary>
-/// Corrects an employee's name or email address. The whole record is sent, so what is saved is
-/// exactly what the form showed; a blank email removes it.
+/// Corrects an employee's name, email address and placement (department, job title, location). The
+/// whole record is sent, so what is saved is exactly what the form showed: a blank email, or a
+/// missing department, removes it.
 ///
 /// It does NOT change the email an account signs in with. A sign-in address is a credential:
 /// changing it here would let anyone allowed to edit the roster move someone's sign-in to an
@@ -24,9 +25,12 @@ namespace AppPlatform.Core.Features.Employees;
 /// </summary>
 public static class UpdateEmployeeFeature
 {
-    public record UpdateEmployeeCommand(string? FirstName, string? LastName, string? Email);
+    public record UpdateEmployeeCommand(
+        string? FirstName, string? LastName, string? Email,
+        string? DepartmentId = null, string? JobTitleId = null, string? LocationId = null);
 
-    public class UpdateEmployeeCommandHandler(IEmployeeService employees, IUserService users, IOutbox outbox)
+    public class UpdateEmployeeCommandHandler(
+        IEmployeeService employees, IUserService users, ICatalogService catalogs, IOutbox outbox)
     {
         public async Task<CommandResult> Handle(
             Caller caller, string employeePublicId, UpdateEmployeeCommand cmd, CancellationToken ct = default)
@@ -45,9 +49,16 @@ public static class UpdateEmployeeFeature
             if (employee is null)
                 return CommandResult.NotFound(CoreProblems.NotFound, "No such employee.");
 
+            // Resolved against the employee as they are, so a retired department they already have stays allowed.
+            var (placement, placementProblem) = await EmployeePlacement.ResolveAsync(
+                cmd.DepartmentId, cmd.JobTitleId, cmd.LocationId, employee, catalogs, ct);
+            if (placement is null)
+                return CommandResult.Invalid(CoreProblems.ValidationFailed, placementProblem!);
+
             // Nothing changed: no save, and no event for a change that never happened.
             if (employee.FirstName == details.FirstName && employee.LastName == details.LastName
-                && employee.Email == details.Email)
+                && employee.Email == details.Email
+                && placement == new EmployeePlacement.Placement(employee.DepartmentId, employee.JobTitleId, employee.LocationId))
             {
                 return CommandResult.Ok(new { employeeId = employee.PublicId });
             }
@@ -62,6 +73,9 @@ public static class UpdateEmployeeFeature
             employee.FirstName = details.FirstName;
             employee.LastName = details.LastName;
             employee.Email = details.Email;
+            employee.DepartmentId = placement.DepartmentId;
+            employee.JobTitleId = placement.JobTitleId;
+            employee.LocationId = placement.LocationId;
             employee.Version++;
 
             outbox.AddEvent("employee", employee.PublicId, employee.Version, "employee.updated",
@@ -84,10 +98,11 @@ public static class UpdateEmployeeFeature
                 [FromServices] ICallerContext callerContext,
                 [FromServices] IEmployeeService employees,
                 [FromServices] IUserService users,
+                [FromServices] ICatalogService catalogs,
                 [FromServices] IOutbox outbox,
                 CancellationToken ct) =>
             {
-                var handler = new UpdateEmployeeCommandHandler(employees, users, outbox);
+                var handler = new UpdateEmployeeCommandHandler(employees, users, catalogs, outbox);
                 return (await handler.Handle(callerContext.Require(), employeeId, cmd, ct)).CreateIResult();
             })
             .RequireAuthorization()

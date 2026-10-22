@@ -220,7 +220,7 @@ escape hatch: `docs/architecture.md`.
 - `platform` — operator tables. `core` — org/people. `identity` — users, sessions,
   tokens, MFA. `tickets` — the first app. `ledger` — the second. One schema per app thereafter.
 - **Core publishes versioned read views**: `core_v1.employee`, `core_v1.department`,
-  `core_v1.company`, `core_v1.job_title`. Thin, denormalized, display-safe, carrying
+  `core_v1.company`, `core_v1.job_title`, `core_v1.location`. Thin, denormalized, display-safe, carrying
   `tenant_id` so a consuming app applies its ordinary `ITenantScoped` filter to them
   with no new machinery.
 - **An app may map its own schema plus `core_v1`, and nothing else.** Never a `core`

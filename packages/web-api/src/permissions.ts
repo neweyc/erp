@@ -15,6 +15,7 @@ export const Permissions = {
     userRead: 'core.user.read',
     userManage: 'core.user.manage',
     roleManage: 'core.role.manage',
+    catalogManage: 'core.catalog.manage',
   },
   tickets: {
     ticketRead: 'tickets.ticket.read',

@@ -21,6 +21,7 @@ const admin: Session = {
 
 const employee = (id: string, first: string, last: string, email: string | null, status = 'Active') => ({
   employeeId: id, firstName: first, lastName: last, displayName: `${first} ${last}`, email, status,
+  department: null, jobTitle: null, location: null,
 })
 
 const ada = employee('emp_ada', 'Ada', 'Lovelace', 'ada@acme.test')
@@ -43,6 +44,9 @@ function stubApi(handlers: Record<string, Handler>) {
     'GET /api/core/v1/employees?includeTerminated=false': () => ({ body: [ada, grace, linus] }),
     'GET /api/core/v1/users': () => ({ body: [graceAccount] }),
     'GET /api/core/v1/roles': () => ({ body: roles }),
+    'GET /api/core/v1/departments': () => ({ body: [] }),
+    'GET /api/core/v1/job-titles': () => ({ body: [] }),
+    'GET /api/core/v1/locations': () => ({ body: [] }),
     ...handlers,
   }
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -130,7 +134,7 @@ describe('employees page', () => {
 
     expect(await screen.findByText('Margaret Hamilton is on the roster, and an invitation is on its way.')).toBeInTheDocument()
     expect(sent(fetchMock, 'POST', '/api/core/v1/employees')).toEqual([
-      { firstName: 'Margaret', lastName: 'Hamilton', email: 'margaret@acme.test' },
+      { firstName: 'Margaret', lastName: 'Hamilton', email: 'margaret@acme.test', departmentId: null, jobTitleId: null, locationId: null },
     ])
     expect(sent(fetchMock, 'POST', '/api/core/v1/employees/emp_new/invite')).toEqual([
       { roles: ['core:member'], email: 'margaret@acme.test' },
@@ -214,5 +218,74 @@ describe('employees page', () => {
     await screen.findByRole('row', { name: /Ada Lovelace/ })
     expect(screen.queryByRole('columnheader', { name: 'Access' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Add employee|Edit|Terminate|Give/ })).not.toBeInTheDocument()
+  })
+
+  describe('placement', () => {
+    const departments = [
+      { departmentId: 'dept_eng', name: 'Engineering', parentId: null, depth: 1, path: 'Engineering', active: true },
+      { departmentId: 'dept_plat', name: 'Platform', parentId: 'dept_eng', depth: 2, path: 'Engineering › Platform', active: true },
+      { departmentId: 'dept_old', name: 'Old division', parentId: null, depth: 1, path: 'Old division', active: false },
+    ]
+    const jobTitles = [{ jobTitleId: 'title_eng', name: 'Engineer', active: true }]
+    const locations = [{ locationId: 'loc_hq', name: 'Head office', active: true }]
+    const catalogs = {
+      'GET /api/core/v1/departments': () => ({ body: departments }),
+      'GET /api/core/v1/job-titles': () => ({ body: jobTitles }),
+      'GET /api/core/v1/locations': () => ({ body: locations }),
+    }
+
+    it('shows where each person sits', async () => {
+      const placed = {
+        ...grace,
+        jobTitle: { id: 'title_eng', name: 'Engineer', active: true },
+        department: { id: 'dept_plat', name: 'Engineering › Platform', active: true },
+        location: { id: 'loc_hq', name: 'Head office', active: true },
+      }
+      stubApi({ ...catalogs, 'GET /api/core/v1/employees?includeTerminated=false': () => ({ body: [ada, placed] }) })
+      await renderEmployees()
+
+      expect(screen.getByRole('cell', { name: 'Engineer in Engineering › Platform at Head office' })).toBeInTheDocument()
+      expect(within(screen.getByRole('row', { name: /Ada Lovelace/ })).getByText('Not set')).toBeInTheDocument()
+    })
+
+    it('places someone when adding them, picking from the lists only', async () => {
+      const fetchMock = stubApi({ ...catalogs, 'POST /api/core/v1/employees': () => ({ body: { employeeId: 'emp_new' } }) })
+      const user = userEvent.setup()
+      await renderEmployees()
+
+      await user.click(await screen.findByRole('button', { name: 'Add employee' }))
+      await user.type(screen.getByLabelText('First name'), 'Margaret')
+      await user.type(screen.getByLabelText('Last name'), 'Hamilton')
+      await user.click(screen.getByRole('checkbox', { name: /Send an invitation/ }))
+      // A retired department is not offered to someone new.
+      expect(within(screen.getByLabelText('Department')).queryByRole('option', { name: /Old division/ })).not.toBeInTheDocument()
+      await user.selectOptions(screen.getByLabelText('Department'), 'Engineering › Platform')
+      await user.selectOptions(screen.getByLabelText('Job title'), 'Engineer')
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add employee' }))
+
+      expect(await screen.findByText('Margaret Hamilton is on the roster.')).toBeInTheDocument()
+      expect(sent(fetchMock, 'POST', '/api/core/v1/employees')).toEqual([
+        { firstName: 'Margaret', lastName: 'Hamilton', email: '', departmentId: 'dept_plat', jobTitleId: 'title_eng', locationId: null },
+      ])
+    })
+
+    it('keeps a retired department on offer for someone already in it', async () => {
+      const inOld = { ...grace, department: { id: 'dept_old', name: 'Old division', active: false } }
+      const fetchMock = stubApi({
+        ...catalogs,
+        'GET /api/core/v1/employees?includeTerminated=false': () => ({ body: [ada, inOld] }),
+        'PUT /api/core/v1/employees/emp_grace': () => ({ body: { employeeId: 'emp_grace' } }),
+      })
+      const user = userEvent.setup()
+      await renderEmployees()
+
+      await user.click(screen.getByRole('button', { name: 'Edit Grace Hopper' }))
+      expect(screen.getByLabelText('Department')).toHaveDisplayValue('Old division (inactive)')
+      await user.type(screen.getByLabelText('First name'), 'e')
+      await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+      await screen.findByText('Gracee Hopper is updated.')
+      expect(sent(fetchMock, 'PUT', '/api/core/v1/employees/emp_grace')[0]).toMatchObject({ departmentId: 'dept_old' })
+    })
   })
 })

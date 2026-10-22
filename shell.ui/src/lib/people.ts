@@ -1,3 +1,4 @@
+import type { Placement } from './catalogs'
 import type { BadgeTone } from '@app-platform/ui-kit'
 
 /** One row of GET /api/core/v1/users. */
@@ -27,6 +28,9 @@ export interface EmployeeRow {
   readonly displayName: string
   readonly email: string | null
   readonly status: 'Active' | 'OnLeave' | 'Terminated'
+  readonly department: Placement | null
+  readonly jobTitle: Placement | null
+  readonly location: Placement | null
 }
 
 /**

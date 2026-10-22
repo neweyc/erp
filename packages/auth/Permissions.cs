@@ -30,6 +30,8 @@ public static class Permissions
         public const string UserRead = "core.user.read";
         public const string UserManage = "core.user.manage";
         public const string RoleManage = "core.role.manage";
+        /// <summary>Departments, job titles and locations: the lists employees are placed from.</summary>
+        public const string CatalogManage = "core.catalog.manage";
     }
 
     public static class Tickets
@@ -73,11 +75,12 @@ public static class PermissionCatalogue
     [
         new(Permissions.Core.EmployeeRead, "See the employee roster"),
         new(Permissions.Core.EmployeeCreate, "Add employees"),
-        new(Permissions.Core.EmployeeUpdate, "Edit employees' names and email addresses"),
+        new(Permissions.Core.EmployeeUpdate, "Edit employees' names, email addresses, departments, job titles and locations"),
         new(Permissions.Core.EmployeeTerminate, "Terminate employees, which also ends their access"),
         new(Permissions.Core.UserRead, "See accounts, their roles, and the roles defined"),
         new(Permissions.Core.UserManage, "Invite people and change anyone's roles"),
         new(Permissions.Core.RoleManage, "Create, edit and delete the organization's own roles"),
+        new(Permissions.Core.CatalogManage, "Add, rename, move and deactivate departments, job titles and locations"),
 
         new(Permissions.Tickets.TicketRead, "See tickets"),
         new(Permissions.Tickets.TicketCreate, "Raise tickets"),
@@ -124,9 +127,12 @@ public static class BuiltInRoles
             Permissions.Core.EmployeeRead, Permissions.Core.EmployeeCreate, Permissions.Core.EmployeeUpdate,
             Permissions.Core.EmployeeTerminate,
             Permissions.Core.UserRead, Permissions.Core.UserManage, Permissions.Core.RoleManage,
+            Permissions.Core.CatalogManage,
         ]),
         // Not termination: it deactivates the person's account, and a Manager cannot otherwise
         // take anyone's access away. An organization that wants it builds a role with it.
+        // Not the catalogs either: a Manager places people in departments, but renaming or retiring
+        // a department changes it for everyone, so that stays with administrators.
         new("core:manager", "Manager", "Maintains the employee roster.",
         [
             Permissions.Core.EmployeeRead, Permissions.Core.EmployeeCreate, Permissions.Core.EmployeeUpdate,

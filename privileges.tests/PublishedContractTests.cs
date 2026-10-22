@@ -43,8 +43,27 @@ public class PublishedContractTests(PrivilegeFixture fixture)
             [
                 "id", "tenant_id", "company_id", "public_id",
                 "first_name", "last_name", "display_name", "status",
+                // Cycle 17, appended: where the person sits. Names come along so an app can show
+                // them without a second view.
+                "department_id", "department_name", "job_title_id", "job_title_name",
+                "location_id", "location_name",
             ],
             await ColumnsOfAsync("core_v1", "employee"));
+    }
+
+    [Fact]
+    public async Task The_catalog_views_expose_exactly_the_agreed_columns()
+    {
+        // Job titles are tenant-wide and carry no company; departments and locations belong to one.
+        Assert.Equal(
+            ["id", "tenant_id", "company_id", "public_id", "name", "parent_id", "active"],
+            await ColumnsOfAsync("core_v1", "department"));
+        Assert.Equal(
+            ["id", "tenant_id", "public_id", "name", "active"],
+            await ColumnsOfAsync("core_v1", "job_title"));
+        Assert.Equal(
+            ["id", "tenant_id", "company_id", "public_id", "name", "active"],
+            await ColumnsOfAsync("core_v1", "location"));
     }
 
     [Fact]

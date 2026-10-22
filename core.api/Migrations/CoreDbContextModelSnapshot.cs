@@ -141,6 +141,68 @@ namespace AppPlatform.Core.Migrations
                     b.ToTable("company", "core");
                 });
 
+            modelBuilder.Entity("AppPlatform.Core.Data.Department", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("company_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_id");
+
+                    b.Property<string>("PublicId")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)")
+                        .HasColumnName("public_id");
+
+                    b.Property<int>("TenantId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_department");
+
+                    b.HasAlternateKey("TenantId", "Id")
+                        .HasName("ak_departments_tenant_id_id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_department_public_id");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_department_tenant_id");
+
+                    b.HasIndex("TenantId", "CompanyId")
+                        .HasDatabaseName("ix_department_tenant_id_company_id");
+
+                    b.HasIndex("TenantId", "ParentId")
+                        .HasDatabaseName("ix_department_tenant_id_parent_id");
+
+                    b.ToTable("department", "core");
+                });
+
             modelBuilder.Entity("AppPlatform.Core.Data.Employee", b =>
                 {
                     b.Property<Guid>("Id")
@@ -156,6 +218,10 @@ namespace AppPlatform.Core.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("deleted");
 
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("department_id");
+
                     b.Property<string>("Email")
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)")
@@ -167,11 +233,19 @@ namespace AppPlatform.Core.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("first_name");
 
+                    b.Property<Guid?>("JobTitleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("job_title_id");
+
                     b.Property<string>("LastName")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("last_name");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
 
                     b.Property<string>("PublicId")
                         .IsRequired()
@@ -210,12 +284,124 @@ namespace AppPlatform.Core.Migrations
                     b.HasIndex("TenantId", "CompanyId")
                         .HasDatabaseName("ix_employee_tenant_id_company_id");
 
+                    b.HasIndex("TenantId", "DepartmentId")
+                        .HasDatabaseName("ix_employee_tenant_id_department_id");
+
                     b.HasIndex("TenantId", "Email")
                         .IsUnique()
                         .HasDatabaseName("ix_employee_tenant_id_email")
                         .HasFilter("email IS NOT NULL AND deleted = false");
 
+                    b.HasIndex("TenantId", "JobTitleId")
+                        .HasDatabaseName("ix_employee_tenant_id_job_title_id");
+
+                    b.HasIndex("TenantId", "LocationId")
+                        .HasDatabaseName("ix_employee_tenant_id_location_id");
+
                     b.ToTable("employee", "core");
+                });
+
+            modelBuilder.Entity("AppPlatform.Core.Data.JobTitle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("PublicId")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)")
+                        .HasColumnName("public_id");
+
+                    b.Property<int>("TenantId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_job_title");
+
+                    b.HasAlternateKey("TenantId", "Id")
+                        .HasName("ak_job_titles_tenant_id_id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_job_title_public_id");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_job_title_tenant_id");
+
+                    b.ToTable("job_title", "core");
+                });
+
+            modelBuilder.Entity("AppPlatform.Core.Data.Location", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("company_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("PublicId")
+                        .IsRequired()
+                        .HasMaxLength(34)
+                        .HasColumnType("character varying(34)")
+                        .HasColumnName("public_id");
+
+                    b.Property<int>("TenantId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_location");
+
+                    b.HasAlternateKey("TenantId", "Id")
+                        .HasName("ak_locations_tenant_id_id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_location_public_id");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_location_tenant_id");
+
+                    b.HasIndex("TenantId", "CompanyId")
+                        .HasDatabaseName("ix_location_tenant_id_company_id");
+
+                    b.ToTable("location", "core");
                 });
 
             modelBuilder.Entity("AppPlatform.Core.Data.Role", b =>
@@ -652,6 +838,24 @@ namespace AppPlatform.Core.Migrations
                     b.ToTable("outbox_message", "core");
                 });
 
+            modelBuilder.Entity("AppPlatform.Core.Data.Department", b =>
+                {
+                    b.HasOne("AppPlatform.Core.Data.Company", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CompanyId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_department_company_tenant_id_company_id");
+
+                    b.HasOne("AppPlatform.Core.Data.Department", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ParentId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_department_department_tenant_id_parent_id");
+                });
+
             modelBuilder.Entity("AppPlatform.Core.Data.Employee", b =>
                 {
                     b.HasOne("AppPlatform.Core.Data.Company", null)
@@ -661,6 +865,38 @@ namespace AppPlatform.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_employee_company_tenant_id_company_id");
+
+                    b.HasOne("AppPlatform.Core.Data.Department", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "DepartmentId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_employee_departments_tenant_id_department_id");
+
+                    b.HasOne("AppPlatform.Core.Data.JobTitle", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "JobTitleId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_employee_job_titles_tenant_id_job_title_id");
+
+                    b.HasOne("AppPlatform.Core.Data.Location", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "LocationId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_employee_locations_tenant_id_location_id");
+                });
+
+            modelBuilder.Entity("AppPlatform.Core.Data.Location", b =>
+                {
+                    b.HasOne("AppPlatform.Core.Data.Company", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CompanyId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_location_company_tenant_id_company_id");
                 });
 
             modelBuilder.Entity("AppPlatform.Core.Data.Session", b =>

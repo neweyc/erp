@@ -25,6 +25,7 @@ public class EmployeeRosterTests
     private readonly Mock<IEmployeeService> _employees = new();
     private readonly Mock<IUserService> _users = new();
     private readonly Mock<IRoleService> _roles = new();
+    private readonly Mock<ICatalogService> _catalogs = new();
     private readonly RecordingOutbox _outbox = new();
     private readonly FakeTimeProvider _clock = new(Now);
     private readonly List<User> _everyone = [];
@@ -71,7 +72,7 @@ public class EmployeeRosterTests
     private User Me() => AccountFor(OnRoster(email: "me@example.com"), BuiltInRoles.CoreAdmin, _admin.UserId);
 
     private Task<CommandResult> Update(Employee employee, string? first, string? last, string? email)
-        => new UpdateEmployeeCommandHandler(_employees.Object, _users.Object, _outbox)
+        => new UpdateEmployeeCommandHandler(_employees.Object, _users.Object, _catalogs.Object, _outbox)
             .Handle(_admin, employee.PublicId, new UpdateEmployeeCommand(first, last, email));
 
     private Task<CommandResult> Terminate(Employee employee)

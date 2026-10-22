@@ -9,11 +9,12 @@ namespace AppPlatform.Core.Tests;
 public class CreateEmployeeTests
 {
     private readonly Mock<IEmployeeService> _employees = new();
+    private readonly Mock<ICatalogService> _catalogs = new();
     private readonly RecordingOutbox _outbox = new();
 
     public CreateEmployeeTests() => _employees.Setup(s => s.DefaultCompanyIdAsync(default)).ReturnsAsync(1);
 
-    private CreateEmployeeCommandHandler Handler() => new(_employees.Object, _outbox);
+    private CreateEmployeeCommandHandler Handler() => new(_employees.Object, _catalogs.Object, _outbox);
 
     [Fact]
     public async Task A_valid_employee_is_created_with_a_public_id()

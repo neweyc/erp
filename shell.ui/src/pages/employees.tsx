@@ -3,12 +3,13 @@ import { Pencil, Send, UserMinus, UserPlus, UsersRound } from 'lucide-react'
 import { api, ApiError, Permissions } from '@app-platform/web-api'
 import {
   Alert, Avatar, Badge, Button, Card, Checkbox, CheckboxRow, ConfirmDialog, DataTable, Dialog, DialogBody,
-  DialogFooter, EmptyState, Field, Input, Loading, PageHeader, PageStack, type BadgeTone, type ColumnDef,
+  DialogFooter, EmptyState, Field, Input, Loading, NativeSelect, PageHeader, PageStack, type BadgeTone, type ColumnDef,
   type ColumnMeta,
 } from '@app-platform/ui-kit'
 import { useSession } from '../components/session-provider'
 import { RoleChecklist, toggled } from '../components/role-checklist'
 import { accountSentence, describeAccount, type EmployeeRow, employeeStatusLabel, type UserRow } from '../lib/people'
+import { departmentItems, pickerOptions, type CatalogRow, type DepartmentRow } from '../lib/catalogs'
 import type { RoleRow } from '../lib/roles'
 
 /** Keyed on the server's stable problemCode, never its message. */
@@ -33,12 +34,27 @@ function explain(error: unknown): string {
 
 const statusTone: Record<EmployeeRow['status'], BadgeTone> = { Active: 'success', OnLeave: 'warning', Terminated: 'neutral' }
 
-/** The details form, shared by adding and editing. */
+/** The details form, shared by adding and editing. Each placement is an id, or '' for none. */
 interface Details {
   readonly firstName: string
   readonly lastName: string
   readonly email: string
+  readonly departmentId: string
+  readonly jobTitleId: string
+  readonly locationId: string
 }
+
+const NO_DETAILS: Details = { firstName: '', lastName: '', email: '', departmentId: '', jobTitleId: '', locationId: '' }
+
+/** The three lists an employee is placed from. */
+interface Catalogs {
+  readonly departments: readonly CatalogRow[]
+  readonly jobTitles: readonly CatalogRow[]
+  readonly locations: readonly CatalogRow[]
+}
+
+const toRows = (rows: Record<string, unknown>[], idField: string): CatalogRow[] =>
+  rows.map((r) => ({ id: String(r[idField]), name: String(r.name), active: Boolean(r.active) }))
 
 type Open =
   | { kind: 'add'; details: Details; invite: boolean; chosen: ReadonlySet<string> }
@@ -62,6 +78,7 @@ export function Employees() {
   const [employees, setEmployees] = useState<readonly EmployeeRow[]>([])
   const [users, setUsers] = useState<readonly UserRow[]>([])
   const [roles, setRoles] = useState<readonly RoleRow[]>([])
+  const [catalogs, setCatalogs] = useState<Catalogs>({ departments: [], jobTitles: [], locations: [] })
   const [showTerminated, setShowTerminated] = useState(false)
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState<Open | null>(null)
@@ -80,20 +97,29 @@ export function Employees() {
 
   const load = useCallback(async () => {
     try {
-      const [employeeRows, userRows, roleRows] = await Promise.all([
+      const [employeeRows, userRows, roleRows, departmentRows, jobTitleRows, locationRows] = await Promise.all([
         api<EmployeeRow[]>(`/api/core/v1/employees?includeTerminated=${showTerminated}`),
         canSeeAccess ? api<UserRow[]>('/api/core/v1/users') : Promise.resolve([]),
         canInvite ? api<RoleRow[]>('/api/core/v1/roles') : Promise.resolve([]),
+        // Only the forms need the lists; the roster rows carry their own names.
+        canAdd || canEdit ? api<DepartmentRow[]>('/api/core/v1/departments') : Promise.resolve([]),
+        canAdd || canEdit ? api<Record<string, unknown>[]>('/api/core/v1/job-titles') : Promise.resolve([]),
+        canAdd || canEdit ? api<Record<string, unknown>[]>('/api/core/v1/locations') : Promise.resolve([]),
       ])
       setEmployees(employeeRows)
       setUsers(userRows)
       setRoles(roleRows)
+      setCatalogs({
+        departments: departmentItems(departmentRows),
+        jobTitles: toRows(jobTitleRows, 'jobTitleId'),
+        locations: toRows(locationRows, 'locationId'),
+      })
     } catch (e) {
       setError(explain(e))
     } finally {
       setLoading(false)
     }
-  }, [showTerminated, canSeeAccess, canInvite])
+  }, [showTerminated, canSeeAccess, canInvite, canAdd, canEdit])
 
   useEffect(() => {
     void load()
@@ -119,6 +145,22 @@ export function Employees() {
             </span>
           </span>
         ),
+      },
+      {
+        id: 'position',
+        header: 'Position',
+        accessorFn: (e) => [e.jobTitle?.name, e.department?.name, e.location?.name].filter(Boolean).join(' · '),
+        meta: { cellLabel: (e) => positionSentence(e) } satisfies ColumnMeta<EmployeeRow>,
+        cell: ({ row: { original: e } }) => {
+          const where = [e.department?.name, e.location?.name].filter(Boolean).join(' · ')
+          if (!e.jobTitle && !where) return <span className="text-sm text-muted-foreground">Not set</span>
+          return (
+            <span className="grid min-w-0">
+              <span className="truncate">{e.jobTitle?.name ?? 'No job title'}</span>
+              {where && <span className="truncate text-xs text-muted-foreground">{where}</span>}
+            </span>
+          )
+        },
       },
       {
         id: 'status',
@@ -171,7 +213,7 @@ export function Employees() {
               )}
               {canEdit && (
                 <Button size="sm" variant="ghost" aria-label={`Edit ${e.displayName}`} disabled={saving}
-                  onClick={() => show({ kind: 'edit', employee: e, details: { firstName: e.firstName, lastName: e.lastName, email: e.email ?? '' } })}>
+                  onClick={() => show({ kind: 'edit', employee: e, details: detailsOf(e) })}>
                   <Pencil /> Edit
                 </Button>
               )}
@@ -214,8 +256,16 @@ export function Employees() {
     await load()
   }
 
+  // The whole record, placements included: an edit replaces all of it, so '' (none) is sent as null.
   const detailsBody = (details: Details) =>
-    JSON.stringify({ firstName: details.firstName, lastName: details.lastName, email: details.email })
+    JSON.stringify({
+      firstName: details.firstName,
+      lastName: details.lastName,
+      email: details.email,
+      departmentId: details.departmentId || null,
+      jobTitleId: details.jobTitleId || null,
+      locationId: details.locationId || null,
+    })
 
   /**
    * Adds the employee and, if asked, invites them: two requests, because they are two things. If
@@ -271,7 +321,7 @@ export function Employees() {
         actions={
           canAdd && (
             <Button variant="primary"
-              onClick={() => show({ kind: 'add', details: { firstName: '', lastName: '', email: '' }, invite: canInvite, chosen: MEMBER })}>
+              onClick={() => show({ kind: 'add', details: NO_DETAILS, invite: canInvite, chosen: MEMBER })}>
               <UserPlus /> Add employee
             </Button>
           )
@@ -348,6 +398,21 @@ export function Employees() {
                   <Input id="employee-email" type="email" maxLength={320} value={open.details.email}
                     onChange={(e) => setOpen({ ...open, details: { ...open.details, email: e.target.value } })} />
                 </Field>
+              </div>
+
+              <div className="grid gap-4 border-t pt-5 sm:grid-cols-2">
+                <PlacementPicker label="Department" id="employee-department" className="sm:col-span-2"
+                  items={catalogs.departments} value={open.details.departmentId}
+                  current={open.kind === 'edit' ? open.employee.department?.id ?? null : null}
+                  onChange={(departmentId) => setOpen({ ...open, details: { ...open.details, departmentId } })} />
+                <PlacementPicker label="Job title" id="employee-job-title"
+                  items={catalogs.jobTitles} value={open.details.jobTitleId}
+                  current={open.kind === 'edit' ? open.employee.jobTitle?.id ?? null : null}
+                  onChange={(jobTitleId) => setOpen({ ...open, details: { ...open.details, jobTitleId } })} />
+                <PlacementPicker label="Location" id="employee-location"
+                  items={catalogs.locations} value={open.details.locationId}
+                  current={open.kind === 'edit' ? open.employee.location?.id ?? null : null}
+                  onChange={(locationId) => setOpen({ ...open, details: { ...open.details, locationId } })} />
               </div>
 
               {open.kind === 'add' && canInvite && (
@@ -432,5 +497,51 @@ export function Employees() {
         onConfirm={() => terminating && void terminate(terminating)}
       />
     </PageStack>
+  )
+}
+
+function detailsOf(e: EmployeeRow): Details {
+  return {
+    firstName: e.firstName,
+    lastName: e.lastName,
+    email: e.email ?? '',
+    departmentId: e.department?.id ?? '',
+    jobTitleId: e.jobTitle?.id ?? '',
+    locationId: e.location?.id ?? '',
+  }
+}
+
+/** "Engineer in Engineering › Platform at Head office", for the position cell's accessible name. */
+function positionSentence(e: EmployeeRow): string {
+  if (!e.jobTitle && !e.department && !e.location) return 'Not set'
+  return [e.jobTitle?.name ?? 'No job title', e.department && `in ${e.department.name}`, e.location && `at ${e.location.name}`]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/**
+ * Picks a department, job title or location from its list: pick-only, never typed, so a typo cannot
+ * become a new entry. Offers what is in use, plus the one the employee already has if it was retired.
+ */
+function PlacementPicker({
+  label, id, items, value, current, onChange, className,
+}: {
+  label: string
+  id: string
+  items: readonly CatalogRow[]
+  value: string
+  current: string | null
+  onChange: (id: string) => void
+  className?: string
+}) {
+  return (
+    <Field label={label} htmlFor={id} className={className}>
+      <NativeSelect id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">None</option>
+        {pickerOptions(items, current).map((o) => (
+          <option key={o.id} value={o.id}>{o.label}</option>
+        ))}
+      </NativeSelect>
+    </Field>
   )
 }

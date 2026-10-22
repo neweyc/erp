@@ -64,8 +64,16 @@ scattered through handlers.
 
 ## Catalogs (departments, job titles, locations)
 
-Tenant-scoped, `Name`/`Active`/`SortOrder`, **deactivate — never delete**, admin editor
-in settings. Two lessons carried from EMS, both learned the hard way:
+Built (Cycle 17). Tenant-scoped, `Name`/`Active`, **deactivate — never delete**, edited on the
+Departments, Job titles and Locations pages with `core.catalog.manage`. Departments nest (a parent
+each, at most 8 deep; the tree's rules are `DepartmentRules`). No `SortOrder` yet: lists are
+alphabetical until someone needs otherwise. Every catalog write takes the tenant's **catalog lock**
+(`ICatalogService.LockCatalogsAsync`) first, because the rules read the whole list. An employee's
+placement is set only through `EmployeePlacement`, which resolves each id in the tenant and refuses a
+retired item unless the employee already has it.
+
+Core stores **no copy** of a catalog name beside the id: every read joins, so a rename needs no
+fan-out. Two lessons carried from EMS, both learned the hard way:
 
 - Where a denormalized display copy of a catalog name sits beside the FK, the FK is the
   source of truth and the **only** thing safe to group or order by. Write both together

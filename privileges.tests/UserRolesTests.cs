@@ -85,11 +85,13 @@ public class UserRolesTests(PrivilegeFixture fixture)
             tenant, new AmbientAuditActor(AuditActor.User(actingUser)), TimeProvider.System);
     }
 
-    private static EFUserService Users(CoreDbContext db, int tenantId)
+    private static EFUserService Users(CoreDbContext db, int tenantId) => new(db, Tenant(tenantId));
+
+    private static AmbientTenantProvider Tenant(int tenantId)
     {
         var tenant = new AmbientTenantProvider();
         tenant.UseTenant(tenantId);
-        return new EFUserService(db, tenant);
+        return tenant;
     }
 
     private static Caller Admin(int tenantId) => new()
@@ -681,7 +683,8 @@ public class UserRolesTests(PrivilegeFixture fixture)
 
     private static Task<CommandResult> EditAsync(CoreDbContext db, int tenantId, string employeePublicId, string firstName)
         => new UpdateEmployeeFeature.UpdateEmployeeCommandHandler(
-                new EFEmployeeService(db), Users(db, tenantId), new Outbox.Outbox(db, TimeProvider.System))
+                new EFEmployeeService(db), Users(db, tenantId), new EFCatalogService(db, Tenant(tenantId)),
+                new Outbox.Outbox(db, TimeProvider.System))
             .Handle(Admin(tenantId), employeePublicId, new(firstName, "Lovelace", null));
 
     private static Task<CommandResult> AddToRosterAsync(CoreDbContext db, int tenantId, string userPublicId)

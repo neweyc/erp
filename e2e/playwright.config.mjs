@@ -96,11 +96,14 @@ export default defineConfig({
     { name: 'user-lifecycle', testMatch: /user-lifecycle\.spec\.mjs/, dependencies: ['license'] },
     // Adding, inviting and terminating from the Employees page.
     { name: 'employee-roster', testMatch: /employee-roster\.spec\.mjs/, dependencies: ['license'] },
+    // Departments, job titles and locations, and placing someone in them.
+    { name: 'organization-structure', testMatch: /organization-structure\.spec\.mjs/, dependencies: ['license'] },
     // The restore drill backs up everything the projects above wrote, so it runs after all of them.
     {
       name: 'restore',
       testMatch: /restore\.spec\.mjs/,
-      dependencies: ['journey', 'guards', 'isolation', 'ledger', 'employee-invite', 'user-lifecycle', 'employee-roster'],
+      dependencies: ['journey', 'guards', 'isolation', 'ledger', 'employee-invite', 'user-lifecycle', 'employee-roster',
+        'organization-structure'],
     },
   ],
   timeout: 30_000,

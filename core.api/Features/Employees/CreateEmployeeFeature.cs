@@ -10,10 +10,14 @@ namespace AppPlatform.Core.Features.Employees;
 
 public static class CreateEmployeeFeature
 {
-    public record CreateEmployeeCommand(string? FirstName, string? LastName, string? Email);
+    /// <param name="DepartmentId">Optional, as are the job title and location: see EmployeePlacement.</param>
+    public record CreateEmployeeCommand(
+        string? FirstName, string? LastName, string? Email,
+        string? DepartmentId = null, string? JobTitleId = null, string? LocationId = null);
 
     public class CreateEmployeeCommandHandler(
         IEmployeeService employees,
+        ICatalogService catalogs,
         IOutbox outbox)
     {
         public async Task<CommandResult> Handle(
@@ -22,6 +26,11 @@ public static class CreateEmployeeFeature
             var (details, problem) = EmployeeRules.Clean(cmd.FirstName, cmd.LastName, cmd.Email);
             if (details is null)
                 return CommandResult.Invalid(CoreProblems.ValidationFailed, problem!);
+
+            var (placement, placementProblem) = await EmployeePlacement.ResolveAsync(
+                cmd.DepartmentId, cmd.JobTitleId, cmd.LocationId, current: null, catalogs, ct);
+            if (placement is null)
+                return CommandResult.Invalid(CoreProblems.ValidationFailed, placementProblem!);
 
             if (details.Email is not null && await employees.EmailInUseAsync(details.Email, ct))
             {
@@ -38,6 +47,9 @@ public static class CreateEmployeeFeature
                 FirstName = details.FirstName,
                 LastName = details.LastName,
                 Email = details.Email,
+                DepartmentId = placement.DepartmentId,
+                JobTitleId = placement.JobTitleId,
+                LocationId = placement.LocationId,
             };
 
             employees.Add(employee);
@@ -66,10 +78,11 @@ public static class CreateEmployeeFeature
                 CreateEmployeeCommand cmd,
                 [FromServices] ICallerContext callerContext,
                 [FromServices] IEmployeeService employees,
+                [FromServices] ICatalogService catalogs,
                 [FromServices] IOutbox outbox,
                 CancellationToken ct) =>
             {
-                var handler = new CreateEmployeeCommandHandler(employees, outbox);
+                var handler = new CreateEmployeeCommandHandler(employees, catalogs, outbox);
                 var result = await handler.Handle(callerContext.Require(), cmd, ct);
                 return result.CreateIResult();
             })

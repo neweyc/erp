@@ -39,11 +39,12 @@ a breaking change, like a problem code. Each has a description in code, shown in
 |---|---|
 | `core.employee.read` | See the employee roster |
 | `core.employee.create` | Add employees |
-| `core.employee.update` | Edit employees' names and email addresses |
+| `core.employee.update` | Edit employees' names, email addresses, departments, job titles and locations |
 | `core.employee.terminate` | Terminate employees, which also ends their access |
 | `core.user.read` | See accounts, their roles, and the roles defined |
 | `core.user.manage` | Invite people and change anyone's roles |
 | `core.role.manage` | Create, edit and delete the organisation's own roles |
+| `core.catalog.manage` | Add, rename, move and deactivate departments, job titles and locations |
 | `tickets.ticket.read` | See tickets |
 | `tickets.ticket.create` | Raise tickets |
 | `tickets.ticket.assign` | Assign tickets |
@@ -61,7 +62,7 @@ permission name are never confused.
 | Key | Grants |
 |---|---|
 | `core:admin` | every core permission, `core.role.manage` included |
-| `core:manager` | `core.employee.read`, `core.employee.create`, `core.employee.update` (not terminate: it ends access, and a Manager cannot otherwise take anyone's) |
+| `core:manager` | `core.employee.read`, `core.employee.create`, `core.employee.update` (not terminate: it ends access, and a Manager cannot otherwise take anyone's; not `core.catalog.manage`: a Manager places people, but renaming or retiring a department changes it for everyone) |
 | `core:member` | `core.employee.read` |
 | `tickets:requester` | read, create |
 | `tickets:agent` | read, create, assign, close |
@@ -284,6 +285,11 @@ in case a customer needs delegated administration.
 - **Employees** page (`core.employee.read`): the roster, with each person's access when the reader
   has `core.user.read`. Add (with "send an invitation" and the role checklist, for `core.user.manage`),
   edit, give access, and terminate, each shown only with its permission.
+- **Departments**, **Job titles** and **Locations** pages (`core.employee.read`, since the roster
+  shows them): each list with its status; departments as an indented tree, searchable by path. With
+  `core.catalog.manage`: add (a department optionally inside another), rename, move a department, and
+  deactivate or reactivate. The employee form picks from these lists only (never free text), offering
+  what is in use plus whatever the person already has.
 - **Roles** page (`core.user.read`): built-in and custom roles, what each grants, and how many
   people hold each. With `core.role.manage`: create a role, start one as a copy of any role, and edit
   or delete custom roles. The permission checklist is grouped by app and shows each description.

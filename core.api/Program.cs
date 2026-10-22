@@ -61,6 +61,7 @@ builder.Services.AddScoped<ITenantResolver, EFTenantResolver>();
 builder.Services.AddScoped<IEmployeeService, EFEmployeeService>();
 builder.Services.AddScoped<IUserService, EFUserService>();
 builder.Services.AddScoped<IRoleService, EFRoleService>();
+builder.Services.AddScoped<ICatalogService, EFCatalogService>();
 builder.Services.AddScoped<IOutbox>(sp => new Outbox(
     sp.GetRequiredService<CoreDbContext>(), sp.GetRequiredService<TimeProvider>()));
 

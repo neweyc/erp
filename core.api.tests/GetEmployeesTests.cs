@@ -8,8 +8,16 @@ namespace AppPlatform.Core.Tests;
 public class GetEmployeesTests
 {
     private readonly Mock<IEmployeeService> _employees = new();
+    private readonly Mock<ICatalogService> _catalogs = new();
 
-    private GetEmployeesQueryHandler Handler() => new(_employees.Object);
+    public GetEmployeesTests()
+    {
+        _catalogs.Setup(s => s.ListDepartmentsAsync(default)).ReturnsAsync([]);
+        _catalogs.Setup(s => s.ListJobTitlesAsync(default)).ReturnsAsync([]);
+        _catalogs.Setup(s => s.ListLocationsAsync(default)).ReturnsAsync([]);
+    }
+
+    private GetEmployeesQueryHandler Handler() => new(_employees.Object, _catalogs.Object);
 
     private void Returns(params Employee[] rows)
         => _employees.Setup(s => s.ListAsync(It.IsAny<bool>(), default)).ReturnsAsync([.. rows]);

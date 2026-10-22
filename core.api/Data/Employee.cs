@@ -38,6 +38,13 @@ public class Employee : IAuditable
 
     public EmployeeStatus Status { get; set; } = EmployeeStatus.Active;
 
+    // Where the person sits, each optional and each held by id only: a rename of the department
+    // shows here at once, with no copy to re-stamp. Set only through EmployeePlacement, which
+    // resolves each id in this tenant and refuses a retired one unless the employee already has it.
+    public Guid? DepartmentId { get; set; }
+    public Guid? JobTitleId { get; set; }
+    public Guid? LocationId { get; set; }
+
     /// <summary>
     /// Bumped on every change that emits an event, so a consumer can detect a gap. The
     /// aggregate owns its counter — the outbox does not invent one.

@@ -6,7 +6,10 @@ import { APPS, componentFor, visibleApps } from '../lib/apps'
 import { Permissions } from '@app-platform/web-api'
 import { useSession } from './session-provider'
 import { Dashboard } from '../pages/dashboard'
+import { Departments } from '../pages/departments'
 import { Employees } from '../pages/employees'
+import { JobTitles } from '../pages/job-titles'
+import { Locations } from '../pages/locations'
 import { Roles } from '../pages/roles'
 import { Users } from '../pages/users'
 
@@ -26,7 +29,13 @@ export function AppRoutes() {
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Dashboard />} />
       {session.permissions.includes(Permissions.core.employeeRead) && (
-        <Route path="/employees" element={<Employees />} />
+        <>
+          <Route path="/employees" element={<Employees />} />
+          {/* Readable by anyone who sees the roster, which shows them; changing them needs core.catalog.manage. */}
+          <Route path="/departments" element={<Departments />} />
+          <Route path="/job-titles" element={<JobTitles />} />
+          <Route path="/locations" element={<Locations />} />
+        </>
       )}
       {session.permissions.includes(Permissions.core.userRead) && (
         <>

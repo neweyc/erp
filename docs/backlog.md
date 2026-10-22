@@ -648,6 +648,69 @@ Open from the closure: D16.
 
 ## Current cycle
 
+**Cycle 17 — departments, job titles and locations.** Chris: "lets work on departments, job titles
+and locations now". Core's CLAUDE.md described the catalogs; none existed, and an employee had a name,
+an email and a status only. **Built and tested. No independent review: Chris chose to skip it
+for this cycle (2026-10-22) although it adds a per-tenant lock, two migrations and published views.
+Evidence instead: real-Postgres race tests that fail when the lock is removed (3 of 3 runs), .NET 867,
+shell 65, Playwright 33/33, 99-verify clean on the local database.**
+
+Decided (Chris, 2026-10-22):
+- **Departments nest** (Chris chose nested over flat): one parent each, at most 8 levels; no loops;
+  an active department never sits under an inactive one, so every active department's whole path is
+  in use. Names are unique among siblings ignoring case ("Support" may sit under Sales and under
+  Engineering); pickers show the path ("Engineering › Platform").
+- **Administrators only** manage the lists: new permission `core.catalog.manage` (Administrator).
+  Managers still place people, which is part of `core.employee.update`.
+- **A location is a name only.** An address can be added later as further columns.
+
+Decided by default (stated when proposing, not overruled):
+- Each employee has at most one department, one job title and one location, all optional.
+- Deactivate, never delete. A retired item stays with the people who have it and is not offered to
+  anyone else; an edit that keeps it is allowed (EmployeePlacement).
+- **No stored copy of the name in core.** Employees hold the id and every read joins, so a rename
+  shows everywhere at once and there is nothing to re-stamp. (Core's CLAUDE.md rule about
+  re-stamping applies where a display copy sits beside the id; core keeps none. An app that needs the
+  name as it was keeps its own snapshot, per the root CLAUDE.md.)
+- **No sort order yet**: lists are alphabetical (departments in tree order). The `SortOrder` named in
+  core's CLAUDE.md is deferred until someone needs a non-alphabetical list; it is an additive column.
+- Job titles are tenant-wide and carry no company; departments and locations carry one (a
+  sub-department takes its parent's), as the root CLAUDE.md requires.
+- Readable by anyone with `core.employee.read`, since the roster shows them.
+
+Built:
+- Data: `core.department` (with `parent_id`), `core.job_title`, `core.location`; the employee's
+  `department_id`, `job_title_id`, `location_id`. Every reference carries the tenant (composite
+  foreign keys), parent included. Case-insensitive unique name indexes in SQL. Migrations
+  `AddCatalogs` (migration role) and `AddCatalogViews` (ap_owner), scripts in `database/core/`.
+- Published: `core_v1.department`, `core_v1.job_title`, `core_v1.location`; `core_v1.employee` gains
+  `department_id`, `department_name`, `job_title_id`, `job_title_name`, `location_id`,
+  `location_name`, appended. No department path in the view: it needs a recursive query the planner
+  cannot narrow to the reader's tenant.
+- API: `GET/POST /departments`, `PUT /departments/{id}`; the same for `/job-titles` and
+  `/locations`. Employee add and edit take `departmentId`, `jobTitleId`, `locationId`; the roster
+  returns each as `{ id, name, active }` (a department's name is its path). Events
+  `department.created/updated`, `job_title.created/updated`, `location.created/updated`.
+- **A new per-tenant catalog lock** (`ICatalogService.LockCatalogsAsync`), taken first by every
+  catalog write: the tree rules and the name check read the whole list, which is sound only while
+  nothing else changes it. Separate from the role-change lock: catalog edits change no access.
+- Shell: Departments (the tree, indented, searchable by path; "Add inside"; edit name, parent and
+  status), Job titles and Locations (one shared page), all under Organization in the navigation;
+  the employee form gains three pick-only selects, and the roster a Position column.
+- Evidence (measured): .NET 867 (was 825): `CatalogTests` (20, unit: names, the tree's rules,
+  locking, events), `EmployeePlacementTests` (9), and against real PostgreSQL `CatalogTests` (7: a
+  write waits for the catalog lock; two departments moved under each other at once make no loop; two
+  same-named job titles at once make one; the database refuses a duplicate name and a cross-tenant
+  placement or parent; one tenant never lists another's; an app reads the placement through
+  `core_v1.employee` and sees a rename at once), the published-view shapes, and the access matrix
+  (apps read the new views; never the tables; the platform reads neither). UI: shell 65 (was 55).
+  Playwright 33/33 with the new `organization-structure` spec (build a two-level department, a job
+  title and a location; place someone; rename the department and see it on them; 390px fits).
+  Broken on purpose, caught each time (3 of 3 runs): the catalog lock removed fails the lock, loop and
+  duplicate tests.
+
+## Previous cycle
+
 **Cycle 16 — the employee roster, and inviting people from it.** Chris: "lets work on the employee
 roster now. How will we invite users?", then "go with your recommendations". Inviting existed only
 as an API (`POST /employees/{id}/invite`); no screen could reach it, and employees could be neither
@@ -1235,7 +1298,8 @@ disqualifying.
 ## Milestone 3 — widen
 
 19. Catalogs: departments, job titles, locations, with rename fan-out and pick-only
-    controls.
+    controls. *Built in Cycle 17 (nested departments; no stored name copies, so no fan-out is
+    needed). Not built: a sort order other than alphabetical.*
 20. Terminology overrides and the settings editor.
 21. Tenant-configured ticket status and category wording over fixed enums.
 22. Comments, attachments, ticket audit trail.

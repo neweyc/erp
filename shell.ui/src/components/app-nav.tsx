@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ShieldCheck, Users, UsersRound } from 'lucide-react'
+import { BriefcaseBusiness, LayoutDashboard, MapPin, Network, ShieldCheck, Users, UsersRound } from 'lucide-react'
 import { Permissions } from '@app-platform/web-api'
 import { cn } from '@app-platform/ui-kit'
 import { visibleApps } from '../lib/apps'
@@ -34,6 +34,9 @@ export function AppNav({ onNavigate }: { onNavigate?: () => void }) {
       {canSeeRoster && (
         <NavSection title="Organization">
           <NavItem to="/employees" icon={UsersRound} label="Employees" onNavigate={onNavigate} />
+          <NavItem to="/departments" icon={Network} label="Departments" onNavigate={onNavigate} />
+          <NavItem to="/job-titles" icon={BriefcaseBusiness} label="Job titles" onNavigate={onNavigate} />
+          <NavItem to="/locations" icon={MapPin} label="Locations" onNavigate={onNavigate} />
         </NavSection>
       )}
 

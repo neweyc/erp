@@ -153,7 +153,7 @@ public static class SeedE2E
         // Through the real handler, as provisioning is. A raw INSERT would skip the validation,
         // the public id, and the domain event every other employee gets.
         var created = await new CreateEmployeeFeature.CreateEmployeeCommandHandler(
-            new EFEmployeeService(db), new Outbox.Outbox(db, TimeProvider.System))
+            new EFEmployeeService(db), new EFCatalogService(db, scoped), new Outbox.Outbox(db, TimeProvider.System))
             .Handle(SeedCaller(tenantId), new(EmployeeFirstName, EmployeeLastName, EmployeeEmail));
 
         if (!created.Succeeded)
