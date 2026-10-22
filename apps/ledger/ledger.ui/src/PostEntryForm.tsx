@@ -79,7 +79,7 @@ export function PostEntryForm({
 
   return (
     <Card>
-      <section aria-labeledby="post-heading">
+      <section aria-labelledby="post-heading">
         <CardHeader
           id="post-heading"
           title="Post an entry"

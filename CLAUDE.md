@@ -312,8 +312,10 @@ first commit.
   An authenticated endpoint that declares nothing is refused at runtime and fails
   `PermissionCoverageTests`. Licensing an app grants nobody a role in it. **Every access change
   takes the tenant's role-change lock first** (`IUserService.LockRoleChangesAsync`): role writes,
-  deactivation, reactivation and accepting an invitation; sign-in takes it shared. So must any future
-  write that can take access away. Permission names are mirrored in
+  deactivation, reactivation, accepting an invitation, terminating an employee, and linking an account
+  to one; sign-in takes it shared. Editing an employee takes it too: the address is where an
+  invitation goes, and an invitation names the address it was approved for. So must any future write
+  that can take access away. Permission names are mirrored in
   `packages/web-api/src/permissions.ts`, kept in step by `PermissionCatalogueTests`.
 - `identity.user.employee_id` links an account to a core employee. It is what makes
   termination cut access, and it gates all self-service.
@@ -572,7 +574,9 @@ URL including the cloud metadata address.
 
 - **Product text is American English** (Chris, 2026-10-21): "organization", "color", "license",
   "-ize". That covers everything a customer reads: UI, API messages, emails, permission descriptions.
-  Stable codes (`mfa_not_enrolled`) are never renamed for spelling.
+  Stable codes (`mfa_not_enrolled`) are never renamed for spelling, and nor are names a standard
+  defines: `aria-labelledby` is spelled with two Ls. A blanket find-and-replace broke it once and
+  nothing type-checked it.
 - Chris applies SQL to live databases manually — write or generate scripts, never execute
   against a live DB.
 - Commit only when asked.

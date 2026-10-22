@@ -71,6 +71,8 @@ public static class CoreProblems
     public const string EmailInUse = "email_in_use";
     public const string EmployeeHasAccount = "employee_has_account";
     public const string EmployeeTerminated = "employee_terminated";
+    /// <summary>The employee's email changed after the caller read it, so an invitation would go elsewhere.</summary>
+    public const string EmployeeChanged = "employee_changed";
     public const string NotFound = "not_found";
     /// <summary>The change would leave no active user who can manage users.</summary>
     public const string LastAdmin = "last_admin";
@@ -82,6 +84,10 @@ public static class CoreProblems
     public const string CannotDeactivateSelf = "cannot_deactivate_self";
     /// <summary>Only an account that has not yet accepted its invitation can be sent one again.</summary>
     public const string NotInvited = "not_invited";
+    /// <summary>Terminating your own employee record would end your own access; another administrator must.</summary>
+    public const string CannotTerminateSelf = "cannot_terminate_self";
+    /// <summary>The account is already linked to an employee record.</summary>
+    public const string UserHasEmployee = "user_has_employee";
     /// <summary>Re-exported from the permission check, so a handler refusing something itself uses the same code.</summary>
     public const string NotPermitted = AuthProblem.NotPermitted;
 

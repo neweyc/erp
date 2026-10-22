@@ -94,11 +94,13 @@ export default defineConfig({
     { name: 'employee-invite', testMatch: /employee-invite\.spec\.mjs/, dependencies: ['license'] },
     // Resending an invitation, deactivating and reactivating, through the Users page.
     { name: 'user-lifecycle', testMatch: /user-lifecycle\.spec\.mjs/, dependencies: ['license'] },
+    // Adding, inviting and terminating from the Employees page.
+    { name: 'employee-roster', testMatch: /employee-roster\.spec\.mjs/, dependencies: ['license'] },
     // The restore drill backs up everything the projects above wrote, so it runs after all of them.
     {
       name: 'restore',
       testMatch: /restore\.spec\.mjs/,
-      dependencies: ['journey', 'guards', 'isolation', 'ledger', 'employee-invite', 'user-lifecycle'],
+      dependencies: ['journey', 'guards', 'isolation', 'ledger', 'employee-invite', 'user-lifecycle', 'employee-roster'],
     },
   ],
   timeout: 30_000,

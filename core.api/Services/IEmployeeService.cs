@@ -15,6 +15,10 @@ public interface IEmployeeService
     Task<Employee?> FindByPublicIdAsync(string publicId, CancellationToken ct = default);
     Task<Employee?> FindByIdAsync(Guid id, CancellationToken ct = default);
     Task<bool> EmailInUseAsync(string email, CancellationToken ct = default);
+
+    /// <summary>Whether an employee OTHER than this one has the address: for an edit, which may keep its own.</summary>
+    Task<bool> EmailInUseByAnotherAsync(string email, Guid employeeId, CancellationToken ct = default);
+
     Task<int> DefaultCompanyIdAsync(CancellationToken ct = default);
     void Add(Employee employee);
     Task SaveAsync(CancellationToken ct = default);

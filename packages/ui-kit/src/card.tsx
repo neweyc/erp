@@ -17,7 +17,7 @@ export function CardHeader({
   actions?: ReactNode
   /** h2 for a section of a page, h3 inside a section. */
   level?: 2 | 3
-  /** For `aria-labeledby` on the card's section. */
+  /** For `aria-labelledby` on the card's section. */
   id?: string
   className?: string
 }) {

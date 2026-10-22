@@ -24,6 +24,9 @@ public static class Permissions
     {
         public const string EmployeeRead = "core.employee.read";
         public const string EmployeeCreate = "core.employee.create";
+        public const string EmployeeUpdate = "core.employee.update";
+        /// <summary>Also ends the employee's account: termination deactivates it.</summary>
+        public const string EmployeeTerminate = "core.employee.terminate";
         public const string UserRead = "core.user.read";
         public const string UserManage = "core.user.manage";
         public const string RoleManage = "core.role.manage";
@@ -70,6 +73,8 @@ public static class PermissionCatalogue
     [
         new(Permissions.Core.EmployeeRead, "See the employee roster"),
         new(Permissions.Core.EmployeeCreate, "Add employees"),
+        new(Permissions.Core.EmployeeUpdate, "Edit employees' names and email addresses"),
+        new(Permissions.Core.EmployeeTerminate, "Terminate employees, which also ends their access"),
         new(Permissions.Core.UserRead, "See accounts, their roles, and the roles defined"),
         new(Permissions.Core.UserManage, "Invite people and change anyone's roles"),
         new(Permissions.Core.RoleManage, "Create, edit and delete the organization's own roles"),
@@ -116,12 +121,15 @@ public static class BuiltInRoles
     [
         new(CoreAdmin, "Administrator", "Manages people, accounts and roles.",
         [
-            Permissions.Core.EmployeeRead, Permissions.Core.EmployeeCreate,
+            Permissions.Core.EmployeeRead, Permissions.Core.EmployeeCreate, Permissions.Core.EmployeeUpdate,
+            Permissions.Core.EmployeeTerminate,
             Permissions.Core.UserRead, Permissions.Core.UserManage, Permissions.Core.RoleManage,
         ]),
+        // Not termination: it deactivates the person's account, and a Manager cannot otherwise
+        // take anyone's access away. An organization that wants it builds a role with it.
         new("core:manager", "Manager", "Maintains the employee roster.",
         [
-            Permissions.Core.EmployeeRead, Permissions.Core.EmployeeCreate,
+            Permissions.Core.EmployeeRead, Permissions.Core.EmployeeCreate, Permissions.Core.EmployeeUpdate,
         ]),
         new(CoreMember, "Member", "Sees the employee roster.",
         [

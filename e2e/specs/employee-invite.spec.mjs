@@ -34,7 +34,7 @@ test('an invited employee accepts in the browser and signs in', async ({ page })
   const invited = await admin.post(
     `${CORE}/api/core/v1/employees/${(await employee.json()).employeeId}/invite`, {
       headers: { 'X-CSRF-Token': csrf },
-      data: { roles: ['core:member'] },
+      data: { roles: ['core:member'], email },
     })
   expect(invited.status(), await invited.text()).toBe(200)
   await admin.dispose()
@@ -63,7 +63,7 @@ test('an invited employee accepts in the browser and signs in', async ({ page })
   expect(ownEmployeeId).toBeTruthy()
   const escalation = await invitee.post(`${CORE}/api/core/v1/employees/${ownEmployeeId}/invite`, {
     headers: { 'X-CSRF-Token': inviteeCsrf },
-    data: { roles: ['core:admin'] },
+    data: { roles: ['core:admin'], email },
   })
   expect(escalation.status(), await escalation.text()).toBe(403)
   expect((await escalation.json()).problemCode).toBe('not_permitted')
@@ -111,7 +111,7 @@ test('an invited employee accepts in the browser and signs in', async ({ page })
   await page.setViewportSize({ width: 1280, height: 800 })
 
   await page.getByRole('button', { name: 'New role' }).click()
-  await page.getByLabel('Name').fill(roleName)
+  await page.getByLabel('Name', { exact: true }).fill(roleName)
   await page.getByRole('checkbox', { name: 'See the employee roster' }).check()
   await page.getByRole('checkbox', { name: 'Add employees' }).check()
   await page.getByRole('button', { name: 'Save role' }).click()

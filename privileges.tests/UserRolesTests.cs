@@ -3,6 +3,7 @@ using AppPlatform.Audit;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
 using AppPlatform.Core.Features.Auth;
+using AppPlatform.Core.Features.Employees;
 using AppPlatform.Core.Features.Roles;
 using AppPlatform.Core.Features.Users;
 using AppPlatform.Core.Services;
@@ -575,7 +576,7 @@ public class UserRolesTests(PrivilegeFixture fixture)
         async Task<string> DeliveryAsync()
         {
             await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
-            var listed = await new GetUsersFeature.GetUsersQueryHandler(Users(db, seeded.TenantId), TimeProvider.System)
+            var listed = await new GetUsersFeature.GetUsersQueryHandler(Users(db, seeded.TenantId), new EFEmployeeService(db), TimeProvider.System)
                 .Handle(Admin(seeded.TenantId));
             return Assert.IsType<List<GetUsersFeature.UserModel>>(listed.Value)
                 .Single(u => u.UserId == invitedPublicId).Invitation!.Delivery;
@@ -598,6 +599,201 @@ public class UserRolesTests(PrivilegeFixture fixture)
         // Its email pruned, the newest link's delivery is unknown, not the older failure.
         await Scalar(connection, $"DELETE FROM core.outbox_message WHERE id = '{newestMessage}'");
         Assert.Equal("unknown", await DeliveryAsync());
+    }
+
+    // ---- Terminating an employee ends their access, under the same lock ----
+
+    /// <summary>An employee in the seeded tenant, and optionally links an existing account to them.</summary>
+    private async Task<(Guid Id, string PublicId)> AddEmployeeAsync(Seeded seeded, Guid? account = null)
+    {
+        var id = Guid.CreateVersion7();
+        var publicId = PublicId.New("emp").ToString();
+        await fixture.ExecuteAsync(
+            "INSERT INTO core.employee (id, tenant_id, company_id, public_id, first_name, last_name, email, status, version, deleted) " +
+            $"VALUES ('{id}', {seeded.TenantId}, {seeded.CompanyId}, '{publicId}', 'Ada', 'Lovelace', '{Guid.NewGuid():N}@roles.test', 'Active', 1, false)");
+        if (account is { } user)
+            await fixture.ExecuteAsync($"UPDATE identity.\"user\" SET employee_id = '{id}' WHERE id = '{user}'");
+        return (id, publicId);
+    }
+
+    private static Task<CommandResult> TerminateAsync(CoreDbContext db, int tenantId, string employeePublicId)
+        => new TerminateEmployeeFeature.TerminateEmployeeCommandHandler(
+                new EFEmployeeService(db), Users(db, tenantId), new EFRoleService(db),
+                new Outbox.Outbox(db, TimeProvider.System), TimeProvider.System)
+            .Handle(Admin(tenantId), employeePublicId);
+
+    [Fact]
+    public async Task Terminating_an_employee_ends_their_sessions_at_once_with_audit_and_events()
+    {
+        var seeded = await SeedAsync();
+        var (member, memberPublicId) = await AddUserAsync(seeded, "{core:member}");
+        var (_, employeePublicId) = await AddEmployeeAsync(seeded, member);
+        var sessionId = await AddSessionAsync(seeded.TenantId, member);
+
+        await using (var db = Core(seeded.TenantId, seeded.FirstAdmin))
+        {
+            var result = await TerminateAsync(db, seeded.TenantId, employeePublicId);
+            Assert.True(result.Succeeded, result.Message);
+        }
+
+        // Every service sees it on the next request: the session is revoked, not merely refused.
+        var session = await ReadSessionAsTicketsAsync(sessionId);
+        Assert.False(session.UserActive);
+        Assert.NotNull(session.RevokedAt);
+
+        await using var check = await OpenAsync();
+        Assert.Equal("Terminated", await Scalar(check, $"SELECT status FROM core.employee WHERE public_id = '{employeePublicId}'"));
+        Assert.Equal(1L, await Scalar(check,
+            $"SELECT count(*) FROM core.outbox_event WHERE aggregate_public_id = '{employeePublicId}' AND event_type = 'employee.terminated'"));
+        Assert.Equal(1L, await Scalar(check,
+            $"SELECT count(*) FROM core.outbox_event WHERE aggregate_public_id = '{memberPublicId}' AND event_type = 'user.deactivated'"));
+        // Both changes audited, attributed to the administrator who made them.
+        Assert.Equal(2L, await Scalar(check,
+            "SELECT count(*) FROM core.audit_log " +
+            $"WHERE entity_id IN ('{employeePublicId}', '{memberPublicId}') AND actor_id = '{seeded.FirstAdmin}'"));
+    }
+
+    [Fact]
+    public async Task Termination_waits_for_a_role_change_and_then_sees_it()
+    {
+        var seeded = await SeedAsync();
+        var (_, employeePublicId) = await AddEmployeeAsync(seeded, seeded.SecondAdmin);
+
+        // A role write has demoted the first admin and not committed.
+        var (held, heldTransaction) = await HoldLockAsync(seeded.TenantId,
+            $"UPDATE identity.\"user\" SET roles = '{{core:member}}' WHERE id = '{seeded.FirstAdmin}'");
+        await using var _ = held;
+
+        await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+        var terminate = TerminateAsync(db, seeded.TenantId, employeePublicId);
+
+        await Task.Delay(BlockedFor);
+        Assert.False(terminate.IsCompleted, "termination should be waiting for the role-change lock");
+
+        await heldTransaction.CommitAsync();
+
+        // Counting before the demotion committed, it would have seen two admins and gone ahead.
+        Assert.Equal(CoreProblems.LastAdmin, (await terminate).ProblemCode);
+        await using var check = await OpenAsync();
+        Assert.Equal("Active", await Scalar(check, $"SELECT status FROM core.employee WHERE public_id = '{employeePublicId}'"));
+        Assert.Equal("Active", await Scalar(check, $"SELECT status FROM identity.\"user\" WHERE id = '{seeded.SecondAdmin}'"));
+    }
+
+    private static Task<CommandResult> EditAsync(CoreDbContext db, int tenantId, string employeePublicId, string firstName)
+        => new UpdateEmployeeFeature.UpdateEmployeeCommandHandler(
+                new EFEmployeeService(db), Users(db, tenantId), new Outbox.Outbox(db, TimeProvider.System))
+            .Handle(Admin(tenantId), employeePublicId, new(firstName, "Lovelace", null));
+
+    private static Task<CommandResult> AddToRosterAsync(CoreDbContext db, int tenantId, string userPublicId)
+        => new AddUserToRosterFeature.AddUserToRosterCommandHandler(
+                Users(db, tenantId), new EFEmployeeService(db), new Outbox.Outbox(db, TimeProvider.System))
+            .Handle(Admin(tenantId), userPublicId, new("Grace", "Hopper"));
+
+    [Fact]
+    public async Task An_edit_waits_for_a_termination_in_progress_and_neither_is_lost()
+    {
+        var seeded = await SeedAsync();
+        var (member, memberPublicId) = await AddUserAsync(seeded, "{core:member}");
+        var (_, employeePublicId) = await AddEmployeeAsync(seeded, member);
+
+        // Something holding the lock, as a termination does from its first read to its commit.
+        var (held, heldTransaction) = await HoldLockAsync(seeded.TenantId, "SELECT 1");
+        await using var _ = held;
+
+        await using (var editDb = Core(seeded.TenantId, seeded.FirstAdmin))
+        {
+            var edit = EditAsync(editDb, seeded.TenantId, employeePublicId, "Augusta");
+            await Task.Delay(BlockedFor);
+            // Unserialized, an edit and a termination both read version 1 and both emit version 2;
+            // the outbox's unique version index then rolls the loser back, deactivation included.
+            Assert.False(edit.IsCompleted, "an edit should wait for the role-change lock");
+            await heldTransaction.RollbackAsync();
+            Assert.True((await edit).Succeeded);
+        }
+
+        // And raced for real, both land, each with its own version.
+        async Task<CommandResult> Edit()
+        {
+            await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+            return await EditAsync(db, seeded.TenantId, employeePublicId, "Ada");
+        }
+        async Task<CommandResult> Terminate()
+        {
+            await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+            return await TerminateAsync(db, seeded.TenantId, employeePublicId);
+        }
+        var results = await Task.WhenAll(Edit(), Terminate());
+        Assert.All(results, r => Assert.True(r.Succeeded, r.Message));
+
+        await using var check = await OpenAsync();
+        Assert.Equal("Terminated", await Scalar(check, $"SELECT status FROM core.employee WHERE public_id = '{employeePublicId}'"));
+        Assert.Equal("Deactivated", await Scalar(check, $"SELECT status FROM identity.\"user\" WHERE id = '{member}'"));
+        Assert.Equal(3L, await Scalar(check,
+            $"SELECT count(DISTINCT aggregate_version) FROM core.outbox_event WHERE aggregate_public_id = '{employeePublicId}'"));
+        Assert.Equal(1L, await Scalar(check,
+            $"SELECT count(*) FROM core.outbox_event WHERE aggregate_public_id = '{memberPublicId}' AND event_type = 'user.deactivated'"));
+    }
+
+    [Fact]
+    public async Task Another_tenants_account_cannot_be_put_on_the_roster()
+    {
+        var mine = await SeedAsync();
+        var theirs = await SeedAsync();
+        var (theirAccount, theirAccountPublicId) = await AddUserAsync(theirs, "{core:member}");
+
+        await using (var db = Core(mine.TenantId, mine.FirstAdmin))
+            Assert.Equal(CoreProblems.NotFound, (await AddToRosterAsync(db, mine.TenantId, theirAccountPublicId)).ProblemCode);
+
+        await using var check = await OpenAsync();
+        Assert.Equal(true, await Scalar(check, $"SELECT employee_id IS NULL FROM identity.\"user\" WHERE id = '{theirAccount}'"));
+        Assert.Equal(0L, await Scalar(check,
+            $"SELECT count(*) FROM core.employee WHERE tenant_id IN ({mine.TenantId}, {theirs.TenantId}) AND first_name = 'Grace'"));
+        Assert.Equal(0L, await Scalar(check,
+            $"SELECT count(*) FROM core.outbox_event WHERE aggregate_public_id = '{theirAccountPublicId}'"));
+    }
+
+    [Fact]
+    public async Task Another_tenants_employee_cannot_be_edited_or_terminated()
+    {
+        var mine = await SeedAsync();
+        var theirs = await SeedAsync();
+        var (_, theirEmployee) = await AddEmployeeAsync(theirs);
+
+        await using (var db = Core(mine.TenantId, mine.FirstAdmin))
+        {
+            var edit = await EditAsync(db, mine.TenantId, theirEmployee, "Mallory");
+            Assert.Equal(CoreProblems.NotFound, edit.ProblemCode);
+        }
+
+        await using (var db = Core(mine.TenantId, mine.FirstAdmin))
+            Assert.Equal(CoreProblems.NotFound, (await TerminateAsync(db, mine.TenantId, theirEmployee)).ProblemCode);
+
+        await using var check = await OpenAsync();
+        Assert.Equal("Ada|Active", await Scalar(check,
+            $"SELECT first_name || '|' || status FROM core.employee WHERE public_id = '{theirEmployee}'"));
+    }
+
+    [Fact]
+    public async Task An_account_put_on_the_roster_twice_at_once_gets_one_employee()
+    {
+        var seeded = await SeedAsync();
+        var (account, accountPublicId) = await AddUserAsync(seeded, "{core:member}");
+
+        async Task<CommandResult> Add()
+        {
+            await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
+            return await AddToRosterAsync(db, seeded.TenantId, accountPublicId);
+        }
+
+        var results = await Task.WhenAll(Add(), Add());
+
+        // The second waits for the first's lock, then sees the link it made.
+        Assert.Single(results, r => r.Succeeded);
+        Assert.Single(results, r => r.ProblemCode == CoreProblems.UserHasEmployee);
+        await using var check = await OpenAsync();
+        Assert.Equal(1L, await Scalar(check,
+            "SELECT count(*) FROM core.employee e JOIN identity.\"user\" u ON u.email = e.email " +
+            $"WHERE u.id = '{account}'"));
     }
 
     private async Task<Guid> AddSessionAsync(int tenantId, Guid userId)

@@ -12,7 +12,13 @@ public static class GetUsersFeature
 {
     /// <param name="Roles">Role keys; the page names them from <c>GET /roles</c>.</param>
     /// <param name="Invitation">For an account not yet accepted: how its latest invitation is doing. Null otherwise.</param>
-    public record UserModel(string UserId, string Email, string Status, IReadOnlyList<string> Roles, InvitationModel? Invitation);
+    /// <param name="EmployeeId">
+    /// The employee the account belongs to, or null for one not on the roster (the administrator made
+    /// at provisioning). The Employees page joins on it to show who has access.
+    /// </param>
+    public record UserModel(
+        string UserId, string Email, string Status, IReadOnlyList<string> Roles, InvitationModel? Invitation,
+        string? EmployeeId);
 
     /// <summary>
     /// What an administrator needs to decide whether to resend (CLAUDE.md, "delivery status is
@@ -26,11 +32,14 @@ public static class GetUsersFeature
     /// <param name="Expired">True when the newest link can no longer be used.</param>
     public record InvitationModel(string Delivery, DateTimeOffset ExpiresAt, bool Expired);
 
-    public class GetUsersQueryHandler(IUserService users, TimeProvider clock)
+    public class GetUsersQueryHandler(IUserService users, IEmployeeService employees, TimeProvider clock)
     {
         public async Task<CommandResult> Handle(Caller caller, CancellationToken ct = default)
         {
             var rows = await users.ListAsync(ct);
+
+            // Terminated included: a terminated employee's deactivated account still belongs to them.
+            var employeeIds = (await employees.ListAsync(includeTerminated: true, ct)).ToDictionary(e => e.Id, e => e.PublicId);
 
             var invited = rows.Where(u => u.Status == UserStatus.Invited).ToList();
             var tokens = invited.Count == 0 ? [] : await users.ListInvitationTokensAsync(invited.Select(u => u.Id).ToList(), ct);
@@ -61,7 +70,8 @@ public static class GetUsersFeature
             }
 
             return CommandResult.Ok(rows.Select(u => new UserModel(
-                u.PublicId, u.Email, u.Status.ToString(), u.Roles, InvitationOf(u))).ToList());
+                u.PublicId, u.Email, u.Status.ToString(), u.Roles, InvitationOf(u),
+                u.EmployeeId is { } id && employeeIds.TryGetValue(id, out var employeeId) ? employeeId : null)).ToList());
         }
     }
 
@@ -71,10 +81,11 @@ public static class GetUsersFeature
             async (
                 [FromServices] ICallerContext callerContext,
                 [FromServices] IUserService users,
+                [FromServices] IEmployeeService employees,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new GetUsersQueryHandler(users, clock);
+                var handler = new GetUsersQueryHandler(users, employees, clock);
                 return (await handler.Handle(callerContext.Require(), ct)).CreateIResult();
             })
             .RequireAuthorization()

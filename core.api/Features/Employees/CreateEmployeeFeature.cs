@@ -19,26 +19,11 @@ public static class CreateEmployeeFeature
         public async Task<CommandResult> Handle(
             Caller caller, CreateEmployeeCommand cmd, CancellationToken ct = default)
         {
-            var first = cmd.FirstName?.Trim();
-            var last = cmd.LastName?.Trim();
-            var email = cmd.Email?.Trim().ToLowerInvariant();
+            var (details, problem) = EmployeeRules.Clean(cmd.FirstName, cmd.LastName, cmd.Email);
+            if (details is null)
+                return CommandResult.Invalid(CoreProblems.ValidationFailed, problem!);
 
-            if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(last))
-            {
-                return CommandResult.Invalid(
-                    CoreProblems.ValidationFailed, "First and last name are required.");
-            }
-
-            // Length is checked HERE, not left to the INSERT. A single over-long name reaching
-            // the database fails the whole statement with a message naming a column, instead of
-            // the one field the person can fix.
-            if (first.Length > 100 || last.Length > 100)
-                return CommandResult.Invalid(CoreProblems.ValidationFailed, "Names are limited to 100 characters.");
-
-            if (email is { Length: > 320 })
-                return CommandResult.Invalid(CoreProblems.ValidationFailed, "Email is limited to 320 characters.");
-
-            if (email is not null && await employees.EmailInUseAsync(email, ct))
+            if (details.Email is not null && await employees.EmailInUseAsync(details.Email, ct))
             {
                 return CommandResult.Conflict(
                     CoreProblems.EmailInUse, "Another employee already has that email address.");
@@ -50,9 +35,9 @@ public static class CreateEmployeeFeature
                 // must carry it and both have to be in one transaction.
                 PublicId = PublicId.New("emp").ToString(),
                 CompanyId = await employees.DefaultCompanyIdAsync(ct),
-                FirstName = first,
-                LastName = last,
-                Email = email,
+                FirstName = details.FirstName,
+                LastName = details.LastName,
+                Email = details.Email,
             };
 
             employees.Add(employee);

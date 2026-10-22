@@ -12,11 +12,9 @@ namespace AppPlatform.Core.Features.Users;
 /// <summary>
 /// Stops an account signing in, at once, without deleting it. Design: docs/permissions.md §6.
 ///
-/// The account keeps its roles, so reactivating it restores exactly what it had. Its sessions are
-/// revoked as well as refused: session revalidation already refuses an inactive user, but a revoked
-/// session stays dead if the account is later reactivated, so a cookie copied before deactivation
-/// is never good again. An invitation not yet accepted stops working too (AcceptInviteFeature
-/// accepts only an invited account).
+/// The account keeps its roles and its sessions are revoked (AccountAccess, shared with
+/// terminating an employee). An invitation not yet accepted stops working too
+/// (AcceptInviteFeature accepts only an invited account).
 /// </summary>
 public static class DeactivateUserFeature
 {
@@ -57,15 +55,7 @@ public static class DeactivateUserFeature
             if (RoleRules.RemovesLastAdmin(everyone, customRoles, u => u.Id == user.Id ? [] : u.Roles, customRoles))
                 return RoleRules.LastAdmin();
 
-            user.Status = UserStatus.Deactivated;
-            user.AccessVersion++;
-
-            var now = clock.GetUtcNow();
-            foreach (var session in await users.ListLiveSessionsAsync(user.Id, ct))
-                session.RevokedAt = now;
-
-            outbox.AddEvent("user", user.PublicId, user.AccessVersion, "user.deactivated",
-                $$"""{"userId":"{{user.PublicId}}"}""");
+            await AccountAccess.DeactivateAsync(user, users, outbox, clock.GetUtcNow(), ct);
 
             await users.SaveAsync(ct);
             await transaction.CommitAsync(ct);

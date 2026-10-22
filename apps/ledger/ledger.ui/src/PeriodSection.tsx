@@ -27,7 +27,7 @@ export function PeriodSection({
 
   return (
     <Card>
-      <section aria-labeledby="period-heading">
+      <section aria-labelledby="period-heading">
         <CardHeader id="period-heading" title="Closed periods" description="Nothing can be posted on or before a closed date." />
         <CardContent className="grid gap-4">
           <ul className="grid gap-2">

@@ -19,7 +19,7 @@ export function JournalSection({
 
   return (
     <Card>
-      <section aria-labeledby="journal-heading">
+      <section aria-labelledby="journal-heading">
         <CardHeader id="journal-heading" title="Journal" description="Every posted entry, newest first. Posted entries never change." />
 
         {entries.length === 0 ? (

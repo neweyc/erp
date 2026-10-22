@@ -10,6 +10,8 @@ export const Permissions = {
   core: {
     employeeRead: 'core.employee.read',
     employeeCreate: 'core.employee.create',
+    employeeUpdate: 'core.employee.update',
+    employeeTerminate: 'core.employee.terminate',
     userRead: 'core.user.read',
     userManage: 'core.user.manage',
     roleManage: 'core.role.manage',

@@ -219,7 +219,7 @@ test('a backup restores into a working, verified copy', async () => {
   const invited = await restored.api.post(
     `${RESTORED.core}/api/core/v1/employees/${(await employee.json()).employeeId}/invite`, {
       headers: { 'X-CSRF-Token': restored.csrf },
-      data: { roles: ['core:member'] },
+      data: { roles: ['core:member'], email },
     })
   expect(invited.ok(), await invited.text()).toBe(true)
 

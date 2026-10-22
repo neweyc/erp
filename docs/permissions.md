@@ -39,6 +39,8 @@ a breaking change, like a problem code. Each has a description in code, shown in
 |---|---|
 | `core.employee.read` | See the employee roster |
 | `core.employee.create` | Add employees |
+| `core.employee.update` | Edit employees' names and email addresses |
+| `core.employee.terminate` | Terminate employees, which also ends their access |
 | `core.user.read` | See accounts, their roles, and the roles defined |
 | `core.user.manage` | Invite people and change anyone's roles |
 | `core.role.manage` | Create, edit and delete the organisation's own roles |
@@ -59,7 +61,7 @@ permission name are never confused.
 | Key | Grants |
 |---|---|
 | `core:admin` | every core permission, `core.role.manage` included |
-| `core:manager` | `core.employee.read`, `core.employee.create` |
+| `core:manager` | `core.employee.read`, `core.employee.create`, `core.employee.update` (not terminate: it ends access, and a Manager cannot otherwise take anyone's) |
 | `core:member` | `core.employee.read` |
 | `tickets:requester` | read, create |
 | `tickets:agent` | read, create, assign, close |
@@ -190,9 +192,12 @@ reading it and saving it, and the save would set it active again. **Sign-in** ta
 from reading the account until its new session commits: sign-ins never wait for each other, but a
 deactivation waits for those in progress and so revokes their sessions too, and a sign-in that starts
 during a deactivation waits and is then refused. Other writes to a user, such as a
-password rehash, take no lock and write other columns, so a role change never makes them fail. Any
-future write that can remove an active user, such as termination, **must take the same lock** and
-run the same check.
+password rehash, take no lock and write other columns, so a role change never makes them fail.
+Terminating an employee takes it and runs the same check (§7). So do two writes that change no
+access themselves: **editing an employee**, because an employee's address is where an invitation
+goes and termination writes the same record, and **putting an account on the roster**, because the
+link decides whose termination ends the account. Any future write that can remove an active user
+**must take the same lock** and run the same check.
 
 ### Deactivating and reactivating an account
 
@@ -221,11 +226,36 @@ only grant what you hold") cannot coexist with "licensing grants nobody anything
 administrator could then never be given an app role at all. Recorded in `docs/open-questions.md`
 in case a customer needs delegated administration.
 
-## 7. Invitations and provisioning
+## 7. Invitations, the roster, and provisioning
 
+- **Every account belongs to an employee** (decided 2026-10-21). Access is given from the roster, by
+  employee, never to a typed address: matching people by email guesses, and the link is what lets
+  termination end access. The one exception is the administrator made at provisioning, who exists
+  before any roster; `GET /users` gives `employeeId: null` for them, and
+  `POST /users/{id}/employee` (`core.user.manage`) gives them a record made from the account's own
+  email. It refuses (`email_in_use`) rather than link to an existing employee with that address, and
+  `user_has_employee` once linked; it takes the role-change lock, so two at once make one record.
+  Linking advances the account's access version and emits `user.employee_linked` (user and employee
+  ids) alongside `employee.created`, so the account's own history records it.
+- `PUT /employees/{id}` (`core.employee.update`) replaces first name, last name and email (blank
+  removes it). It never changes the account's sign-in email: that is a credential, and editing the
+  roster must not be a way to move someone's sign-in to an address you control. The Employees page
+  shows when the two differ. Event `employee.updated`; nothing changed means no save and no event.
+  It takes the role-change lock: without it an edit and a termination both number their event with
+  the same version, and the outbox's unique index rolls back the termination, deactivation included.
+- `POST /employees/{id}/terminate` (`core.employee.terminate`) takes the role-change lock, refuses
+  your own record (`cannot_terminate_self`) and the last administrator (`last_admin`), deactivates
+  the linked account exactly as §6 does (shared code, `AccountAccess`), and marks the employee
+  terminated, in one save. Events `user.deactivated` and `employee.terminated`. A terminated employee
+  stays on record (`?includeTerminated=true`); reactivating or inviting them is refused. Undoing a
+  termination is not built.
+- On leave changes nothing about access.
 - Provisioning gives the first user `core:admin`.
 - `POST …/employees/{id}/invite` takes `roles` (role keys, default `["core:member"]`), validated as
-  for assignment, and requires `core.user.manage`.
+  for assignment, and requires `core.user.manage`. It also requires `email`, the address the inviter
+  was shown, and refuses with `employee_changed` if the employee's address is now different (compared
+  under the lock, which editing also takes). Without it a Manager, who may edit addresses, could change
+  one while an administrator had "Give access" open and receive the administrator's invitation.
 - `POST /api/core/v1/users/{userId}/invitation` (`core.user.manage`) sends an invited person a fresh
   link, for an email that never arrived or a link that expired. Refused with `not_invited` for any
   other account, and `employee_terminated` as inviting is. Earlier links are left alone, not revoked:
@@ -248,8 +278,12 @@ in case a customer needs delegated administration.
 - **Users** page (`core.user.read`): each account with its roles, and for an invited account how its
   invitation is doing ("email could not be delivered", "link expired"). With `core.user.manage`, an
   editor lists every assignable role as a checkbox, with its description, and saves the
-  differences as `add`/`remove`; and each account can be deactivated (on a second click; never your
-  own), reactivated, or, while invited, sent a new invitation.
+  differences as `add`/`remove`; and each account can be deactivated (after a confirming dialog;
+  never your own), reactivated, or, while invited, sent a new invitation. "Invite someone" picks an
+  employee with an address and no account; an account not on the roster says so and can be added.
+- **Employees** page (`core.employee.read`): the roster, with each person's access when the reader
+  has `core.user.read`. Add (with "send an invitation" and the role checklist, for `core.user.manage`),
+  edit, give access, and terminate, each shown only with its permission.
 - **Roles** page (`core.user.read`): built-in and custom roles, what each grants, and how many
   people hold each. With `core.role.manage`: create a role, start one as a copy of any role, and edit
   or delete custom roles. The permission checklist is grouped by app and shows each description.
@@ -264,7 +298,7 @@ for both kinds of principal, as `docs/integration.md` requires.
 
 - Delegated administration, that is, a non-escalation rule (§6).
 - Row-level rules (§4).
-- Terminating an employee, which will deactivate the linked account under the same lock (§6).
+- Undoing a termination (rehiring), which would also have to decide whether the old account returns.
 - Recording who resent an invitation. Tokens are not audited entities, so the resend leaves a token
   row and an email but no actor.
 - Operator roles in the platform console.

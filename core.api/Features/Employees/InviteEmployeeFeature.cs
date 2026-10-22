@@ -20,7 +20,13 @@ namespace AppPlatform.Core.Features.Employees;
 public static class InviteEmployeeFeature
 {
     /// <param name="Roles">Role keys to give the account, built-in or custom. Defaults to <c>core:member</c>.</param>
-    public record InviteEmployeeCommand(List<string?>? Roles);
+    /// <param name="Email">
+    /// The address the inviter saw, which must still be the employee's. Required: the invitation goes
+    /// to the employee's CURRENT address, and a Manager may edit addresses, so without this a Manager
+    /// could change the address while an administrator had the form open and receive an
+    /// administrator invitation the administrator approved for someone else.
+    /// </param>
+    public record InviteEmployeeCommand(List<string?>? Roles, string? Email);
 
     public class InviteEmployeeCommandHandler(
         IEmployeeService employees,
@@ -42,6 +48,10 @@ public static class InviteEmployeeFeature
             if (RoleRules.CleanList(cmd.Roles ?? [BuiltInRoles.CoreMember]) is not { } cleaned)
                 return CommandResult.Invalid(CoreProblems.ValidationFailed, "Role keys cannot be empty.");
             var requested = cleaned.Order(StringComparer.Ordinal).ToArray();
+
+            if (string.IsNullOrWhiteSpace(cmd.Email))
+                return CommandResult.Invalid(CoreProblems.ValidationFailed, "Say which address the invitation goes to.");
+            var expectedEmail = cmd.Email.Trim().ToLowerInvariant();
 
             // Giving roles is a role write, so it takes the tenant's role-change lock like the
             // others: a custom role named here cannot be deleted before this account is saved
@@ -67,6 +77,15 @@ public static class InviteEmployeeFeature
                 return CommandResult.Invalid(
                     CoreProblems.ValidationFailed,
                     "This employee has no email address, so there is nowhere to send an invitation.");
+            }
+
+            // Compared under the lock, which editing an employee also takes, so the address cannot
+            // change between this check and the save.
+            if (employee.Email != expectedEmail)
+            {
+                return CommandResult.Conflict(
+                    CoreProblems.EmployeeChanged,
+                    "This employee's email address has changed since you opened this. Check it and try again.");
             }
 
             // A terminated employee cannot be given access. This is also why the email-matching

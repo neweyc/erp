@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -34,9 +34,11 @@ type Handler = (init?: RequestInit) => { status?: number; body: unknown }
 
 /** Routes each request by method and path; records every call so a test can assert what was sent. */
 function stubApi(handlers: Record<string, Handler>) {
+  // The roster feeds "Invite someone"; empty unless a test says otherwise.
+  const routes: Record<string, Handler> = { 'GET /api/core/v1/employees': () => ({ body: [] }), ...handlers }
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const key = `${(init?.method ?? 'GET').toUpperCase()} ${String(input)}`
-    const handler = handlers[key]
+    const handler = routes[key]
     const { status = 200, body } = handler ? handler(init) : { status: 404, body: { problemCode: 'not_found' } }
 
     return Promise.resolve({ ok: status < 400, status, json: async () => body } as Response)
@@ -295,5 +297,58 @@ describe('users page', () => {
     renderUsers()
 
     expect(await screen.findByRole('cell', { name: 'Invited: link expired' })).toBeInTheDocument()
+  })
+
+  it('invites someone from the roster, offering only people without an account', async () => {
+    const roster = [
+      { employeeId: 'emp_grace', firstName: 'Grace', lastName: 'Hopper', displayName: 'Grace Hopper', email: 'grace@acme.test', status: 'Active' },
+      { employeeId: 'emp_ada', firstName: 'Ada', lastName: 'Lovelace', displayName: 'Ada Lovelace', email: 'ada@acme.test', status: 'Active' },
+      { employeeId: 'emp_linus', firstName: 'Linus', lastName: 'Torvalds', displayName: 'Linus Torvalds', email: null, status: 'Active' },
+    ]
+    const fetchMock = stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, employeeId: 'emp_grace' }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'GET /api/core/v1/employees': () => ({ body: roster }),
+      'POST /api/core/v1/employees/emp_ada/invite': () => ({ body: {} }),
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    await screen.findByRole('cell', { name: 'Member' })
+    await user.click(screen.getByRole('button', { name: 'Invite someone' }))
+
+    // Grace already has an account and Linus has no address: only Ada can be invited.
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Ada Lovelace (ada@acme.test)'])
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }))
+
+    expect(await screen.findByText('An invitation is on its way to ada@acme.test.')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/core/v1/employees/emp_ada/invite',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ roles: ['core:member'], email: 'ada@acme.test' }) }),
+    )
+  })
+
+  it('puts an account that is not on the roster onto it', async () => {
+    const fetchMock = stubApi({
+      'GET /api/core/v1/auth/session': () => ({ body: admin }),
+      'GET /api/core/v1/users': () => ({ body: [{ ...grace, employeeId: null }] }),
+      'GET /api/core/v1/roles': () => ({ body: roles }),
+      'POST /api/core/v1/users/usr_grace/employee': () => ({ body: {} }),
+    })
+    const user = userEvent.setup()
+    renderUsers()
+
+    expect(await screen.findByText('Not on the roster')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add grace@acme.test to the roster' }))
+    await user.type(screen.getByLabelText('First name'), 'Grace')
+    await user.type(screen.getByLabelText('Last name'), 'Hopper')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add to roster' }))
+
+    expect(await screen.findByText('grace@acme.test is on the roster.')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/core/v1/users/usr_grace/employee',
+      expect.objectContaining({ body: JSON.stringify({ firstName: 'Grace', lastName: 'Hopper' }) }),
+    )
   })
 })

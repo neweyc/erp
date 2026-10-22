@@ -1,0 +1,218 @@
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SessionProvider } from '../components/session-provider'
+import type { Session } from '../lib/session'
+import { Employees } from './employees'
+
+const admin: Session = {
+  userId: 'usr_admin',
+  email: 'admin@acme.test',
+  roles: [{ key: 'core:admin', name: 'Administrator' }],
+  permissions: [
+    'core.employee.read', 'core.employee.create', 'core.employee.update', 'core.employee.terminate',
+    'core.user.read', 'core.user.manage', 'core.role.manage',
+  ],
+  tenantName: 'Acme',
+  licensedApps: [],
+  tenantSuspended: false,
+}
+
+const employee = (id: string, first: string, last: string, email: string | null, status = 'Active') => ({
+  employeeId: id, firstName: first, lastName: last, displayName: `${first} ${last}`, email, status,
+})
+
+const ada = employee('emp_ada', 'Ada', 'Lovelace', 'ada@acme.test')
+const grace = employee('emp_grace', 'Grace', 'Hopper', 'grace@acme.test')
+const linus = employee('emp_linus', 'Linus', 'Torvalds', null)
+
+const roles = [
+  { key: 'core:admin', name: 'Administrator', description: 'Manages people.', builtIn: true, permissions: [], holders: 1 },
+  { key: 'core:member', name: 'Member', description: 'Sees the roster.', builtIn: true, permissions: [], holders: 1 },
+]
+
+/** Ada has an account (signing in at a different address); Grace and Linus do not. */
+const graceAccount = { userId: 'usr_ada', email: 'ada.old@acme.test', status: 'Active', roles: ['core:member'], invitation: null, employeeId: 'emp_ada' }
+
+type Handler = (init?: RequestInit) => { status?: number; body: unknown }
+
+function stubApi(handlers: Record<string, Handler>) {
+  const routes: Record<string, Handler> = {
+    'GET /api/core/v1/auth/session': () => ({ body: admin }),
+    'GET /api/core/v1/employees?includeTerminated=false': () => ({ body: [ada, grace, linus] }),
+    'GET /api/core/v1/users': () => ({ body: [graceAccount] }),
+    'GET /api/core/v1/roles': () => ({ body: roles }),
+    ...handlers,
+  }
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const key = `${(init?.method ?? 'GET').toUpperCase()} ${String(input)}`
+    const handler = routes[key]
+    const { status = 200, body } = handler ? handler(init) : { status: 404, body: { problemCode: 'not_found' } }
+    return Promise.resolve({ ok: status < 400, status, json: async () => body } as Response)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/**
+ * Renders the page and waits until the accounts have loaded too. The roster arrives first; when the
+ * accounts follow, the table's columns change and its cells are replaced, so a button found before
+ * then is no longer the one on the page.
+ */
+async function renderEmployees({ withAccounts = true } = {}) {
+  render(
+    <SessionProvider>
+      <MemoryRouter>
+        <Employees />
+      </MemoryRouter>
+    </SessionProvider>,
+  )
+  if (withAccounts) await screen.findByText('Signs in as ada.old@acme.test')
+  else await screen.findByRole('row', { name: /Ada Lovelace/ })
+}
+
+const sent = (fetchMock: ReturnType<typeof stubApi>, method: string, path: string) =>
+  fetchMock.mock.calls.filter(([url, init]) => String(url) === path && init?.method === method).map(([, init]) => JSON.parse(String(init!.body)))
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('employees page', () => {
+  it('shows who has access, and where someone signs in when it differs from the roster', async () => {
+    stubApi({})
+    await renderEmployees()
+
+    const adaRow = await screen.findByRole('row', { name: /Ada Lovelace/ })
+    // Two "Active" cells: her employment, and her account.
+    expect(within(adaRow).getAllByRole('cell', { name: 'Active' })).toHaveLength(2)
+    expect(within(adaRow).getByText('Signs in as ada.old@acme.test')).toBeInTheDocument()
+    expect(within(screen.getByRole('row', { name: /Grace Hopper/ })).getByRole('cell', { name: 'No access' })).toBeInTheDocument()
+  })
+
+  it('offers access only to someone with an email address and no account', async () => {
+    stubApi({})
+    await renderEmployees()
+
+    await screen.findByRole('row', { name: /Ada Lovelace/ })
+    expect(screen.getByRole('button', { name: 'Give Grace Hopper access' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Give Ada Lovelace access' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Give Linus Torvalds access' })).not.toBeInTheDocument()
+  })
+
+  it('gives access with the roles chosen', async () => {
+    const fetchMock = stubApi({ 'POST /api/core/v1/employees/emp_grace/invite': () => ({ body: {} }) })
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await user.click(await screen.findByRole('button', { name: 'Give Grace Hopper access' }))
+    await user.click(screen.getByRole('checkbox', { name: /Administrator/ }))
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }))
+
+    expect(await screen.findByText('An invitation is on its way to grace@acme.test.')).toBeInTheDocument()
+    expect(sent(fetchMock, 'POST', '/api/core/v1/employees/emp_grace/invite')).toEqual([
+      { roles: ['core:member', 'core:admin'], email: 'grace@acme.test' },
+    ])
+  })
+
+  it('adds an employee and invites them in one step', async () => {
+    const fetchMock = stubApi({
+      'POST /api/core/v1/employees': () => ({ body: { employeeId: 'emp_new' } }),
+      'POST /api/core/v1/employees/emp_new/invite': () => ({ body: {} }),
+    })
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await user.click(await screen.findByRole('button', { name: 'Add employee' }))
+    await user.type(screen.getByLabelText('First name'), 'Margaret')
+    await user.type(screen.getByLabelText('Last name'), 'Hamilton')
+    await user.type(screen.getByLabelText('Email'), 'margaret@acme.test')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add employee' }))
+
+    expect(await screen.findByText('Margaret Hamilton is on the roster, and an invitation is on its way.')).toBeInTheDocument()
+    expect(sent(fetchMock, 'POST', '/api/core/v1/employees')).toEqual([
+      { firstName: 'Margaret', lastName: 'Hamilton', email: 'margaret@acme.test' },
+    ])
+    expect(sent(fetchMock, 'POST', '/api/core/v1/employees/emp_new/invite')).toEqual([
+      { roles: ['core:member'], email: 'margaret@acme.test' },
+    ])
+  })
+
+  it('says so when the employee was added but the invitation was refused', async () => {
+    stubApi({
+      'POST /api/core/v1/employees': () => ({ body: { employeeId: 'emp_new' } }),
+      'POST /api/core/v1/employees/emp_new/invite': () => ({ status: 409, body: { problemCode: 'email_in_use' } }),
+    })
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await user.click(await screen.findByRole('button', { name: 'Add employee' }))
+    await user.type(screen.getByLabelText('First name'), 'Margaret')
+    await user.type(screen.getByLabelText('Last name'), 'Hamilton')
+    await user.type(screen.getByLabelText('Email'), 'margaret@acme.test')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add employee' }))
+
+    expect(await screen.findByText(/Margaret Hamilton is on the roster, but the invitation was not sent/)).toBeInTheDocument()
+  })
+
+  it('sends nothing, and says why, when the address changed while the form was open', async () => {
+    stubApi({ 'POST /api/core/v1/employees/emp_grace/invite': () => ({ status: 409, body: { problemCode: 'employee_changed' } }) })
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await user.click(await screen.findByRole('button', { name: 'Give Grace Hopper access' }))
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }))
+
+    expect(await within(screen.getByRole('dialog')).findByText(/Their email address changed while this was open/)).toBeInTheDocument()
+  })
+
+  it('keeps the form open, with the reason, when an edit is refused', async () => {
+    stubApi({ 'PUT /api/core/v1/employees/emp_grace': () => ({ status: 409, body: { problemCode: 'email_in_use' } }) })
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Grace Hopper' }))
+    await user.clear(screen.getByLabelText('Email'))
+    await user.type(screen.getByLabelText('Email'), 'ada@acme.test')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/already has that email address/)
+    expect(screen.getByLabelText('Email')).toHaveValue('ada@acme.test')
+  })
+
+  it('terminates only after confirming, and says their access ends', async () => {
+    const fetchMock = stubApi({ 'POST /api/core/v1/employees/emp_ada/terminate': () => ({ body: {} }) })
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await user.click(await screen.findByRole('button', { name: 'Terminate Ada Lovelace' }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(/signed out at once/)
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/core/v1/employees/emp_ada/terminate', expect.anything())
+
+    await user.click(screen.getByRole('button', { name: 'Confirm: terminate Ada Lovelace' }))
+
+    expect(await screen.findByText('Ada Lovelace is terminated.')).toBeInTheDocument()
+  })
+
+  it('shows terminated people only when asked', async () => {
+    const fetchMock = stubApi({
+      'GET /api/core/v1/employees?includeTerminated=true': () => ({ body: [ada, employee('emp_old', 'Old', 'Timer', null, 'Terminated')] }),
+    })
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await screen.findByRole('row', { name: /Ada Lovelace/ })
+    await user.click(screen.getByRole('checkbox', { name: 'Show terminated' }))
+
+    expect(await screen.findByRole('row', { name: /Old Timer/ })).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/core/v1/employees?includeTerminated=true', expect.anything()))
+  })
+
+  it('is a plain roster for someone who may only read it', async () => {
+    stubApi({ 'GET /api/core/v1/auth/session': () => ({ body: { ...admin, permissions: ['core.employee.read'] } }) })
+    await renderEmployees({ withAccounts: false })
+
+    await screen.findByRole('row', { name: /Ada Lovelace/ })
+    expect(screen.queryByRole('columnheader', { name: 'Access' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add employee|Edit|Terminate|Give/ })).not.toBeInTheDocument()
+  })
+})

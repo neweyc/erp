@@ -27,7 +27,7 @@ test('an administrator resends an invitation, then deactivates and reactivates t
   expect(employee.status(), await employee.text()).toBe(200)
   const invited = await admin.post(`${CORE}/api/core/v1/employees/${(await employee.json()).employeeId}/invite`, {
     headers: { 'X-CSRF-Token': csrf },
-    data: { roles: ['core:member'] },
+    data: { roles: ['core:member'], email },
   })
   expect(invited.status(), await invited.text()).toBe(200)
   const firstLink = await waitForInvitation(email)

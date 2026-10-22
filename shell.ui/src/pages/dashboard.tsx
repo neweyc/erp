@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowRight, LayoutGrid, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import { ArrowRight, LayoutGrid, ShieldCheck, Sparkles, Users, UsersRound } from 'lucide-react'
 import { Permissions } from '@app-platform/web-api'
 import { Alert, Card, EmptyState, PageHeader, PageStack } from '@app-platform/ui-kit'
 import { useSession } from '../components/session-provider'
@@ -24,6 +24,7 @@ export function Dashboard() {
   )
   const canManageUsers = session.permissions.includes(Permissions.core.userManage)
   const canSeeUsers = session.permissions.includes(Permissions.core.userRead)
+  const canSeeRoster = session.permissions.includes(Permissions.core.employeeRead)
 
   return (
     <PageStack>
@@ -48,7 +49,7 @@ export function Dashboard() {
         </Alert>
       )}
 
-      <section aria-labeledby="apps-heading" className="grid gap-3">
+      <section aria-labelledby="apps-heading" className="grid gap-3">
         <h2 id="apps-heading" className="text-sm font-medium text-muted-foreground">
           Your applications
         </h2>
@@ -70,18 +71,27 @@ export function Dashboard() {
         )}
       </section>
 
-      {canSeeUsers && (
-        <section aria-labeledby="admin-heading" className="grid gap-3">
+      {(canSeeRoster || canSeeUsers) && (
+        <section aria-labelledby="admin-heading" className="grid gap-3">
           <h2 id="admin-heading" className="text-sm font-medium text-muted-foreground">
             Administration
           </h2>
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <li>
-              <Tile to="/users" icon={Users} title="People and access" description="Invite, deactivate, and give roles." />
-            </li>
-            <li>
-              <Tile to="/roles" icon={ShieldCheck} title="Roles" description="What each role allows; make your own." />
-            </li>
+            {canSeeRoster && (
+              <li>
+                <Tile to="/employees" icon={UsersRound} title="Employees" description="The roster: add people and give them access." />
+              </li>
+            )}
+            {canSeeUsers && (
+              <>
+                <li>
+                  <Tile to="/users" icon={Users} title="Accounts" description="Who can sign in, and with which roles." />
+                </li>
+                <li>
+                  <Tile to="/roles" icon={ShieldCheck} title="Roles" description="What each role allows; make your own." />
+                </li>
+              </>
+            )}
           </ul>
         </section>
       )}

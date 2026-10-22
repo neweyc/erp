@@ -29,6 +29,9 @@ public class EFEmployeeService(CoreDbContext db) : IEmployeeService
     public Task<bool> EmailInUseAsync(string email, CancellationToken ct = default)
         => db.Employees.AnyAsync(e => e.Email == email && !e.Deleted, ct);
 
+    public Task<bool> EmailInUseByAnotherAsync(string email, Guid employeeId, CancellationToken ct = default)
+        => db.Employees.AnyAsync(e => e.Email == email && e.Id != employeeId && !e.Deleted, ct);
+
     public async Task<int> DefaultCompanyIdAsync(CancellationToken ct = default)
     {
         // Exactly one company per tenant today. Ordered so that the day a tenant has several,

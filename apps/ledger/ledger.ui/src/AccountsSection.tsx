@@ -40,7 +40,7 @@ export function AccountsSection({
 
   return (
     <Card>
-      <section aria-labeledby="accounts-heading">
+      <section aria-labelledby="accounts-heading">
         <CardHeader id="accounts-heading" title="Chart of accounts" />
 
         {accounts.length === 0 ? (

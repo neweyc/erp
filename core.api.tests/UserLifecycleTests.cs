@@ -44,6 +44,7 @@ public class UserLifecycleTests
         _users.Setup(s => s.ListInvitationEmailsAsync(It.IsAny<IReadOnlyCollection<Guid>>(), default))
             .ReturnsAsync((IReadOnlyCollection<Guid> ids, CancellationToken _) => _emails.Where(e => ids.Contains(e.MessageId)).ToList());
         _roles.Setup(s => s.ListAsync(default)).ReturnsAsync([]);
+        _employees.Setup(s => s.ListAsync(true, default)).ReturnsAsync([]);
     }
 
     private User Existing(UserStatus status = UserStatus.Active, string role = BuiltInRoles.CoreMember, Guid? id = null)
@@ -289,7 +290,7 @@ public class UserLifecycleTests
 
     private async Task<UserModel> Listed(User user)
     {
-        var result = await new GetUsersQueryHandler(_users.Object, _clock).Handle(_admin);
+        var result = await new GetUsersQueryHandler(_users.Object, _employees.Object, _clock).Handle(_admin);
         return Assert.IsType<List<UserModel>>(result.Value).Single(u => u.UserId == user.PublicId);
     }
 

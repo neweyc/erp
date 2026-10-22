@@ -246,8 +246,8 @@ ERP will need again.
 - **Webhooks, public API, API keys.** Designed in `docs/integration.md`; the three irreversible
   decisions are built, the surface is not.
 - **Idle timeout, notifications bell** — `ActivityPolicy` anticipates both; neither is built.
-- **Terminating an employee.** Will deactivate the linked account under the role-change lock, as
-  `DeactivateUserFeature` does; reactivation and resending already refuse a terminated employee.
+- **Undoing a termination (rehiring).** Termination is built (Cycle 16); reversing it is not, and
+  would have to decide whether the old account comes back with its old roles.
 
 ---
 
@@ -647,6 +647,67 @@ ahead of review while Codex was at its usage limit; the review then ran and its 
 Open from the closure: D16.
 
 ## Current cycle
+
+**Cycle 16 — the employee roster, and inviting people from it.** Chris: "lets work on the employee
+roster now. How will we invite users?", then "go with your recommendations". Inviting existed only
+as an API (`POST /employees/{id}/invite`); no screen could reach it, and employees could be neither
+edited nor terminated. **Complete. Independent review (Codex, two rounds) CLOSED: no blocking
+findings.**
+
+Decided (Chris accepted the recommendations, 2026-10-21):
+- Every account belongs to an employee. Invitations go from the roster, by employee, never by a
+  typed address. The one account without an employee, the administrator made at provisioning, is
+  shown as "Not on the roster" and can be given a record (`POST /users/{id}/employee`).
+- Editing an employee's email does NOT change the account's sign-in email; the roster shows when
+  they differ.
+- Terminating an employee deactivates their account under the role-change lock, as deactivation
+  does (sessions revoked, last administrator refused, not yourself). Terminated people leave the
+  default list and stay visible behind a filter. Undoing a termination is not in this cycle.
+- On leave changes nothing about access.
+- Departments, job titles and locations: next cycle.
+- New permissions `core.employee.update` (Administrator and Manager) and `core.employee.terminate`
+  (Administrator only: termination ends access, and a Manager cannot otherwise deactivate anyone).
+
+Built:
+- API: `PUT /employees/{id}` (a whole-record replace, so what is saved is what the form showed),
+  `POST /employees/{id}/terminate`, `POST /users/{id}/employee`; `GET /users` gains each account's
+  `employeeId` (additive). Events `employee.updated`, `employee.terminated`. Ending an account's
+  access is one shared helper (`AccountAccess`) used by deactivation and termination; the name and
+  email rules are one (`EmployeeRules`) used by adding and editing.
+- Shell: an Employees page (search, status, access with "signs in as" when the addresses differ,
+  "show terminated", add with "send an invitation" and the role checklist, edit, give access,
+  terminate after a confirming dialog); the Users page gains "Invite someone" (picks an employee
+  with an address and no account) and "Not on the roster" with "Add to roster". The role checklist
+  and the account wording are shared by both pages.
+- Fixed on the way: the American-spelling change in Cycle 15 had turned `aria-labelledby` into
+  `aria-labeledby` in eight places, silently unnaming every ledger and dashboard section (TypeScript
+  does not check hyphenated JSX attributes). Restored; a ledger test now finds each section by its
+  name and fails on the misspelling; the CLAUDE.md spelling rule now excludes standard names.
+- Evidence (measured): .NET 820 tests (was 798): `EmployeeRosterTests` (18, unit) and, against real
+  PostgreSQL, termination ending sessions at once with audit and both events, termination waiting
+  for a role change and then refusing the last administrator, another tenant's employee neither
+  edited nor terminated, and one account added to the roster twice at once getting one employee.
+  UI: shell 54 (was 43), ledger 26, tickets 15, ui-kit 14, web-api 8; every workspace builds.
+  Playwright 32/32, with the new `employee-roster` spec: add and invite in the browser, accept the
+  delivered link, sign in, terminate (live session 401, sign-in refused, shown behind "show
+  terminated" as Terminated and Deactivated), and the provisioned administrator shown as not on the
+  roster; 390px fits. Broken on purpose, each caught: termination without the lock; adding to the
+  roster without the lock; the section-name misspelling.
+- **Independent review (Codex), round 1 — 4 blocking. All taken.**
+  1. A Manager could redirect an administrator's invitation: the invite request carried only roles,
+     so editing the employee's address while "Give access" was open sent the administrator's chosen
+     access to the new address. The invitation now requires the address the inviter was shown,
+     compared under the lock; a mismatch is 409 `employee_changed` and nothing is sent.
+  2. Editing took no lock, so an edit and a termination could both number their event version 2; the
+     outbox's unique index then rolled the termination back, deactivation and session revocation
+     included. Editing now takes the role-change lock (real-Postgres test; fails with it removed).
+  3. Linking an account to an employee emitted no account event. It now advances the account's
+     access version and emits `user.employee_linked`.
+  4. Add-to-roster had no cross-tenant test. Added.
+- **Round 2: all four fixes confirmed; no new findings. NO BLOCKING FINDINGS.**
+- Evidence after the fixes: .NET 825 (5 new), shell 55, Playwright 32/32.
+
+## Previous cycle
 
 **Cycle 15 — the UI kit and a professional shell.** Chris, on first running the platform locally:
 "yikes, the ui is really bad", then "do the ui-kit cycle. We need this to look outstandingly

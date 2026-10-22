@@ -176,6 +176,11 @@ describe('ledger app', () => {
     await screen.findByRole('article', { name: 'Entry 2026-1' })
 
     expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
+    // Each section is a named region, so a screen reader can jump between them. The name comes
+    // from aria-labelledby, an attribute TypeScript does not check: a misspelling silently drops it.
+    for (const name of ['Journal', 'Trial balance', 'Chart of accounts', 'Closed periods']) {
+      expect(screen.getByRole('region', { name })).toBeInTheDocument()
+    }
     expect(screen.queryByRole('form', { name: 'Post an entry' })).not.toBeInTheDocument()
     expect(screen.queryByRole('form', { name: 'Add account' })).not.toBeInTheDocument()
     expect(screen.queryByRole('form', { name: 'Close the books' })).not.toBeInTheDocument()

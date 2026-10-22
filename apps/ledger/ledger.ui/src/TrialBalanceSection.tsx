@@ -14,7 +14,7 @@ export function TrialBalanceSection({
 }) {
   return (
     <Card>
-      <section aria-labeledby="trial-balance-heading">
+      <section aria-labelledby="trial-balance-heading">
         <CardHeader
           id="trial-balance-heading"
           title="Trial balance"

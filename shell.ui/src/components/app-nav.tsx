@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ShieldCheck, Users } from 'lucide-react'
+import { LayoutDashboard, ShieldCheck, Users, UsersRound } from 'lucide-react'
 import { Permissions } from '@app-platform/web-api'
 import { cn } from '@app-platform/ui-kit'
 import { visibleApps } from '../lib/apps'
@@ -18,6 +18,7 @@ export function AppNav({ onNavigate }: { onNavigate?: () => void }) {
 
   const apps = visibleApps(session.licensedApps, session.permissions)
   const canSeeUsers = session.permissions.includes(Permissions.core.userRead)
+  const canSeeRoster = session.permissions.includes(Permissions.core.employeeRead)
 
   return (
     <nav aria-label="Applications" className="grid gap-6">
@@ -29,6 +30,12 @@ export function AppNav({ onNavigate }: { onNavigate?: () => void }) {
           <NavItem key={app.id} to={app.path} icon={app.icon} label={app.name} onNavigate={onNavigate} />
         ))}
       </NavSection>
+
+      {canSeeRoster && (
+        <NavSection title="Organization">
+          <NavItem to="/employees" icon={UsersRound} label="Employees" onNavigate={onNavigate} />
+        </NavSection>
+      )}
 
       {canSeeUsers && (
         <NavSection title="Administration">
