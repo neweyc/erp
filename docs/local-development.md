@@ -19,7 +19,7 @@ does, and the way to do any step by hand. After the prerequisites in Part 1:
 ```bash
 bin/dev setup                                   # build, settings, database (safe to re-run)
 bin/dev operator create you@example.com         # asks for a password; prints the MFA QR code ONCE
-bin/dev up                                      # database + four APIs + shell, in the background
+bin/dev up                                      # database + four APIs + shell + console, in the background
 bin/dev tenant create "Acme Fire" admin@acme.test
                                                 # asks for the operator password and a current code,
                                                 # creates the tenant, licenses Tickets and Ledger,
@@ -28,13 +28,18 @@ bin/dev tenant create "Acme Fire" admin@acme.test
 
 Open the printed link, set the admin's password, then sign in at http://localhost:5173.
 
+As the operator, open the console at **http://localhost:5174** and sign in with your email, password
+and a current authenticator code. It lists every tenant, creates new ones, licenses apps, suspends,
+resumes and retires, and shows the error feed and the operator audit log. `bin/dev tenant create` is
+still the quickest first tenant, because it also pins core.api to it (D5).
+
 Day to day:
 
 | Command | Does |
 |---|---|
 | `bin/dev up` / `bin/dev down` | start / stop everything (data is kept) |
 | `bin/dev status` | what is running, the operator, the pinned tenant |
-| `bin/dev logs core` | follow a service's log (`core`, `platform`, `tickets`, `ledger`, `shell`); logs are in `.local/logs/` |
+| `bin/dev logs core` | follow a service's log (`core`, `platform`, `tickets`, `ledger`, `shell`, `console`); logs are in `.local/logs/` |
 | `bin/dev invite-link [email]` | the newest invitation link, for that address if given |
 | `bin/dev operator reset` | a new authenticator secret for the operator (lost phone) |
 | `bin/dev reset` | delete the local database and state, after you type `reset`; keeps `.local/dev.env` |
@@ -50,16 +55,18 @@ by the process listening on each port.
 |---|---|---|
 | PostgreSQL 16 | Docker container `app-platform-dev-db`, port **5433** | Data kept in the Docker volume `app-platform-dev-data` |
 | core.api | http://localhost:5100 | Organisation, people, sign-in, invitations |
-| platform.api | http://localhost:5101 | Operator API. There is no operator console yet (D14), so you use it with `curl` |
+| platform.api | http://localhost:5101 | Operator API, used by the console (or by `curl`, below) |
 | tickets.api | http://localhost:5102 | |
 | ledger.api | http://localhost:5104 | |
 | shell | **http://localhost:5173** | The app you open in the browser. It forwards `/api/core`, `/api/tickets` and `/api/ledger` to the APIs above |
+| console | **http://localhost:5174** | The operator console. It forwards `/api/platform` to platform.api, and nothing else |
 
 Port 5433, not 5432, so it cannot collide with a PostgreSQL you may already run.
 If 5433 is taken as well, run the first setup as `DEV_DB_PORT=5434 bin/dev setup`; the container
 and `.local/dev.env` keep that port from then on.
 
-The API ports are fixed: the shell's proxy (`shell.ui/vite.config.ts`) expects them. The browser
+The API ports are fixed: the shell's and the console's proxies (`shell.ui/vite.config.ts`,
+`platform.console/vite.config.ts`) expect them. The browser
 test suite (`e2e/`) uses the **same** API ports with its own database, so stop your local services
 before running it.
 
@@ -216,6 +223,9 @@ ConnectionStrings__Ledger="$DB;Username=ap_ledger_rt" \
 
 # Tab 5: the shell
 npm run dev --workspace @app-platform/shell
+
+# Tab 6 (optional): the operator console, on 5174
+npm run dev --workspace @app-platform/console -- --port 5174
 ```
 
 Each API logs `Now listening on: http://localhost:51xx` when it is ready. The shell prints
@@ -410,8 +420,14 @@ run `source .local/dev.env` in that tab.
 **No invitation in `.local/mail/`.** core.api delivers it within a few seconds of the tenant being
 created, but only while it is running. Check tab 1 is up and has no errors.
 
+**After signing out of the console, the app refuses changes with `csrf_failed` (or the reverse).**
+Local only. Browsers do not separate cookies by port, so on `localhost` the shell and the console
+share the `ap_csrf` cookie, and signing out of either deletes it. Sign in to the other again. In a
+deployment the console has its own hostname and the two never share a cookie.
+
 **A page shows an error with a reference like `err_…`.** Search that service's tab for the
-reference: the full error is logged there under it. Operators also see it in the error feed:
+reference: the full error is logged there under it. Operators also see it on the console's Errors
+page, or:
 
 ```bash
 curl -s -b .local/operator.jar 'http://localhost:5101/api/platform/v1/errors?limit=20'
@@ -425,6 +441,11 @@ With a signed-in `.local/operator.jar` and `$CSRF` from 6.2:
 
 | What | Request |
 |---|---|
+| Who is signed in | `GET /api/platform/v1/auth/session` |
+| Sign out (revokes the session) | `POST /api/platform/v1/auth/sign-out` |
+| Every tenant, with status and apps | `GET /api/platform/v1/tenants` |
+| One tenant, its license history and the operator actions on it | `GET /api/platform/v1/tenants/{tenantId}` |
+| Operator audit log | `GET /api/platform/v1/audit?limit=100` |
 | Error feed | `GET /api/platform/v1/errors?limit=50` |
 | Create a tenant | `POST /api/platform/v1/tenants` `{"name","adminEmail","idempotencyKey"}` |
 | License or unlicense an app | `POST /api/platform/v1/tenants/{tenantId}/entitlements` `{"app":"tickets","licensed":true}` |

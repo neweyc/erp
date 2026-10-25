@@ -1,5 +1,7 @@
 using System.Text.Json;
 using AppPlatform.Api;
+using AppPlatform.Platform.Auth;
+using AppPlatform.Platform.Data;
 using AppPlatform.Platform.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -20,9 +22,11 @@ public static class CreateTenantFeature
 
     public class CreateTenantCommandHandler(
         IProvisioningClient provisioning,
-        IIdempotencyService idempotency)
+        IIdempotencyService idempotency,
+        TimeProvider clock)
     {
-        public async Task<CommandResult> Handle(CreateTenantCommand cmd, CancellationToken ct = default)
+        public async Task<CommandResult> Handle(
+            Guid operatorId, CreateTenantCommand cmd, CancellationToken ct = default)
         {
             var name = cmd.Name?.Trim();
             var email = cmd.AdminEmail?.Trim().ToLowerInvariant();
@@ -62,7 +66,19 @@ public static class CreateTenantFeature
 
             var response = JsonSerializer.Serialize(new { tenantId = result.TenantPublicId });
 
-            if (!await idempotency.TryRecordAsync(Operation, key, response, ct))
+            // The trail commits with the idempotency record, so a tenant is audited once however many
+            // times its creation is retried: a replay returns above, before reaching here. The admin's
+            // address is left out: it is customer data, and the operator log is not the place for it.
+            var audit = new PlatformAuditLog
+            {
+                PlatformUserId = operatorId,
+                Action = "tenant.created",
+                TenantPublicId = result.TenantPublicId,
+                Detail = name,
+                CreatedAt = clock.GetUtcNow(),
+            };
+
+            if (!await idempotency.TryRecordAsync(Operation, key, response, audit, ct))
             {
                 // Lost the race to a concurrent retry. The other caller's response is the
                 // authoritative one — returning ours would hand out a different tenant id for
@@ -81,12 +97,14 @@ public static class CreateTenantFeature
         public void Map(IEndpointRouteBuilder routes) => routes.MapPost("/api/platform/v1/tenants",
             async (
                 CreateTenantCommand cmd,
+                [FromServices] IOperatorContext operatorContext,
                 [FromServices] IProvisioningClient provisioning,
                 [FromServices] IIdempotencyService idempotency,
+                [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new CreateTenantCommandHandler(provisioning, idempotency);
-                return (await handler.Handle(cmd, ct)).CreateIResult();
+                var handler = new CreateTenantCommandHandler(provisioning, idempotency, clock);
+                return (await handler.Handle(operatorContext.Require().PlatformUserId, cmd, ct)).CreateIResult();
             })
             .RequireAuthorization();
     }

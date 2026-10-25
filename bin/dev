@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the whole platform on this machine: database, four APIs, and the shell.
+# Runs the whole platform on this machine: database, four APIs, the shell and the operator console.
 #
 # The steps are the ones docs/local-development.md explains by hand; this only saves the typing.
 # Everything local lives in .local/ (gitignored, readable only by you): settings, logs, the cookie
@@ -11,7 +11,7 @@
 #   bin/dev tenant create "<name>" <email>     a tenant with Tickets and Ledger, and its admin's invitation
 #   bin/dev invite-link [email]                the newest invitation link (for that address)
 #   bin/dev status                             what is running
-#   bin/dev logs <core|platform|tickets|ledger|shell>
+#   bin/dev logs <core|platform|tickets|ledger|shell|console>
 #   bin/dev down                               stop everything (data is kept)
 #   bin/dev operator reset                     new authenticator secret for the operator
 #   bin/dev reset                              delete the local database and state, after asking
@@ -43,20 +43,23 @@ DB_PORT="${DEV_DB_PORT:-5433}"
 SETUP_MARKER="bin/dev: initialised"
 
 SHELL_URL="http://localhost:5173"
+CONSOLE_URL="http://localhost:5174"
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mdev: %s\033[0m\n' "$*" >&2; exit 1; }
 
 # --------------------------------------------------------------------------------------------
 # The services. Name, port, project, and the database role it connects as. The ports are fixed:
-# the shell's proxy (shell.ui/vite.config.ts) expects them.
+# the shell's and the console's proxies (shell.ui/vite.config.ts, platform.console/vite.config.ts)
+# expect them.
 # --------------------------------------------------------------------------------------------
 SERVICES="core platform tickets ledger"
 
 port_of() {
   case "$1" in
     core) echo 5100 ;; platform) echo 5101 ;; tickets) echo 5102 ;; ledger) echo 5104 ;; shell) echo 5173 ;;
-    *) die "no service '$1' (core, platform, tickets, ledger, shell)" ;;
+    console) echo 5174 ;;
+    *) die "no service '$1' (core, platform, tickets, ledger, shell, console)" ;;
   esac
 }
 
@@ -78,7 +81,7 @@ connection_setting_of() {
 probe_of() {
   case "$1" in
     core) echo /api/core/v1/auth/session ;; platform) echo /api/platform/v1/errors ;;
-    tickets) echo /api/tickets/v1/tickets ;; ledger) echo /api/ledger/v1/accounts ;; shell) echo / ;;
+    tickets) echo /api/tickets/v1/tickets ;; ledger) echo /api/ledger/v1/accounts ;; shell|console) echo / ;;
   esac
 }
 
@@ -290,14 +293,15 @@ cmd_up() {
 
   local service
   for service in $SERVICES; do start_service "$service"; done
-  start_shell
+  start_ui shell @app-platform/shell
+  start_ui console @app-platform/console
 
-  for service in $SERVICES shell; do wait_for "$service"; done
+  for service in $SERVICES shell console; do wait_for "$service"; done
 
   if [ -z "${TENANT:-}" ]; then
     say "up, with no tenant yet. Next: bin/dev tenant create \"Acme Fire\" admin@acme.test"
   else
-    say "up. Open $SHELL_URL"
+    say "up. Open $SHELL_URL (operators: $CONSOLE_URL)"
   fi
 }
 
@@ -335,13 +339,16 @@ start_service() {
   ) &
 }
 
-start_shell() {
-  if is_listening 5173; then
-    echo "    shell already running on 5173"
+# The shell or the console: a Vite dev server, which proxies /api to the services above.
+start_ui() {
+  local service="$1" workspace="$2" port
+  port="$(port_of "$service")"
+  if is_listening "$port"; then
+    echo "    $service already running on $port"
     return
   fi
-  echo "    starting shell on 5173"
-  nohup npm run dev --workspace @app-platform/shell -- --port 5173 --strictPort > "$LOGS/shell.log" 2>&1 &
+  echo "    starting $service on $port"
+  nohup npm run dev --workspace "$workspace" -- --port "$port" --strictPort > "$LOGS/$service.log" 2>&1 &
 }
 
 # Ready means answering HTTP at all.
@@ -388,7 +395,7 @@ stop_service() {
 cmd_down() {
   say "stopping services"
   local service
-  for service in shell $SERVICES; do stop_service "$service"; done
+  for service in console shell $SERVICES; do stop_service "$service"; done
   if container_running; then
     say "stopping the database (data is kept)"
     docker stop "$DB_CONTAINER" >/dev/null
@@ -402,7 +409,7 @@ cmd_status() {
   else
     echo "database   stopped"
   fi
-  for service in $SERVICES shell; do
+  for service in $SERVICES shell console; do
     port="$(port_of "$service")"
     if is_listening "$port"; then state="running"; else state="stopped"; fi
     printf '%-10s %-8s http://localhost:%s\n' "$service" "$state" "$port"
@@ -420,7 +427,7 @@ cmd_status() {
 }
 
 cmd_logs() {
-  [ $# -ge 1 ] || die "usage: bin/dev logs <core|platform|tickets|ledger|shell>"
+  [ $# -ge 1 ] || die "usage: bin/dev logs <core|platform|tickets|ledger|shell|console>"
   port_of "$1" >/dev/null
   tail -n 50 -f "$LOGS/$1.log"
 }
@@ -576,7 +583,7 @@ cmd_reset() {
   docker info >/dev/null 2>&1 || die "Docker is not running, so the database cannot be deleted; nothing deleted."
 
   local service
-  for service in shell $SERVICES; do stop_service "$service"; done
+  for service in console shell $SERVICES; do stop_service "$service"; done
 
   # Listed first, and a FAILED listing stops everything: it must not be mistaken for "not there",
   # or a Docker hiccup here would delete local state while the database survives.

@@ -43,7 +43,7 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 
 | # | Criterion | State |
 |---|---|---|
-| A1 | Full journey works **through the browser** against the real stack | **Verified for every step that has a UI** — accept, sign in, create, assign, close. Provision and license have **no operator UI** (D14) and run over real HTTP and handler paths instead. Delivery is a background worker with no UI by nature. Marking this plainly rather than borrowing A6's standard |
+| A1 | Full journey works **through the browser** against the real stack | **Verified for every step that has a UI** — accept, sign in, create, assign, close; and, since Cycle 18, provision and license through the operator console (`operator-console.spec.mjs`, on a tenant of its own). The journey's own tenant is still seeded through the handler and licensed over the operator API, because the other specs depend on it existing before they run. Delivery is a background worker with no UI by nature. Marking this plainly rather than borrowing A6's standard |
 | A2 | A second tenant proves isolation | **Verified** — a real second tenant, signed in with its own session, cannot read, close, reassign, or reference the first tenant's tickets and employees through the running core.api and tickets.api that serve both (`tenant-isolation.spec.mjs`). Found and fixed a real cross-tenant leak on the way (D15) |
 | A3 | Unlicensed access rejected by the **API** | **Verified** — an authenticated tenant admin is refused 403 `app_not_licensed` by the *running* tickets service before the grant, and accepted after, on the same session |
 | A4 | Fresh-database initialization succeeds using the documented scripts | **Verified** — `PrivilegeFixture` builds an empty database from `database/privileges/01`, all three `migrations-all.sql`, then `02-grants`, applied **as `ap_owner`**, and `99-verify` reports zero findings. The browser harness does the same as superuser (D7) |
@@ -56,11 +56,11 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 
 | Step | Through the browser | Real path | Notes |
 |---|---|---|---|
-| Provision tenant | No | Handler, real migrations | Seed calls the real handler; no operator UI |
+| Provision tenant | **Yes**, in the console spec | Handler, real migrations | The journey's tenant is seeded through the real handler; the console spec provisions another through the console, platform.api and core |
 | **Deliver** invitation | n/a | **Yes** | Outbox worker delivers via `FileEmailTransport`; message captured to disk |
 | Accept invitation | **Yes** | Yes | Browser reads the token from the **delivered message**, not the database |
 | Sign in | **Yes** | Yes | Real cookie + CSRF issuance, browser-verified |
-| License tickets | Operator API over HTTP | **Yes** | Real operator session + CSRF; 403 before the grant, 200 after, same tenant session |
+| License tickets | Operator API over HTTP; the console spec licenses through the console | **Yes** | Real operator session + CSRF; 403 before the grant, 200 after, same tenant session |
 | Create ticket | **Yes** | Yes | Through the form in `@app-platform/tickets-ui` |
 | Assign ticket | **Yes** | Yes | Picked from core's roster; resolved server-side through `core_v1.employee`; snapshot stored |
 | Close ticket | **Yes** | Yes | Closed, disappears from the open list, still named when closed are shown |
@@ -218,7 +218,7 @@ ERP will need again.
 | **D15** | High — **fixed** | The session endpoint showed every tenant the name of whichever tenant was provisioned first. `TenantNameAsync` read `db.Tenants.FirstAsync()` with no id, and the tenant table has no query filter — it is what tenants are scoped *by*. | Tenant B's session on a core.api reports "E2E Ltd". Invisible with one tenant, which is why nothing caught it. | A cross-tenant disclosure on every dashboard load. Now takes the caller's tenant id explicitly; `AuthTests.The_session_names_the_callers_tenant_not_the_first_tenant` and the e2e cover it. `Tenant` is the only entity without the filter, and its other two reads are keyed. |
 | **D13** | High — **was failing CI on main** | `startDatabase` used `pg_isready -d appplatform` as its readiness check. `pg_isready` only reports that the server accepts connections; the postgres image runs a temporary init server before creating `POSTGRES_DB`, so readiness passed while the database did not exist. **Fixed** — readiness is now a real `SELECT 1` against the target database. | Reproduced: polling a fresh container showed `pg_isready=yes` while `SELECT 1` still failed, a ~0.4s window. CI run `36143741902` failed with `database "appplatform" does not exist` at `applyMigrations`. | The whole e2e job failed. It passed locally because a cached image wins the race, which is why it reached main — a flake class that only appears on a cold runner. |
 | **D12** | Low | `WalkingSkeletonTests` still licenses via raw `INSERT INTO platform.tenant_app`. | `privileges.tests/WalkingSkeletonTests.cs:131` | A handler-level fixture shortcut, not a shipped path. The operator endpoint is covered by the e2e, so this is split coverage rather than a gap — recorded so it is not invisible if the endpoint's behaviour changes. |
-| **D14** | Medium | No operator UI. Provisioning a tenant and granting an entitlement are reachable only over HTTP — `platform.console/` exists as an empty directory. | `ls platform.console` | A1 cannot be "the whole journey in a browser" until an operator has one. Deliberate for this milestone: the customer-facing surface was the priority, and the operator paths are exercised over real HTTP with real sessions. |
+| **D14** | Medium — **fixed** (Cycle 18) | No operator UI. Provisioning a tenant and granting an entitlement are reachable only over HTTP — `platform.console/` exists as an empty directory. | `ls platform.console` | A1 cannot be "the whole journey in a browser" until an operator has one. Fixed: `platform.console` signs in with MFA, creates, licenses, suspends, resumes and retires tenants, and shows the error feed and operator audit. Evidence: `operator-console.spec.mjs` in the browser; console unit tests at 100% line coverage. |
 | **D10** | High — **fixed** (Cycle 6) | There was no append-only mechanism. | — | Built: `IAppendOnly`, refused in code and by grant, the two kept in step by `BoundaryTests`. See `docs/ledger.md`. |
 | **D11** | High — **fixed** (Cycle 5) | `packages/audit` did not exist. | — | Built: see Cycle 5 and `docs/audit.md`. Sign-in events are not audited (security log, not data history). |
 | **D7** | Low (was Medium) | The Playwright harness's APIs connect as the `postgres` superuser. | `e2e/stack.mjs`, `connectionString` | Narrowed twice. `PrivilegeFixture` applies the **shipped** scripts as `ap_owner` and every access test connects as a runtime role. Since Cycle 8 the harness also builds its database with `database/init-local.sh` (roles, schemas, migrations as `ap_owner`, grants), so its ownership and grants match a deployment and the restore drill's `99-verify` is meaningful. What remains: the running APIs bypass grants, so a grant regression is caught by `AccessMatrixTests` and `VerificationTests`, not the browser. Checked by hand on 2026-09-29 while writing `docs/local-development.md`: every service connected as its own runtime role, and the full journey (operator with MFA, provisioning, licensing, invitation, sign-in, a ticket, the ledger, the error feed) worked with no missing grant. |
@@ -232,8 +232,6 @@ ERP will need again.
 
 ## Deferred
 
-- **Operator console UI** (`platform.console`) — directory exists, no code. Entitlement granting
-  is API-only.
 - **A real email transport.** The outbox worker is built and delivers through
   `FileEmailTransport`, which is a local capture substitute gated to non-production. A real
   transport (SMTP/HTTP API) does not exist.
@@ -647,6 +645,74 @@ ahead of review while Codex was at its usage limit; the review then ran and its 
 Open from the closure: D16.
 
 ## Current cycle
+
+**Cycle 18 — the operator console (D14; M3 item 23).** Chris: "lets work on the operator console
+now", after asking what was next. `platform.console` was an empty directory, so creating a customer
+and licensing an app needed hand-made API calls. **Built and tested. Independent review (Codex, two
+rounds) CLOSED: no blocking findings.** It was required: the change touches operator authentication
+(a new sign-out that revokes sessions, and new operator reads). Chris asked for it (2026-10-24).
+
+Built:
+- **platform.api**, five slices: `GET /auth/session`, `POST /auth/sign-out` (revokes the session
+  server-side and audits `operator.signed_out`), `GET /tenants` (status and live apps, one query),
+  `GET /tenants/{id}` (license history and the operator actions on that tenant), `GET /audit`.
+- **Creating a tenant is now audited** (`tenant.created`, naming the operator). It was the one
+  operator action that left no trail. The entry commits in the same save as the idempotency record,
+  so a retried creation is recorded once, and a lost race discards its entry with its record. The
+  admin's address is left out: it is customer data.
+- **platform.console**: sign-in (password and code together), tenants list and New tenant (one
+  idempotency key per opening of the dialog, reused on retry), a tenant's page (suspend and retire
+  confirmed by typing the name, with what the customer's people will experience; resume; license
+  and revoke; license history; operator actions), Errors, Audit log. "Read at" and Refresh on every
+  page; a 401 anywhere returns to sign-in with the reason. Same kit and theme as the shell.
+- `bin/dev up` starts the console on 5174. The e2e harness gives the main core.api the internal
+  provisioning key, so the console can create a tenant end to end as in a deployment.
+
+Defaults taken (no decision asked for):
+- A top bar with three sections rather than the shell's sidebar.
+- Licensing an app takes one click; revoking asks first. Resuming asks without a typed name, since
+  nothing is taken away.
+- MFA enrolment and recovery stay CLI-only, as platform.api/CLAUDE.md requires.
+- Local only: the shell and the console share the `ap_csrf` cookie on `localhost`, so signing out of
+  one makes the other refuse changes until it is signed in again. Documented in
+  docs/local-development.md; production hostnames are separate.
+
+Evidence:
+- .NET 879 passing (was 867): platform unit tests for every new handler and the creation audit;
+  privileges.tests `OperatorConsoleReadTests` run the new queries as `ap_platform_rt` on real
+  PostgreSQL, including a race in which two retries record one creation and exactly one audit entry
+  survives.
+- Console: 38 Vitest tests, 100% line coverage, enforced by the test run.
+- Playwright 34/34, including `operator-console.spec.mjs`: sign in with a code, create a tenant
+  through core, license Tickets, suspend by typing the name, resume, find each action in the audit
+  log, no horizontal scroll at 390px, and a copied cookie refused as `session_revoked` after
+  sign-out.
+- All workspaces build (`tsc -b` and `vite build`).
+
+Independent review (Codex):
+- **Round 1: 2 blocking, 2 optional. All taken.** The API side was confirmed: every new endpoint
+  needs an MFA-complete operator session, sign-out is CSRF-protected and a copied cookie is then
+  refused, nothing reads outside the platform schema, and the creation audit excludes the admin
+  address. The findings were all in the console:
+  - BLOCKING: a failed sign-out still said "You have signed out", while the session stayed valid
+    (refresh restored access; a copied cookie kept working). It now returns to sign-in only once the
+    server confirms, or a 401 says the session had already ended; otherwise it says the session may
+    still be active and offers Sign out again. `csrf_failed` has its own wording.
+  - BLOCKING: the New tenant dialog's close button worked while a create was pending, so reopening it
+    made a new idempotency key and the same tenant could be created twice. Every close path is now
+    refused while busy, and closing re-reads the list, since a failed attempt may still have created
+    the tenant.
+  - Optional: reads finishing out of order could put stale data on screen with the newest "Read at".
+    `useLoad` now shows only the newest read.
+  - Optional: the audit page said "every operator action" but shows the latest 100. Reworded.
+- **Round 2: fixes confirmed; no blocking findings; 1 optional. Taken.** A reload left over from a
+  change on tenant A, finishing after the operator opened tenant B, could show A's data on B's page.
+  `useLoad` now ignores reloads for a path the page has left.
+- Each fix has a test; the two `useLoad` tests fail with their guard removed. Console after review:
+  44 tests, 100% line coverage. Playwright not rerun after the review fixes (the local stack held its
+  ports); the fixes change only the console's failure paths, which the unit tests cover.
+
+## Previous cycle
 
 **Cycle 17 — departments, job titles and locations.** Chris: "lets work on departments, job titles
 and locations now". Core's CLAUDE.md described the catalogs; none existed, and an employee had a name,
@@ -1304,7 +1370,9 @@ disqualifying.
 21. Tenant-configured ticket status and category wording over fixed enums.
 22. Comments, attachments, ticket audit trail.
 23. Operator MFA enrolment polish and recovery UX; operator audit; tenant lifecycle
-    screens.
+    screens. *Built in Cycle 18: the console, its operator audit page and the tenant lifecycle
+    screens. Not built: MFA enrolment and recovery in the browser; both stay CLI-only on purpose
+    (enrolment at creation, recovery by `reset-platform-user-mfa`).*
 24. Contextual help.
 
 ---

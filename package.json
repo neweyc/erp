@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "shell.ui",
+    "platform.console",
     "packages/*",
     "apps/*/*.ui",
     "e2e"

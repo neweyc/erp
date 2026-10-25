@@ -21,15 +21,20 @@ const apiEnv = apiEnvironment({
 })
 
 /**
- * Only platform.api needs these, and giving them to core.api has a side effect worth avoiding:
- * `Internal:ApiKey` is precisely what turns core's anonymous provisioning endpoint from a 404 into
- * a live tenant-creation route. It stays off for every server that does not need it.
+ * The shared secret for core's provisioning endpoint. platform.api sends it; the main core.api
+ * accepts it, so the operator console can create a tenant end to end, as in a deployment. It
+ * stays off for every other server: it is precisely what turns core's anonymous provisioning
+ * endpoint from a 404 into a live tenant-creation route.
  */
+const INTERNAL_KEY = 'e2e-internal-key'
+
+const coreEnv = { ...apiEnv, Internal__ApiKey: INTERNAL_KEY }
+
+/** Only the platform receives its key-encryption key, as in a deployment. */
 const platformEnv = {
   ...apiEnv,
-  // Only the platform receives its key-encryption key, as in a deployment.
   Encryption__PlatformKeyEncryptionKey: PLATFORM_KEK_FOR_TESTS_ONLY,
-  Internal__ApiKey: 'e2e-internal-key',
+  Internal__ApiKey: INTERNAL_KEY,
   Core__BaseUrl: 'http://localhost:5100',
 }
 
@@ -98,12 +103,16 @@ export default defineConfig({
     { name: 'employee-roster', testMatch: /employee-roster\.spec\.mjs/, dependencies: ['license'] },
     // Departments, job titles and locations, and placing someone in them.
     { name: 'organization-structure', testMatch: /organization-structure\.spec\.mjs/, dependencies: ['license'] },
+    // The operator console in the browser: sign in with a code, create and license a tenant,
+    // suspend and resume it. After operator-mfa, the other spec that signs in with fresh codes, so
+    // neither can use up a code the other was about to use.
+    { name: 'operator-console', testMatch: /operator-console\.spec\.mjs/, dependencies: ['operator-mfa'] },
     // The restore drill backs up everything the projects above wrote, so it runs after all of them.
     {
       name: 'restore',
       testMatch: /restore\.spec\.mjs/,
       dependencies: ['journey', 'guards', 'isolation', 'ledger', 'employee-invite', 'user-lifecycle', 'employee-roster',
-        'organization-structure'],
+        'organization-structure', 'operator-console'],
     },
   ],
   timeout: 30_000,
@@ -120,7 +129,7 @@ export default defineConfig({
       ignoreHTTPSErrors: true,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: apiEnv,
+      env: coreEnv,
     },
     {
       command: `dotnet run --project ${join(ROOT, 'apps/tickets/tickets.api')} --no-launch-profile --no-restore --urls http://localhost:5102`,
@@ -133,11 +142,8 @@ export default defineConfig({
       // The operator surface. Present because granting an entitlement is an operator action, and
       // the journey performs it over HTTP rather than with a database edit.
       command: `dotnet run --project ${join(ROOT, 'platform.api')} --no-launch-profile --no-restore --urls http://localhost:5101`,
-      // Readiness by PORT, not by URL. platform.api exposes no anonymous GET — every route is a
-      // POST behind authorization — so a URL probe gets 405, which Playwright does not accept as
-      // ready. Inventing a health endpoint purely to satisfy the probe would mean a feature with
-      // no handler, which the VSA rules exist to prevent.
-      port: 5101,
+      // The console's session route: 401 with no operator is a healthy answer, as for core.
+      url: 'http://localhost:5101/api/platform/v1/auth/session',
       reuseExistingServer: false,
       timeout: 120_000,
       env: platformEnv,
@@ -155,6 +161,14 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       env: otherCoreEnv,
+    },
+    {
+      // The operator console. Its dev server proxies /api/platform to the platform.api above.
+      command: `npm run dev --workspace @app-platform/console -- --port 5274 --strictPort`,
+      url: 'http://localhost:5274',
+      cwd: ROOT,
+      reuseExistingServer: false,
+      timeout: 120_000,
     },
     {
       command: `npm run dev --workspace @app-platform/shell -- --port 5273 --strictPort`,

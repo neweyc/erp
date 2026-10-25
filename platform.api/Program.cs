@@ -62,6 +62,7 @@ builder.Services.AddScoped<ITenantAuditWriter, EFTenantAuditWriter>();
 builder.Services.AddScoped<ITenantService, EFTenantService>();
 builder.Services.AddScoped<IIdempotencyService, EFIdempotencyService>();
 builder.Services.AddScoped<IErrorFeedService, EFErrorFeedService>();
+builder.Services.AddScoped<IAuditLogService, EFAuditLogService>();
 
 // The platform reports into its own feed like every other service, and keeps it bounded.
 builder.Services.AddErrorFeed(app: "platform", connection);

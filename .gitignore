@@ -11,6 +11,8 @@ node_modules/
 dist/
 *.local
 *.tsbuildinfo
+# Test coverage reports (the console's gate writes one on every run)
+coverage/
 
 # Playwright (e2e)
 test-results/

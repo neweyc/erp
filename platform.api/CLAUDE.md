@@ -48,7 +48,11 @@ Widening any of this is a design decision with a written record, never a conveni
 - **Operator audit**: every operator action, in `platform.audit_log`, separate from
   tenant audit. Mutations audit explicitly and usually **staged**, so the action and its
   trail commit together. Post-commit audits are best-effort — a committed change is never
-  reported as failed.
+  reported as failed. Creating a tenant is audited in the same save as its idempotency record,
+  so a retried creation is recorded once; the admin's address is left out of the entry. Read by
+  `GET /api/platform/v1/audit` and, per tenant, `GET /api/platform/v1/tenants/{id}`.
+- **The console's reads**: `GET /auth/session`, `GET /tenants`, `GET /tenants/{id}`, `GET /audit`,
+  and `POST /auth/sign-out`, which revokes the session server-side.
 
 ## Operator auth
 

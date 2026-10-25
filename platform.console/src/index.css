@@ -1,0 +1,10 @@
+/*
+ * The console's stylesheet: the same kit and theme as the customer shell, so an operator sees the
+ * same components. Tailwind generates only the classes it finds in the sources listed here, so the
+ * kit MUST be listed or its styling silently disappears from the build.
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@app-platform/ui-kit/theme.css';
+
+@source '../../packages/ui-kit/src';
