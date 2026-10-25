@@ -9,9 +9,11 @@ afterEach(() => vi.unstubAllGlobals())
 
 const acme: TenantSummary = {
   tenantId: 'ten_acme', name: 'Acme Fire', status: 'Active', createdAt: '2026-10-01T09:00:00Z',
-  statusChangedAt: null, apps: ['tickets', 'ledger'],
+  statusChangedAt: null, apps: ['tickets', 'ledger'], subdomain: 'acme', signInUrl: 'https://acme.app.example.com',
 }
-const beta: TenantSummary = { ...acme, tenantId: 'ten_beta', name: 'Beta Rescue', status: 'Suspended', apps: [] }
+const beta: TenantSummary = {
+  ...acme, tenantId: 'ten_beta', name: 'Beta Rescue', status: 'Suspended', apps: [], subdomain: null, signInUrl: null,
+}
 
 const show = () => renderAt('/tenants', '/tenants', <Tenants />)
 
@@ -24,7 +26,8 @@ describe('the tenant list', () => {
     const acmeRow = within(table).getByRole('row', { name: /Acme Fire/ })
     expect(acmeRow).toHaveTextContent('Active')
     expect(acmeRow).toHaveTextContent('Tickets, Ledger')
-    expect(within(table).getByRole('row', { name: /Beta Rescue/ })).toHaveTextContent('SuspendedNone')
+    expect(acmeRow).toHaveTextContent('acme')
+    expect(within(table).getByRole('row', { name: /Beta Rescue/ })).toHaveTextContent('SuspendedNoneNone')
     expect(within(table).getByRole('link', { name: 'Acme Fire' })).toHaveAttribute('href', '/tenants/ten_acme')
     expect(screen.getByText(/^Read at /)).toBeInTheDocument()
   })
@@ -186,5 +189,59 @@ describe('creating a tenant', () => {
     expect(screen.getByLabelText('Organization name')).toHaveValue('')
     await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('suggests an address from the name, and shows the full address it will be', async () => {
+    const fetchMock = stubApi({
+      'GET /api/platform/v1/tenants': () => ({ body: [] }),
+      'POST /api/platform/v1/tenants': () => ({ body: { tenantId: 'ten_gamma' } }),
+    })
+    show()
+    const { user, dialog } = await fill()
+
+    // fill() typed "Gamma Ltd" as the name.
+    expect(within(dialog).getByLabelText('Address')).toHaveValue('gamma-ltd')
+    expect(dialog).toHaveTextContent('People sign in at https://gamma-ltd.app.example.com')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Create tenant' }))
+    await screen.findByText('Elsewhere')
+    expect(sent(fetchMock, 'POST', '/api/platform/v1/tenants')).toMatchObject([{ subdomain: 'gamma-ltd' }])
+  })
+
+  it("keeps the operator's own address once they type one, whatever the name becomes", async () => {
+    stubApi({ 'GET /api/platform/v1/tenants': () => ({ body: [] }) })
+    show()
+    const { user, dialog } = await fill()
+
+    const address = within(dialog).getByLabelText('Address')
+    await user.clear(address)
+    expect(dialog).toHaveTextContent('Letters, digits and hyphens')
+    await user.type(address, 'gamma')
+    await user.type(within(dialog).getByLabelText('Organization name'), ' Group')
+
+    expect(address).toHaveValue('gamma')
+  })
+
+  it("shows the platform's words when the address is taken, so another can be tried with the same key", async () => {
+    let attempts = 0
+    const fetchMock = stubApi({
+      'GET /api/platform/v1/tenants': () => ({ body: [] }),
+      'POST /api/platform/v1/tenants': () => attempts++ === 0
+        ? { status: 409, body: { problemCode: 'subdomain_taken', message: 'The address "gamma-ltd" belongs to another tenant.' } }
+        : { body: { tenantId: 'ten_gamma' } },
+    })
+    show()
+    const { user, dialog } = await fill()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Create tenant' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('belongs to another tenant')
+    await user.clear(within(dialog).getByLabelText('Address'))
+    await user.type(within(dialog).getByLabelText('Address'), 'gamma-two')
+    await user.click(within(dialog).getByRole('button', { name: 'Create tenant' }))
+
+    await screen.findByText('Elsewhere')
+    const bodies = sent(fetchMock, 'POST', '/api/platform/v1/tenants') as { idempotencyKey: string; subdomain: string }[]
+    expect(bodies.map((b) => b.subdomain)).toEqual(['gamma-ltd', 'gamma-two'])
+    expect(bodies[0]!.idempotencyKey).toBe(bodies[1]!.idempotencyKey)
   })
 })

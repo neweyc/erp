@@ -22,23 +22,30 @@ bin/dev operator create you@example.com         # asks for a password; prints th
 bin/dev up                                      # database + four APIs + shell + console, in the background
 bin/dev tenant create "Acme Fire" admin@acme.test
                                                 # asks for the operator password and a current code,
-                                                # creates the tenant, licenses Tickets and Ledger,
-                                                # pins core.api to it, prints the invitation link
+                                                # creates the tenant at acme-fire.localhost, licenses
+                                                # Tickets and Ledger, prints the invitation link
 ```
 
-Open the printed link, set the admin's password, then sign in at http://localhost:5173.
+Open the printed link, set the admin's password, then sign in at **http://acme-fire.localhost:5173**.
+
+**Each tenant has its own address**, a subdomain of the shell: Acme Fire signs in at
+`acme-fire.localhost:5173`, and sign-in finds the tenant from that address. Browsers send any
+`*.localhost` address to this machine, so nothing needs setting up. Plain `localhost:5173` belongs
+to no tenant, and sign-in there says so. A third argument chooses the address:
+`bin/dev tenant create "Acme Fire" admin@acme.test acme`.
 
 As the operator, open the console at **http://localhost:5174** and sign in with your email, password
-and a current authenticator code. It lists every tenant, creates new ones, licenses apps, suspends,
-resumes and retires, and shows the error feed and the operator audit log. `bin/dev tenant create` is
-still the quickest first tenant, because it also pins core.api to it (D5).
+and a current authenticator code. It lists every tenant with its address, creates new ones (the
+address is suggested from the name), changes a tenant's address, licenses apps, suspends, resumes
+and retires, and shows the error feed and the operator audit log. A tenant created in the console
+signs in at its own address straight away.
 
 Day to day:
 
 | Command | Does |
 |---|---|
 | `bin/dev up` / `bin/dev down` | start / stop everything (data is kept) |
-| `bin/dev status` | what is running, the operator, the pinned tenant |
+| `bin/dev status` | what is running, the operator, the last tenant created and its address |
 | `bin/dev logs core` | follow a service's log (`core`, `platform`, `tickets`, `ledger`, `shell`, `console`); logs are in `.local/logs/` |
 | `bin/dev invite-link [email]` | the newest invitation link, for that address if given |
 | `bin/dev operator reset` | a new authenticator secret for the operator (lost phone) |
@@ -58,7 +65,7 @@ by the process listening on each port.
 | platform.api | http://localhost:5101 | Operator API, used by the console (or by `curl`, below) |
 | tickets.api | http://localhost:5102 | |
 | ledger.api | http://localhost:5104 | |
-| shell | **http://localhost:5173** | The app you open in the browser. It forwards `/api/core`, `/api/tickets` and `/api/ledger` to the APIs above |
+| shell | **http://\<address\>.localhost:5173** | The app you open in the browser, at a tenant's address (`acme-fire.localhost:5173`). It forwards `/api/core`, `/api/tickets` and `/api/ledger` to the APIs above, keeping the address for core |
 | console | **http://localhost:5174** | The operator console. It forwards `/api/platform` to platform.api, and nothing else |
 
 Port 5433, not 5432, so it cannot collide with a PostgreSQL you may already run.
@@ -125,6 +132,10 @@ export Email__CapturePath="$(pwd)/.local/mail"
 # Shared between platform.api and core.api for provisioning tenants.
 export Internal__ApiKey="$(openssl rand -hex 24)"
 export Core__BaseUrl="http://localhost:5100"
+
+# Tenants sign in at subdomains of the shell (acme-fire at http://acme-fire.localhost:5173).
+# core.api reads the tenant from that address; platform.api shows each tenant's address.
+export Tenant__BaseUrl="http://localhost:5173"
 
 # The platform's key-encryption key. NOT exported, so no other service inherits it: platform
 # commands below pass it to platform.api explicitly.
@@ -271,9 +282,12 @@ Use an email address of your own for the tenant's first admin. Nothing is really
 invitation is written to `.local/mail/`. The `idempotencyKey` makes a retry safe: sending the same
 request again returns the same tenant rather than creating a second.
 
+The `subdomain` is the tenant's address: its people sign in at `acme-fire.localhost:5173`. Lowercase
+letters, digits and single hyphens, 3 to 40 characters, starting with a letter.
+
 ```bash
 curl -s -b .local/operator.jar -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
-  -d '{"name":"Acme Fire","adminEmail":"admin@acme.test","idempotencyKey":"first-local-tenant"}' \
+  -d '{"name":"Acme Fire","adminEmail":"admin@acme.test","idempotencyKey":"first-local-tenant","subdomain":"acme-fire"}' \
   http://localhost:5101/api/platform/v1/tenants
 # → {"tenantId":"ten_…"}
 
@@ -285,35 +299,21 @@ for app in tickets ledger; do
     http://localhost:5101/api/platform/v1/tenants/$TENANT/entitlements; echo
 done
 
-echo "export TENANT=$TENANT" >> .local/dev.env   # so later starts can find it
 ```
 
-### 6.4 Restart core.api pinned to that tenant
-
-Sign-in has to know which tenant you are signing in to. In production that will come from the
-hostname; that is not built yet (D5), so locally core.api is **pinned** to one tenant by
-configuration. In tab 1, stop core.api (`Ctrl+C`) and start it again with the tenant:
-
-```bash
-source .local/dev.env
-ConnectionStrings__Core="$DB;Username=ap_core_rt" Tenant__PublicId="$TENANT" \
-  dotnet run --project core.api --no-launch-profile --urls http://localhost:5100
-```
-
-If it says the address is already in use, see "Port already in use" below.
-
-### 6.5 Accept the invitation and sign in
+### 6.4 Accept the invitation and sign in
 
 Get the link from the captured invitation:
 
 ```bash
 TOKEN=$(node -e "const fs=require('fs');const f=fs.readdirSync('.local/mail').filter(n=>n.endsWith('.json')).map(n=>'.local/mail/'+n).sort((a,b)=>fs.statSync(b).mtimeMs-fs.statSync(a).mtimeMs)[0];console.log(JSON.parse(fs.readFileSync(f)).payload.token)")
-echo "http://localhost:5173/accept-invite?token=$TOKEN"
+echo "http://acme-fire.localhost:5173/accept-invite?token=$TOKEN"
 ```
 
 Open that link in Chrome or Firefox, choose the admin's password, and accept. Then go to
-**http://localhost:5173**, sign in as `admin@acme.test`, and you should see **Tickets** and
-**Ledger** in the navigation.
+**http://acme-fire.localhost:5173**, sign in as `admin@acme.test`, and you should see **Tickets** and
+**Ledger** in the navigation. (Safari may not send `*.localhost` to this machine; use Chrome or
+Firefox.)
 
 That is the whole journey: an operator created a tenant and licensed it, and its admin, invited by
 email, is working in both apps.
@@ -326,13 +326,7 @@ email, is working in both apps.
 docker start app-platform-dev-db
 ```
 
-Then the five tabs from 6.1, each starting with `source .local/dev.env`, with **one change**: tab 1
-starts core.api already pinned:
-
-```bash
-ConnectionStrings__Core="$DB;Username=ap_core_rt" Tenant__PublicId="$TENANT" \
-  dotnet run --project core.api --no-launch-profile --urls http://localhost:5100
-```
+Then the five tabs from 6.1, each starting with `source .local/dev.env`.
 
 To stop: `Ctrl+C` in each tab, then `docker stop app-platform-dev-db`. Your data stays in the Docker
 volume.
@@ -349,7 +343,7 @@ below, then Parts 4–6. Nothing local is worth keeping yet.
 docker rm -f app-platform-dev-db
 docker volume rm app-platform-dev-data
 rm -rf .local/keys .local/mail .local/operator.jar
-sed -i '' '/^export TENANT=/d' .local/dev.env
+sed -i '' '/^export TENANT=/d; /^export TENANT_URL=/d' .local/dev.env
 ```
 
 Then Parts 4 to 6. Keep `.local/dev.env` (its keys still work for a new database). Delete it too
@@ -384,9 +378,19 @@ kill $(lsof -ti tcp:5100 -sTCP:LISTEN)     # or 5101, 5102, 5104, 5173
 ring. Every API tab must have run `source .local/dev.env` (it sets `DataProtection__KeyPath`).
 Restart any tab that did not.
 
-**The admin's sign-in says the email or password is wrong, and it is right.** core.api is not
-pinned to the tenant, or is pinned to a different one. Check tab 1 was started with
-`Tenant__PublicId="$TENANT"` and that `echo $TENANT` shows the tenant's id.
+**Sign-in says "No organization signs in at localhost:5173".** You are on the shell's bare
+address. Use the tenant's own address, such as `http://acme-fire.localhost:5173`; the console shows
+it on the tenant's page. The same message at a tenant's address means the address was changed or
+mistyped.
+
+**The admin's sign-in says the email or password is wrong, and it is right.** You are at another
+tenant's address: sign-in looks the account up in the tenant the address names. Check the
+address on the tenant's page in the console.
+
+**Sign-in says no organization signs in at the address, after a pull, for a tenant made earlier.**
+Tenants made before addresses existed were given one made from their id (`t-01h…`); the console
+shows it, and changes it. If the address table is missing altogether, the local database needs the
+new migration: see "After pulling new code".
 
 **platform.api or `create-platform-user` refuses to start, naming key fingerprints.** It was started
 with a different `PLATFORM_KEK` from the one that created its keys, almost always because
@@ -443,11 +447,12 @@ With a signed-in `.local/operator.jar` and `$CSRF` from 6.2:
 |---|---|
 | Who is signed in | `GET /api/platform/v1/auth/session` |
 | Sign out (revokes the session) | `POST /api/platform/v1/auth/sign-out` |
-| Every tenant, with status and apps | `GET /api/platform/v1/tenants` |
-| One tenant, its license history and the operator actions on it | `GET /api/platform/v1/tenants/{tenantId}` |
+| Every tenant, with status, address and apps | `GET /api/platform/v1/tenants` |
+| One tenant, its addresses, license history and the operator actions on it | `GET /api/platform/v1/tenants/{tenantId}` |
+| Change a tenant's address | `POST /api/platform/v1/tenants/{tenantId}/address` `{"subdomain":"acme-rescue"}` |
 | Operator audit log | `GET /api/platform/v1/audit?limit=100` |
 | Error feed | `GET /api/platform/v1/errors?limit=50` |
-| Create a tenant | `POST /api/platform/v1/tenants` `{"name","adminEmail","idempotencyKey"}` |
+| Create a tenant | `POST /api/platform/v1/tenants` `{"name","adminEmail","idempotencyKey","subdomain"}` |
 | License or unlicense an app | `POST /api/platform/v1/tenants/{tenantId}/entitlements` `{"app":"tickets","licensed":true}` |
 | Suspend, resume or retire a tenant | `POST /api/platform/v1/tenants/{tenantId}/status` (see `SetTenantStatusFeature.cs` for the body) |
 

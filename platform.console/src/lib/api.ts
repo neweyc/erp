@@ -19,6 +19,16 @@ export interface TenantSummary {
   readonly createdAt: string
   readonly statusChangedAt: string | null
   readonly apps: readonly string[]
+  /** The current address (acme-fire), and the full one its people sign in at. */
+  readonly subdomain: string | null
+  readonly signInUrl: string | null
+}
+
+/** An address the tenant has had. The current one has no `replacedAt`. */
+export interface Address {
+  readonly subdomain: string
+  readonly assignedAt: string
+  readonly replacedAt: string | null
 }
 
 export interface Grant {
@@ -38,6 +48,7 @@ export interface AuditEntry {
 }
 
 export interface TenantDetail extends TenantSummary {
+  readonly addresses: readonly Address[]
   readonly grants: readonly Grant[]
   readonly actions: readonly AuditEntry[]
 }
@@ -59,12 +70,35 @@ export const routes = {
   tenant: (id: string) => `/api/platform/v1/tenants/${encodeURIComponent(id)}`,
   status: (id: string) => `/api/platform/v1/tenants/${encodeURIComponent(id)}/status`,
   entitlements: (id: string) => `/api/platform/v1/tenants/${encodeURIComponent(id)}/entitlements`,
+  address: (id: string) => `/api/platform/v1/tenants/${encodeURIComponent(id)}/address`,
   errors: '/api/platform/v1/errors',
   audit: '/api/platform/v1/audit',
 }
 
 export function appName(id: string): string {
   return LICENSABLE_APPS.find((a) => a.id === id)?.name ?? id
+}
+
+/**
+ * A first suggestion for a tenant's address, from its name: "Acme Fire & Rescue" -> acme-fire-rescue.
+ * Only a suggestion: the operator can change it, and platform.api decides whether it can be used.
+ */
+export function suggestSubdomain(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '')
+}
+
+/** The address an operator is choosing, in full: acme-fire under https://app.example.com. */
+export function signInUrlFor(subdomain: string, tenantBaseUrl: string): string {
+  const url = new URL(tenantBaseUrl)
+  url.hostname = `${subdomain}.${url.hostname}`
+  return url.origin
 }
 
 /** A moment as an operator reads it: date and time, in their own time zone. */

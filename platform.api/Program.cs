@@ -7,6 +7,7 @@ using AppPlatform.Platform.Auth;
 using AppPlatform.Platform.Data;
 using AppPlatform.Platform.Features.Auth;
 using AppPlatform.Platform.Services;
+using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -60,6 +61,8 @@ builder.Services.AddScoped<ICookieAuthenticationState>(sp => sp.GetRequiredServi
 builder.Services.AddScoped<IOperatorSessionStore, EFOperatorSessionStore>();
 builder.Services.AddScoped<ITenantAuditWriter, EFTenantAuditWriter>();
 builder.Services.AddScoped<ITenantService, EFTenantService>();
+// Read at startup, and refused there if missing: the console shows each tenant's sign-in address.
+builder.Services.AddSingleton(new TenantSite(TenantAddress.ParseBaseUrl(builder.Configuration["Tenant:BaseUrl"])));
 builder.Services.AddScoped<IIdempotencyService, EFIdempotencyService>();
 builder.Services.AddScoped<IErrorFeedService, EFErrorFeedService>();
 builder.Services.AddScoped<IAuditLogService, EFAuditLogService>();

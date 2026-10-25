@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 namespace AppPlatform.Core.Features.Internal;
 
 /// <summary>
-/// Creates a tenant, its company, and its first admin invitation.
+/// Creates a tenant, its address, its company, and its first admin invitation.
 ///
 /// This lives in CORE, not platform, for one reason: all of it must commit in a single
 /// transaction, and a transaction cannot span two services. Platform holds the commercial
@@ -21,7 +21,8 @@ public static class ProvisionTenantFeature
 {
     public const string ApiKeyHeader = "X-Internal-Key";
 
-    public record ProvisionTenantCommand(string? Name, string? AdminEmail, string? IdempotencyKey);
+    /// <param name="Subdomain">The tenant's address under the base domain (<see cref="TenantAddress"/>).</param>
+    public record ProvisionTenantCommand(string? Name, string? AdminEmail, string? IdempotencyKey, string? Subdomain);
 
     public class ProvisionTenantCommandHandler(
         CoreDbContext db,
@@ -48,8 +49,19 @@ public static class ProvisionTenantFeature
 
             // Checked first as a fast path, but NOT relied on: two concurrent calls both find
             // nothing here. The unique index below is the actual guard.
+            //
+            // Before the address is checked: a retry of a call that succeeded finds its own address
+            // taken (by itself), and must get its tenant back rather than a refusal.
             if (await db.Tenants.FirstOrDefaultAsync(t => t.ProvisioningKey == key, ct) is { } already)
                 return Replay(already, ct);
+
+            if (!TenantAddress.TryNormalize(cmd.Subdomain, out var subdomain, out var addressProblem))
+                return CommandResult.Invalid(CoreProblems.ValidationFailed, addressProblem);
+
+            // A fast, readable refusal. The primary key on the address is the guard against a
+            // concurrent call taking it between here and the insert below.
+            if (await db.TenantSubdomains.AnyAsync(s => s.Subdomain == subdomain, ct))
+                return AddressTaken(subdomain);
 
             var now = clock.GetUtcNow();
 
@@ -88,6 +100,28 @@ public static class ProvisionTenantFeature
                 if (winner is not null) return Replay(winner, ct);
 
                 throw;
+            }
+
+            // The address, in the tenant's transaction: a tenant committed without one could not be
+            // signed in to. Saved on its own so a clash is known to be the address, not the key.
+            db.TenantSubdomains.Add(new TenantSubdomain
+            {
+                Subdomain = subdomain,
+                TenantId = tenant.Id,
+                AssignedAt = now,
+            });
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (Exception ex) when (DatabaseConflict.IsUniqueViolation(ex))
+            {
+                // A concurrent call with a different key took the same address. Nothing of this
+                // tenant survives the rollback, so a retry with another address starts clean.
+                await transaction.RollbackAsync(ct);
+                db.ChangeTracker.Clear();
+                return AddressTaken(subdomain);
             }
 
             // Declared, because there is no session to take one from: the company and the admin
@@ -139,6 +173,10 @@ public static class ProvisionTenantFeature
 
             return CommandResult.Ok(new { tenantId = tenant.PublicId, adminUserId = admin.PublicId });
         }
+
+        private static CommandResult AddressTaken(string subdomain)
+            => CommandResult.Conflict(
+                CoreProblems.SubdomainTaken, $"The address \"{subdomain}\" belongs to another tenant. Choose another.");
 
         /// <summary>
         /// A replay returns the tenant only. The admin user id is deliberately absent: the

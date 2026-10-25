@@ -44,6 +44,29 @@ public class Tenant : IPublicIdentified
 }
 
 /// <summary>
+/// An address a tenant signs in at (<c>acme-fire</c>, meaning <c>acme-fire.{base domain}</c>), and
+/// how sign-in finds the tenant. Rows are kept after a rename, so a tenant's history lists every
+/// address it has had.
+///
+/// The subdomain is the key, so an address belongs to one tenant forever and is never given to
+/// another. Its people may still be signed in at the old address after a rename, holding a cookie
+/// for that host; another tenant taking it would put them on a stranger's address. A tenant may
+/// take back one of its own former addresses.
+///
+/// Core holds SELECT and INSERT here, as on <see cref="Tenant"/>: provisioning writes the first
+/// address in the same transaction as the tenant, and sign-in reads it. Only the operator renames.
+/// </summary>
+public class TenantSubdomain
+{
+    public required string Subdomain { get; set; }
+    public int TenantId { get; set; }
+    public DateTimeOffset AssignedAt { get; set; }
+
+    /// <summary>Null for the tenant's current address; set when a rename replaces it.</summary>
+    public DateTimeOffset? ReplacedAt { get; set; }
+}
+
+/// <summary>
 /// An entitlement: the tenant has licensed this app. **Rows exist only for licensed apps** —
 /// core has no row, because core is always on. Not tenant-scoped: entitlements are managed at
 /// host level, by an operator, and a tenant must not be able to grant itself one.

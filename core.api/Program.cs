@@ -5,6 +5,7 @@ using AppPlatform.Core.Data;
 using AppPlatform.Core.Services;
 using AppPlatform.ErrorFeed;
 using AppPlatform.Outbox;
+using AppPlatform.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -57,7 +58,12 @@ builder.Services.AddSingleton(NpgsqlDataSource.Create(connection));
 builder.Services.AddScoped<ISessionStore, NpgsqlSessionStore>();
 
 builder.Services.AddScoped<IAuthService, EFAuthService>();
-builder.Services.AddScoped<ITenantResolver, EFTenantResolver>();
+// Tenants sign in at subdomains of the shell's address (acme-fire.app.example.com, or
+// acme-fire.localhost:5173 in development), and sign-in reads the tenant from the host. Without
+// it nobody can sign in, so it is refused at startup rather than at the first sign-in.
+var tenantBaseDomain = TenantAddress.ParseBaseUrl(builder.Configuration["Tenant:BaseUrl"]).Host;
+builder.Services.AddScoped<ITenantResolver>(sp =>
+    new EFTenantResolver(sp.GetRequiredService<CoreDbContext>(), tenantBaseDomain));
 builder.Services.AddScoped<IEmployeeService, EFEmployeeService>();
 builder.Services.AddScoped<IUserService, EFUserService>();
 builder.Services.AddScoped<IRoleService, EFRoleService>();

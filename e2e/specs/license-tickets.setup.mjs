@@ -1,8 +1,8 @@
 import { expect, request, test } from '@playwright/test'
-import { operatorSignIn, seededTenantPublicId } from '../stack.mjs'
+import { operatorSignIn, seededTenantPublicId, tenantOrigin } from '../stack.mjs'
 
-const CORE = 'http://localhost:5100'
-const TICKETS = 'http://localhost:5102'
+const CORE = tenantOrigin(5100)
+const TICKETS = tenantOrigin(5102)
 const ADMIN_EMAIL = 'admin@e2e.test'
 const ADMIN_PASSWORD = 'correct horse battery'
 

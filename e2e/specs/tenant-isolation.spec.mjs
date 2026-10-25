@@ -1,6 +1,7 @@
 import { expect, request, test } from '@playwright/test'
 import {
-  grantOwnAppRole, operatorSignIn, OTHER_TENANT_NAME, otherTenantPublicId, waitForInvitation,
+  grantOwnAppRole, operatorSignIn, OTHER_TENANT_NAME, OTHER_TENANT_SUBDOMAIN, otherTenantPublicId, tenantOrigin,
+  TENANT_SUBDOMAIN, waitForInvitation,
 } from '../stack.mjs'
 
 /**
@@ -11,40 +12,37 @@ import {
  * actually in force in the deployed processes: that the tenant is taken from the SESSION on every
  * request, in a core.api and tickets.api that serve both tenants at once.
  *
- * That last point is why tenant B signs in through a separate core.api (5103, pinned to B — see
- * the config) but does everything else through the SAME core.api (5100) and tickets.api (5102)
- * as tenant A. Were B's requests served by its own processes, a pass would prove nothing about
- * isolation inside a shared one.
+ * Both tenants go through the SAME core.api (5100) and tickets.api (5102), each at its own address:
+ * A at e2e.localhost, B at other.localhost. Sign-in reads the tenant from that address (D5); every
+ * request after it takes the tenant from the session. Were B served by processes of its own, a
+ * pass would prove nothing about isolation inside a shared one.
  */
 
-const CORE = 'http://localhost:5100'
-const OTHER_CORE_SIGN_IN = 'http://localhost:5103'
-const TICKETS = 'http://localhost:5102'
-const PLATFORM = 'http://localhost:5101'
-
-const A = { email: 'admin@e2e.test', password: 'correct horse battery' }
-const B = { email: 'admin@other.test', password: 'other correct horse battery' }
+const A = { email: 'admin@e2e.test', password: 'correct horse battery', subdomain: TENANT_SUBDOMAIN }
+const B = { email: 'admin@other.test', password: 'other correct horse battery', subdomain: OTHER_TENANT_SUBDOMAIN }
 
 /** Tenant B's own employee, created over HTTP by B's admin. */
 const GRACE = { firstName: 'Grace', lastName: 'Hopper', email: 'grace@other.test' }
 
 /**
- * Signs in at the given core and returns a context holding that session and its CSRF token.
- * Each identity gets its own context, so no cookie can leak between tenants inside the test.
+ * Signs in at a tenant's address and returns a context holding that session and its CSRF token,
+ * with the services at that same address (the cookies belong to it). Each identity gets its own
+ * context, so no cookie can leak between tenants inside the test.
  */
-async function signIn(signInBase, { email, password }) {
+async function signIn(subdomain, { email, password }) {
   const api = await request.newContext()
+  const core = tenantOrigin(5100, subdomain)
 
-  const response = await api.post(`${signInBase}/api/core/v1/auth/sign-in`, {
+  const response = await api.post(`${core}/api/core/v1/auth/sign-in`, {
     data: { email, password },
   })
 
   const csrf = (await api.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value
-  return { api, csrf, status: response.status(), body: await response.text() }
+  return { api, csrf, core, tickets: tenantOrigin(5102, subdomain), status: response.status(), body: await response.text() }
 }
 
-async function signInOrFail(signInBase, credentials) {
-  const session = await signIn(signInBase, credentials)
+async function signInOrFail(subdomain, credentials) {
+  const session = await signIn(subdomain, credentials)
   expect(session.status, session.body).toBe(200)
   expect(session.csrf, 'sign-in must issue a csrf token').toBeTruthy()
   return session
@@ -56,15 +54,15 @@ async function json(response) {
 }
 
 async function listTickets(session) {
-  return json(await session.api.get(`${TICKETS}/api/tickets/v1/tickets?includeClosed=true`))
+  return json(await session.api.get(`${session.tickets}/api/tickets/v1/tickets?includeClosed=true`))
 }
 
 async function listEmployees(session) {
-  return json(await session.api.get(`${CORE}/api/core/v1/employees`))
+  return json(await session.api.get(`${session.core}/api/core/v1/employees`))
 }
 
 async function createTicket(session, data) {
-  return session.api.post(`${TICKETS}/api/tickets/v1/tickets`, {
+  return session.api.post(`${session.tickets}/api/tickets/v1/tickets`, {
     headers: { 'X-CSRF-Token': session.csrf },
     data,
   })
@@ -87,13 +85,13 @@ test.describe('a second tenant', () => {
    * second acceptance of the same invitation is (correctly) refused.
    */
   test.beforeAll(async () => {
-    const existing = await signIn(OTHER_CORE_SIGN_IN, B)
+    const existing = await signIn(B.subdomain, B)
     await existing.api.dispose()
 
     if (existing.status !== 200) {
       const token = await waitForInvitation(B.email)
       const anonymous = await request.newContext()
-      const accepted = await anonymous.post(`${CORE}/api/core/v1/auth/accept-invite`, {
+      const accepted = await anonymous.post(`${tenantOrigin(5100, B.subdomain)}/api/core/v1/auth/accept-invite`, {
         data: { token, password: B.password },
       })
       expect(accepted.status(), await accepted.text()).toBe(200)
@@ -104,17 +102,17 @@ test.describe('a second tenant', () => {
     // A's has. Without either, every tickets request from B would be refused 403 — and "B cannot
     // see A's tickets" would pass without the tenant filter ever being consulted.
     await licenseTicketsForTenantB()
-    await grantOwnAppRole({ core: CORE, signInBase: OTHER_CORE_SIGN_IN, ...B, app: 'tickets', role: 'agent' })
+    await grantOwnAppRole({ core: tenantOrigin(5100, B.subdomain), ...B, app: 'tickets', role: 'agent' })
 
     // Signed in AFTER the role change, which ends the user's earlier sessions.
-    tenantB = await signInOrFail(OTHER_CORE_SIGN_IN, B)
-    tenantA = await signInOrFail(CORE, A)
+    tenantB = await signInOrFail(B.subdomain, B)
+    tenantA = await signInOrFail(A.subdomain, A)
 
     const rosterOfB = await listEmployees(tenantB)
     graceId = rosterOfB.find((e) => e.email === GRACE.email)?.employeeId
 
     if (!graceId) {
-      const created = await tenantB.api.post(`${CORE}/api/core/v1/employees`, {
+      const created = await tenantB.api.post(`${tenantB.core}/api/core/v1/employees`, {
         headers: { 'X-CSRF-Token': tenantB.csrf },
         data: GRACE,
       })
@@ -142,17 +140,16 @@ test.describe('a second tenant', () => {
     await tenantB?.api.dispose()
   })
 
-  test('signs in to its own tenant only, and its session is honoured by the shared core', async () => {
-    // Read from 5100 — the core pinned to tenant A. The session, not the process's pinned tenant,
-    // decides whose data this is.
-    const session = await json(await tenantB.api.get(`${CORE}/api/core/v1/auth/session`))
+  test('signs in to its own tenant only, at its own address, through the shared core', async () => {
+    // One core.api process serves both addresses; the session decides whose data this is.
+    const session = await json(await tenantB.api.get(`${tenantB.core}/api/core/v1/auth/session`))
     expect(session.tenantName).toBe(OTHER_TENANT_NAME)
     expect(session.licensedApps).toContain('tickets')
 
-    // Each tenant's credentials are unknown at the other's door. Sign-in looks the user up inside
-    // the resolved tenant, so another tenant's valid password is just a wrong password.
-    const aAtB = await signIn(OTHER_CORE_SIGN_IN, A)
-    const bAtA = await signIn(CORE, B)
+    // Each tenant's credentials are unknown at the other's address. Sign-in looks the user up
+    // inside the tenant the address names, so another tenant's valid password is a wrong one.
+    const aAtB = await signIn(B.subdomain, A)
+    const bAtA = await signIn(A.subdomain, B)
     await aAtB.api.dispose()
     await bAtA.api.dispose()
 
@@ -160,6 +157,24 @@ test.describe('a second tenant', () => {
     expect(aAtB.body).toContain('invalid_credentials')
     expect(bAtA.status).toBe(403)
     expect(bAtA.body).toContain('invalid_credentials')
+  })
+
+  test("a session carried to the other tenant's address still sees only its own tenant", async () => {
+    // A browser never sends B's cookie to A's address, but an attacker can. The address chooses a
+    // tenant only for sign-in; afterwards the session does, so B's cookie at A's address is still B.
+    const cookie = (await tenantB.api.storageState()).cookies
+      .filter((c) => c.name === 'ap_session')
+      .map((c) => `${c.name}=${c.value}`)
+      .join('; ')
+    expect(cookie, 'B must hold a session cookie').toBeTruthy()
+
+    const anonymous = await request.newContext()
+    const atA = await anonymous.get(`${tenantA.core}/api/core/v1/employees`, { headers: { Cookie: cookie } })
+    const roster = (await json(atA)).map((e) => e.employeeId)
+    await anonymous.dispose()
+
+    expect(roster).toContain(graceId)
+    expect(roster).not.toContain(adaId)
   })
 
   test("cannot see the other tenant's tickets", async () => {
@@ -176,11 +191,11 @@ test.describe('a second tenant', () => {
   })
 
   test("cannot close or reassign the other tenant's ticket, even knowing its id", async () => {
-    const close = await tenantB.api.post(`${TICKETS}/api/tickets/v1/tickets/${ticketOfA.id}/close`, {
+    const close = await tenantB.api.post(`${tenantB.tickets}/api/tickets/v1/tickets/${ticketOfA.id}/close`, {
       headers: { 'X-CSRF-Token': tenantB.csrf },
     })
     const reassign = await tenantB.api.post(
-      `${TICKETS}/api/tickets/v1/tickets/${ticketOfA.id}/assignee`, {
+      `${tenantB.tickets}/api/tickets/v1/tickets/${ticketOfA.id}/assignee`, {
         headers: { 'X-CSRF-Token': tenantB.csrf },
         data: { employeeId: graceId },
       })
@@ -200,7 +215,7 @@ test.describe('a second tenant', () => {
     // the assignment case.
     const own = (await json(await createTicket(tenantB, { title: `B closes its own ${Date.now()}` })))
       .ticketId
-    const closedOwn = await tenantB.api.post(`${TICKETS}/api/tickets/v1/tickets/${own}/close`, {
+    const closedOwn = await tenantB.api.post(`${tenantB.tickets}/api/tickets/v1/tickets/${own}/close`, {
       headers: { 'X-CSRF-Token': tenantB.csrf },
     })
     expect(closedOwn.status(), await closedOwn.text()).toBe(200)
@@ -217,7 +232,7 @@ test.describe('a second tenant', () => {
     expect((await listTickets(tenantB)).map((t) => t.title)).not.toContain(title)
 
     const assignee = (ticketId, employeeId) => tenantB.api.post(
-      `${TICKETS}/api/tickets/v1/tickets/${ticketId}/assignee`, {
+      `${tenantB.tickets}/api/tickets/v1/tickets/${ticketId}/assignee`, {
         headers: { 'X-CSRF-Token': tenantB.csrf },
         data: { employeeId },
       })
@@ -241,7 +256,7 @@ test.describe('a second tenant', () => {
   })
 
   test("cannot see the other tenant's employees", async () => {
-    // Both read through 5100, one process, two sessions.
+    // Both read through 5100: one process, two addresses, two sessions.
     const rosterOfA = (await listEmployees(tenantA)).map((e) => e.employeeId)
     const rosterOfB = (await listEmployees(tenantB)).map((e) => e.employeeId)
 

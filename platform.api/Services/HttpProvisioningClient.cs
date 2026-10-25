@@ -17,6 +17,7 @@ public sealed class HttpProvisioningClient(HttpClient http, string apiKey) : IPr
                 name = request.TenantName,
                 adminEmail = request.AdminEmail,
                 idempotencyKey = request.IdempotencyKey,
+                subdomain = request.Subdomain,
             }),
         };
 
@@ -29,10 +30,32 @@ public sealed class HttpProvisioningClient(HttpClient http, string apiKey) : IPr
         var body = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
-            return new ProvisionResult(false, null, $"core returned {(int)response.StatusCode}: {body}");
+        {
+            return new ProvisionResult(
+                false, null, $"core returned {(int)response.StatusCode}: {body}", ProblemCodeOf(body));
+        }
 
         using var json = JsonDocument.Parse(body);
         return new ProvisionResult(
             true, json.RootElement.GetProperty("tenantId").GetString(), null);
+    }
+
+    /// <summary>Core's stable problem code, when its refusal carries one. Never its message.</summary>
+    private static string? ProblemCodeOf(string body)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(body);
+            return json.RootElement.ValueKind == JsonValueKind.Object
+                && json.RootElement.TryGetProperty("problemCode", out var code)
+                && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            // A proxy's HTML error page, or nothing at all: no code to report.
+            return null;
+        }
     }
 }

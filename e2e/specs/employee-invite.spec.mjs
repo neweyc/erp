@@ -1,5 +1,5 @@
 import { expect, request, test } from '@playwright/test'
-import { waitForInvitation } from '../stack.mjs'
+import { tenantOrigin, waitForInvitation } from '../stack.mjs'
 
 /**
  * D17: an employee invited by an admin can accept and sign in.
@@ -12,7 +12,7 @@ import { waitForInvitation } from '../stack.mjs'
  * the administrator defines one on the Roles page and gives it to the invitee on the Users page.
  */
 
-const CORE = 'http://localhost:5100'
+const CORE = tenantOrigin(5100)
 const ADMIN = { email: 'admin@e2e.test', password: 'correct horse battery' }
 
 test('an invited employee accepts in the browser and signs in', async ({ page }) => {

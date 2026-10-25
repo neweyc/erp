@@ -1,7 +1,10 @@
 namespace AppPlatform.Platform.Services;
 
-public record ProvisionRequest(string TenantName, string AdminEmail, string IdempotencyKey);
-public record ProvisionResult(bool Succeeded, string? TenantPublicId, string? Error);
+public record ProvisionRequest(string TenantName, string AdminEmail, string IdempotencyKey, string Subdomain);
+
+/// <param name="ProblemCode">Core's code when it refused, so a refusal the operator can act on
+/// (the address is taken) is told apart from a failure worth retrying.</param>
+public record ProvisionResult(bool Succeeded, string? TenantPublicId, string? Error, string? ProblemCode = null);
 
 /// <summary>
 /// Calls core's internal provisioning endpoint.

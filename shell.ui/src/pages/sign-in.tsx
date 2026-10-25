@@ -39,7 +39,11 @@ export function SignIn() {
       await refresh()
     } catch (caught) {
       const code = caught instanceof ApiError ? caught.problemCode : 'unknown'
-      setError(EXPLANATION[code] ?? 'Sign-in failed. Please try again.')
+      // Sign-in finds the organization from the address in the browser (acme.app.example.com), so
+      // a mistyped or out-of-date address is told apart from a wrong password.
+      setError(code === 'tenant_not_found'
+        ? `No organization signs in at ${window.location.host}. Check the address you were given.`
+        : EXPLANATION[code] ?? 'Sign-in failed. Please try again.')
     } finally {
       setSubmitting(false)
     }

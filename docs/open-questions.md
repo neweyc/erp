@@ -123,3 +123,7 @@ remain open; they are not a blanket prohibition on building experiments.
   restore (one app corrupted, others fine) is not possible without a plan.
 - **Who answers at 2am?** Unchanged from the September debate, and unsolved.
 - **Secret storage** for connection strings and keys, and how they rotate.
+- **The production domain** (D5 built in Cycle 19). Tenants sign in at `<address>.<base domain>`,
+  configured as `Tenant:BaseUrl`; which domain that is, and who issues the wildcard certificate,
+  waits on the hosting provider. **Customers' own domains** (`portal.acmefire.com`) are a second
+  lookup plus a certificate per domain, and are deferred until a customer asks.

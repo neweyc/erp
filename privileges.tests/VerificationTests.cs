@@ -19,6 +19,10 @@ public class VerificationTests(PrivilegeFixture fixture)
                 "REVOKE USAGE ON SCHEMA core FROM ap_platform_rt")]
     [InlineData("GRANT UPDATE ON platform.tenant TO ap_core_rt",
                 "REVOKE UPDATE ON platform.tenant FROM ap_core_rt")]
+    [InlineData("GRANT UPDATE ON platform.tenant_subdomain TO ap_core_rt",
+                "REVOKE UPDATE ON platform.tenant_subdomain FROM ap_core_rt")]
+    [InlineData("GRANT SELECT ON platform.tenant_app TO ap_core_rt",
+                "REVOKE SELECT ON platform.tenant_app FROM ap_core_rt")]
     [InlineData("GRANT CREATE ON SCHEMA tickets TO ap_tickets_rt",
                 "REVOKE CREATE ON SCHEMA tickets FROM ap_tickets_rt")]
     [InlineData("CREATE TABLE public.stray (id int)", "DROP TABLE public.stray")]

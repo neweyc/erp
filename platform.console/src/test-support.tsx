@@ -9,7 +9,7 @@ type Answer = { status?: number; body?: unknown }
 /** An answer, or a promise of one for a test that holds a request open. */
 export type Handler = (init?: RequestInit) => Answer | Promise<Answer>
 
-export const operator = { email: 'op@platform.test' }
+export const operator = { email: 'op@platform.test', tenantBaseUrl: 'https://app.example.com' }
 
 /**
  * Stands in for platform.api: each route answers from a handler, keyed "METHOD /path". The session

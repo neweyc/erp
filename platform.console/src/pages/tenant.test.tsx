@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { SessionProvider } from '../components/session'
 import userEvent from '@testing-library/user-event'
@@ -13,7 +13,11 @@ const PATH = '/api/platform/v1/tenants/ten_acme'
 
 const acme: TenantDetail = {
   tenantId: 'ten_acme', name: 'Acme Fire', status: 'Active', createdAt: '2026-10-01T09:00:00Z',
-  statusChangedAt: null, apps: ['tickets'],
+  statusChangedAt: null, apps: ['tickets'], subdomain: 'acme-fire', signInUrl: 'https://acme-fire.app.example.com',
+  addresses: [
+    { subdomain: 'acme-fire', assignedAt: '2026-10-05T09:00:00Z', replacedAt: null },
+    { subdomain: 'acme', assignedAt: '2026-10-01T09:00:00Z', replacedAt: '2026-10-05T09:00:00Z' },
+  ],
   grants: [
     { app: 'tickets', grantedAt: '2026-10-02T09:00:00Z', revokedAt: null },
     { app: 'ledger', grantedAt: '2026-10-01T09:00:00Z', revokedAt: '2026-10-03T09:00:00Z' },
@@ -244,4 +248,100 @@ it("never shows one tenant's data on another's page when a change finishes after
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(screen.getByRole('heading', { name: 'Beta Rescue' })).toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: 'Acme Fire' })).not.toBeInTheDocument()
+})
+
+describe('its address', () => {
+  it('shows where its people sign in, and the addresses it had before', async () => {
+    show(acme)
+
+    const link = await screen.findByRole('link', { name: 'https://acme-fire.app.example.com' })
+    expect(link).toHaveAttribute('href', 'https://acme-fire.app.example.com')
+    expect(screen.getByRole('list', { name: 'Former addresses' })).toHaveTextContent('acme')
+  })
+
+  it('says when a tenant has no address, and lists no former ones when there are none', async () => {
+    show({ ...acme, subdomain: null, signInUrl: null, addresses: [] })
+
+    expect(await screen.findByText(/has no address, so nobody can sign in/)).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Former addresses' })).not.toBeInTheDocument()
+  })
+
+  it('changes it after saying what happens to the old one, then reads the tenant again', async () => {
+    let reads = 0
+    const fetchMock = show(() => ({ body: reads++ === 0 ? acme : { ...acme, subdomain: 'acme-rescue' } }), {
+      [`POST ${PATH}/address`]: () => ({ body: { subdomain: 'acme-rescue' } }),
+    })
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Change address' }))
+    const dialog = screen.getByRole('dialog', { name: "Change Acme Fire's address?" })
+    expect(dialog).toHaveTextContent('"acme-fire" stops working at once')
+    expect(dialog).toHaveTextContent('stays reserved to this tenant')
+    const field = within(dialog).getByLabelText('Address')
+    expect(field).toHaveValue('acme-fire')
+    await user.clear(field)
+    await user.type(field, 'acme-rescue')
+    expect(dialog).toHaveTextContent('People sign in at https://acme-rescue.app.example.com')
+    await user.click(within(dialog).getByRole('button', { name: 'Change address' }))
+
+    await waitFor(() => expect(reads).toBe(2))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(sent(fetchMock, 'POST', `${PATH}/address`)).toEqual([{ subdomain: 'acme-rescue' }])
+  })
+
+  it("shows the platform's words for a refused address, and stays open to try another", async () => {
+    show(acme, {
+      [`POST ${PATH}/address`]: () => ({
+        status: 409, body: { problemCode: 'subdomain_taken', message: 'The address "beta" belongs to another tenant.' },
+      }),
+    })
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Change address' }))
+    const dialog = screen.getByRole('dialog')
+    await user.clear(within(dialog).getByLabelText('Address'))
+    await user.type(within(dialog).getByLabelText('Address'), 'beta')
+    await user.click(within(dialog).getByRole('button', { name: 'Change address' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('belongs to another tenant')
+    expect(within(dialog).getByRole('button', { name: 'Change address' })).toBeEnabled()
+  })
+
+  it('reports any other failure plainly', async () => {
+    show(acme, { [`POST ${PATH}/address`]: () => ({ status: 500, body: { problemCode: 'internal_error' } }) })
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Change address' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Change address' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The address could not be changed. Try again.')
+  })
+
+  it('cannot be closed while a change is pending, and can be cancelled otherwise', async () => {
+    const pending = held()
+    show(acme, { [`POST ${PATH}/address`]: () => pending.promise })
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Change address' }))
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Change address' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    pending.answer({ status: 409, body: { problemCode: 'already_in_that_state', message: 'This tenant already signs in at "acme-fire".' } })
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('already signs in at')
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Change address' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('cannot be changed for a retired tenant', async () => {
+    show({ ...acme, status: 'Retired' })
+
+    await screen.findByRole('heading', { name: 'Acme Fire', level: 1 })
+    expect(screen.queryByRole('button', { name: 'Change address' })).not.toBeInTheDocument()
+  })
 })

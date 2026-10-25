@@ -34,6 +34,7 @@ public class CoreDbContext(
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<TenantSubdomain> TenantSubdomains => Set<TenantSubdomain>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<UserToken> UserTokens => Set<UserToken>();
 
@@ -54,6 +55,14 @@ public class CoreDbContext(
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.Property(x => x.ProvisioningKey).HasMaxLength(200);
             e.HasPublicId("ten");
+        });
+
+        modelBuilder.Entity<TenantSubdomain>(e =>
+        {
+            // Platform's table, mapped and never migrated, like the tenant above.
+            e.ToTable("tenant_subdomain", "platform", t => t.ExcludeFromMigrations());
+            e.HasKey(x => x.Subdomain);
+            e.Property(x => x.Subdomain).HasMaxLength(TenantAddress.MaxLength);
         });
 
         modelBuilder.Entity<Company>(e =>

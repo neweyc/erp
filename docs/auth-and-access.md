@@ -164,6 +164,36 @@ alone is not sufficient for state-changing calls.
 - Internal provisioning endpoints run before any tenant exists. They scope explicitly and
   are reviewed as carefully as anonymous endpoints.
 
+### 6b. Anonymous sign-in finds its tenant from the address (D5, Cycle 19)
+
+Sign-in has no session yet, so the one thing it may take a tenant from is the **host the request
+arrived at**: each tenant has an address, a subdomain of the deployment's base domain
+(`acme-fire.app.example.com`), and core resolves it through `platform.tenant_subdomain`. Never a
+header, a query parameter or the body: a tenant named by the client lets the client choose whose
+accounts to try.
+
+- `Tenant:BaseUrl` (`https://app.example.com`) is read by core and platform alike, and required at
+  startup. Its host is the base domain; `TenantAddress` (packages/tenancy) holds the rules for an
+  address and parses a host.
+- A host that is no tenant's current address resolves to nothing, and sign-in answers **404
+  `tenant_not_found`**, so a mistyped address is not mistaken for a wrong password. That confirms
+  whether an address is in use, which the address already does by being how people reach us.
+  Nothing falls back to a default tenant.
+- **An address belongs to one tenant forever.** A rename keeps the old row as a former address,
+  which signs nobody in but is never given to another tenant: people still signed in there hold a
+  cookie for that host, and a stranger taking it would put them on someone else's address. A tenant
+  may take back one of its own former addresses.
+- **The address chooses the tenant for sign-in only.** Afterwards the session does, on every
+  request. A session cookie carried to another tenant's address still reaches only its own tenant
+  (`tenant-isolation.spec.mjs`). Cookies are host-only, so a browser never carries one across.
+- Sibling subdomains are **same-site**, so `SameSite` does nothing between tenants. The CSRF
+  double-submit token is what protects them, and every page under the base domain is served by
+  this platform: no customer-controlled content is ever hosted on a tenant's address.
+- **Deployment requirement.** nginx must pass the original host (`proxy_set_header Host $host`):
+  core reads `Host`, and trusts no `X-Forwarded-Host`. DNS needs a wildcard record for
+  `*.<base domain>`, and TLS a wildcard certificate. A customer's own domain would be a second
+  lookup and per-domain certificates; not built.
+
 ## 6a. The caller, not the user
 
 Every handler receives a `Caller`, never a `Guid userId`:

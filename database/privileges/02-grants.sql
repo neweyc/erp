@@ -154,6 +154,19 @@ BEGIN
 END
 $$;
 
+-- The tenant's address, on the same terms and for the same two reasons: provisioning writes
+-- the first one in the tenant's transaction, and anonymous sign-in reads it to find which
+-- tenant a request is for. Renaming is the operator's, so core has no UPDATE here either.
+-- The table arrives with platform's AddTenantSubdomains migration; skipped before it.
+DO $$
+BEGIN
+  IF to_regclass('platform.tenant_subdomain') IS NOT NULL THEN
+    GRANT SELECT, INSERT ON platform.tenant_subdomain TO ap_core_rt;
+    REVOKE UPDATE, DELETE ON platform.tenant_subdomain FROM ap_core_rt;
+  END IF;
+END
+$$;
+
 -- No other platform table is reachable from core: no entitlement row, billing record,
 -- operator account, or audit entry.
 

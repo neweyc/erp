@@ -17,6 +17,7 @@ public class OperatorConsoleTests
     private static readonly DateTimeOffset Now = new(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
     private readonly Mock<ITenantService> _tenants = new();
     private readonly Mock<IAuditLogService> _audit = new();
+    private readonly TenantSite _site = new(new Uri("https://app.example.com"));
 
     [Fact]
     public async Task A_tenant_shows_its_live_apps_from_the_same_history_it_lists()
@@ -28,9 +29,10 @@ public class OperatorConsoleTests
             new GrantRow("ledger", Now.AddDays(-2), Now.AddDays(-1)),
             new GrantRow("ledger", Now.AddDays(-5), Now.AddDays(-3)),
         ]);
+        _tenants.Setup(t => t.AddressHistoryAsync(7, default)).ReturnsAsync([]);
         _audit.Setup(a => a.RecentAsync(tenant.PublicId, GetTenantFeature.RecentActions, default)).ReturnsAsync([]);
 
-        var result = await new GetTenantFeature.GetTenantQueryHandler(_tenants.Object, _audit.Object).Handle(tenant.PublicId);
+        var result = await new GetTenantFeature.GetTenantQueryHandler(_tenants.Object, _audit.Object, _site).Handle(tenant.PublicId);
 
         var model = Assert.IsType<GetTenantFeature.TenantDetailModel>(result.Value);
         // Revoked grants stay in the history but are not licensed.
@@ -39,12 +41,47 @@ public class OperatorConsoleTests
         Assert.Equal("Active", model.Status);
     }
 
+    [Fact]
+    public async Task A_tenant_shows_where_its_people_sign_in_and_the_addresses_it_had_before()
+    {
+        var tenant = new Tenant { Id = 7, PublicId = PublicId.New("ten").ToString(), Name = "Acme" };
+        _tenants.Setup(t => t.FindByPublicIdAsync(tenant.PublicId, default)).ReturnsAsync(tenant);
+        _tenants.Setup(t => t.GrantHistoryAsync(7, default)).ReturnsAsync([]);
+        _tenants.Setup(t => t.AddressHistoryAsync(7, default)).ReturnsAsync([
+            new AddressRow("acme-fire", Now, null),
+            new AddressRow("acme", Now.AddDays(-9), Now),
+        ]);
+        _audit.Setup(a => a.RecentAsync(tenant.PublicId, GetTenantFeature.RecentActions, default)).ReturnsAsync([]);
+
+        var result = await new GetTenantFeature.GetTenantQueryHandler(_tenants.Object, _audit.Object, _site).Handle(tenant.PublicId);
+
+        var model = Assert.IsType<GetTenantFeature.TenantDetailModel>(result.Value);
+        Assert.Equal("acme-fire", model.Subdomain);
+        Assert.Equal("https://acme-fire.app.example.com", model.SignInUrl);
+        Assert.Equal(["acme-fire", "acme"], model.Addresses.Select(a => a.Subdomain));
+    }
+
+    [Fact]
+    public async Task The_tenant_list_gives_each_tenant_its_sign_in_address()
+    {
+        _tenants.Setup(t => t.ListSummariesAsync(default)).ReturnsAsync([
+            new TenantSummary("ten_a", "Acme", "Active", Now, null, [], "acme"),
+            new TenantSummary("ten_b", "Beta", "Active", Now, null, [], null),
+        ]);
+
+        var result = await new GetTenantsFeature.GetTenantsQueryHandler(_tenants.Object, _site).Handle();
+
+        var list = Assert.IsType<List<TenantSummary>>(result.Value);
+        Assert.Equal("https://acme.app.example.com", list[0].SignInUrl);
+        Assert.Null(list[1].SignInUrl);
+    }
+
     [Theory]
     [InlineData("emp_7h2k3m4n5p6q7r8s9t0v1")]
     [InlineData("not-an-id")]
     public async Task Something_that_is_not_a_tenant_id_is_not_found_without_a_lookup(string id)
     {
-        var result = await new GetTenantFeature.GetTenantQueryHandler(_tenants.Object, _audit.Object).Handle(id);
+        var result = await new GetTenantFeature.GetTenantQueryHandler(_tenants.Object, _audit.Object, _site).Handle(id);
 
         Assert.Equal(PlatformProblems.NotFound, result.ProblemCode);
         _tenants.Verify(t => t.FindByPublicIdAsync(It.IsAny<string>(), default), Times.Never);
@@ -53,7 +90,7 @@ public class OperatorConsoleTests
     [Fact]
     public async Task An_unknown_tenant_is_not_found()
     {
-        var result = await new GetTenantFeature.GetTenantQueryHandler(_tenants.Object, _audit.Object)
+        var result = await new GetTenantFeature.GetTenantQueryHandler(_tenants.Object, _audit.Object, _site)
             .Handle(PublicId.New("ten").ToString());
 
         Assert.Equal(CommandOutcome.NotFound, result.Outcome);

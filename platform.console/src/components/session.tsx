@@ -4,6 +4,8 @@ import { api, ApiError, routes } from '../lib/api'
 
 export interface OperatorSession {
   readonly email: string
+  /** Where tenant addresses sit (https://app.example.com), to show an address before it exists. */
+  readonly tenantBaseUrl: string
 }
 
 interface SessionState {

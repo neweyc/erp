@@ -3,6 +3,7 @@ using AppPlatform.Api;
 using AppPlatform.Platform.Auth;
 using AppPlatform.Platform.Data;
 using AppPlatform.Platform.Services;
+using AppPlatform.Tenancy;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AppPlatform.Platform.Features.Tenants;
@@ -18,7 +19,9 @@ public static class CreateTenantFeature
 {
     public const string Operation = "create_tenant";
 
-    public record CreateTenantCommand(string? Name, string? AdminEmail, string? IdempotencyKey);
+    /// <param name="Subdomain">Where the tenant's people will sign in: <c>acme-fire</c> for
+    /// <c>acme-fire.{base domain}</c>. Chosen by the operator; see <see cref="TenantAddress"/>.</param>
+    public record CreateTenantCommand(string? Name, string? AdminEmail, string? IdempotencyKey, string? Subdomain);
 
     public class CreateTenantCommandHandler(
         IProvisioningClient provisioning,
@@ -38,6 +41,11 @@ public static class CreateTenantFeature
             if (string.IsNullOrWhiteSpace(email))
                 return CommandResult.Invalid(PlatformProblems.ValidationFailed, "An admin email is required.");
 
+            // Checked here for a prompt answer; core checks again, and its primary key is what
+            // actually keeps an address to one tenant.
+            if (!TenantAddress.TryNormalize(cmd.Subdomain, out var subdomain, out var addressProblem))
+                return CommandResult.Invalid(PlatformProblems.ValidationFailed, addressProblem);
+
             // Required, not optional. Provisioning is expensive and externally triggered: a
             // call that times out has an unknown outcome, and a retry without a key creates a
             // SECOND tenant — a failure the caller cannot see and the operator discovers as
@@ -54,7 +62,16 @@ public static class CreateTenantFeature
             if (await idempotency.FindResponseAsync(Operation, key, ct) is { } existing)
                 return CommandResult.Ok(JsonSerializer.Deserialize<JsonElement>(existing));
 
-            var result = await provisioning.ProvisionAsync(new(name, email, key), ct);
+            var result = await provisioning.ProvisionAsync(new(name, email, key, subdomain), ct);
+
+            if (result is { Succeeded: false, ProblemCode: PlatformProblems.SubdomainTaken })
+            {
+                // Not recorded either, for the same reason as below: the operator chooses another
+                // address and presses Create again with the same key, and that must be able to succeed.
+                return CommandResult.Conflict(
+                    PlatformProblems.SubdomainTaken,
+                    $"The address \"{subdomain}\" belongs to another tenant, now or before. Choose another.");
+            }
 
             if (!result.Succeeded)
             {
@@ -119,4 +136,6 @@ public static class PlatformProblems
     public const string AlreadyInThatState = "already_in_that_state";
     public const string TenantRetired = "tenant_retired";
     public const string AppAlreadyLicensed = "app_already_licensed";
+    /// <summary>Another tenant has, or once had, that address. Core sends the same code.</summary>
+    public const string SubdomainTaken = CoreProblems.SubdomainTaken;
 }

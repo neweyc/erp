@@ -119,17 +119,18 @@ app_bypasses_view AS (
 -- 9. Core may create a tenant; only the operator may change one. The split is the whole
 --    point of the exception.
 core_overreach AS (
-  SELECT 'ap_core_rt can modify platform.tenant', priv
-  FROM (SELECT unnest(ARRAY['UPDATE','DELETE']) AS priv) p
-  WHERE to_regclass('platform.tenant') IS NOT NULL
-    AND has_table_privilege('ap_core_rt', 'platform.tenant', p.priv)
+  SELECT format('ap_core_rt can modify %s', t.tbl), priv
+  FROM (SELECT unnest(ARRAY['platform.tenant','platform.tenant_subdomain']) AS tbl) t
+  CROSS JOIN (SELECT unnest(ARRAY['UPDATE','DELETE']) AS priv) p
+  WHERE to_regclass(t.tbl) IS NOT NULL
+    AND has_table_privilege('ap_core_rt', t.tbl, p.priv)
 ),
 core_platform_reach AS (
-  SELECT 'ap_core_rt can read a platform table other than tenant',
+  SELECT 'ap_core_rt can read a platform table other than tenant and its addresses',
          format('%s.%s', n.nspname, c.relname)
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname = 'platform' AND c.relkind IN ('r','v') AND c.relname <> 'tenant'
+  WHERE n.nspname = 'platform' AND c.relkind IN ('r','v') AND c.relname NOT IN ('tenant', 'tenant_subdomain')
     AND has_table_privilege('ap_core_rt', c.oid, 'SELECT')
 ),
 

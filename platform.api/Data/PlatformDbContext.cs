@@ -30,6 +30,7 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
 
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<TenantApp> TenantApps => Set<TenantApp>();
+    public DbSet<TenantSubdomain> TenantSubdomains => Set<TenantSubdomain>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<PlatformUser> PlatformUsers => Set<PlatformUser>();
     public DbSet<PlatformSession> PlatformSessions => Set<PlatformSession>();
@@ -71,6 +72,20 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
             // two concurrent provisioning calls both find nothing and both proceed, and only
             // this index stops both committing a tenant.
             e.HasIndex(x => x.ProvisioningKey).IsUnique().HasFilter("provisioning_key IS NOT NULL");
+        });
+
+        modelBuilder.Entity<TenantSubdomain>(e =>
+        {
+            e.ToTable("tenant_subdomain", Schema);
+            e.HasKey(x => x.Subdomain);
+            e.Property(x => x.Subdomain).HasMaxLength(TenantAddress.MaxLength);
+
+            // One current address per tenant. A rename replaces the old row before adding the new
+            // one (two saves), so two renames racing on one tenant cannot both leave a current row.
+            e.HasIndex(x => x.TenantId).IsUnique().HasFilter("replaced_at IS NULL");
+
+            // Restrict, not cascade: deleting a tenant must not quietly free its addresses for reuse.
+            e.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<TenantApp>(e =>

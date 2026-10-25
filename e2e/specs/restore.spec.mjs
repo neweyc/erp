@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   apiEnvironment, connectionString, CONTAINER, copyIntoContainer, RESTORE_CONTAINER, RESTORE_DB_PORT,
-  ROOT, seededTenantPublicId, startDatabase, stopDatabase,
+  ROOT, startDatabase, stopDatabase, tenantOrigin,
 } from '../stack.mjs'
 
 /**
@@ -29,8 +29,9 @@ import {
 
 const ADMIN = { email: 'admin@e2e.test', password: 'correct horse battery' }
 
-const LIVE = { core: 'http://localhost:5100', tickets: 'http://localhost:5102', ledger: 'http://localhost:5104' }
-const RESTORED = { core: 'http://localhost:5200', tickets: 'http://localhost:5202', ledger: 'http://localhost:5204' }
+/** The tenant's own address on each set of services: sign-in reads the tenant from it. */
+const LIVE = { core: tenantOrigin(5100), tickets: tenantOrigin(5102), ledger: tenantOrigin(5104) }
+const RESTORED = { core: tenantOrigin(5200), tickets: tenantOrigin(5202), ledger: tenantOrigin(5204) }
 
 /** Fixed once, so both reads of the trial balance ask for the same day even across midnight UTC. */
 const asOf = new Date().toISOString().slice(0, 10)
@@ -101,9 +102,10 @@ async function replaySession(savedCookies, coreBase) {
   return result
 }
 
-function startRestoredApi(project, url, env) {
+/** Listens on localhost; reached at the tenant's address, which resolves to the same machine. */
+function startRestoredApi(project, port, env) {
   const api = spawn('dotnet', [
-    'run', '--project', join(ROOT, project), '--no-launch-profile', '--no-restore', '--urls', url,
+    'run', '--project', join(ROOT, project), '--no-launch-profile', '--no-restore', '--urls', `http://localhost:${port}`,
   ], { env: { ...process.env, ...env }, detached: true, stdio: 'ignore' })
   restoredApis.push(api)
 }
@@ -189,12 +191,11 @@ test('a backup restores into a working, verified copy', async () => {
   mkdirSync(restoredCapture)
   const env = apiEnvironment({
     connection: connectionString(RESTORE_DB_PORT),
-    tenantPublicId: seededTenantPublicId(),
     capturePath: restoredCapture,
   })
-  startRestoredApi('core.api', RESTORED.core, { ...env, Outbox__DeliveryPaused: 'true' })
-  startRestoredApi('apps/tickets/tickets.api', RESTORED.tickets, env)
-  startRestoredApi('apps/ledger/ledger.api', RESTORED.ledger, env)
+  startRestoredApi('core.api', 5200, { ...env, Outbox__DeliveryPaused: 'true' })
+  startRestoredApi('apps/tickets/tickets.api', 5202, env)
+  startRestoredApi('apps/ledger/ledger.api', 5204, env)
   await waitUntilAnswering(`${RESTORED.core}/api/core/v1/auth/session`)
   await waitUntilAnswering(`${RESTORED.tickets}/api/tickets/v1/tickets`)
   await waitUntilAnswering(`${RESTORED.ledger}/api/ledger/v1/accounts`)

@@ -1,24 +1,23 @@
 import { defineConfig } from '@playwright/test'
 import { join } from 'node:path'
-import { apiEnvironment, CAPTURE_DIR, CONNECTION, ensureStack, PLATFORM_KEK_FOR_TESTS_ONLY, ROOT } from './stack.mjs'
+import {
+  apiEnvironment, CAPTURE_DIR, CONNECTION, ensureStack, PLATFORM_KEK_FOR_TESTS_ONLY, ROOT, tenantOrigin,
+} from './stack.mjs'
 
 /**
  * The database is prepared HERE, at config-module load, rather than in globalSetup.
  *
  * Ordering is the reason. Playwright evaluates this module — including the webServer commands
- * and their env — BEFORE globalSetup runs, so a tenant id written by globalSetup arrives too
- * late and the APIs start without one. Sign-in then cannot resolve a tenant and every spec fails
- * at the first assertion after the form, which looks like a broken login form and is not one.
+ * and their env — BEFORE globalSetup runs, and the APIs must start against a database that already
+ * holds the seeded tenants and the operator.
  *
  * ensureStack is IDEMPOTENT for the matching reason: this module is evaluated again in each
  * worker process, and a second unconditional rebuild would destroy the database the already-
  * running APIs are connected to.
  */
-const tenants = ensureStack()
+ensureStack()
 
-const apiEnv = apiEnvironment({
-  connection: CONNECTION, tenantPublicId: tenants.tenant, capturePath: CAPTURE_DIR,
-})
+const apiEnv = apiEnvironment({ connection: CONNECTION, capturePath: CAPTURE_DIR })
 
 /**
  * The shared secret for core's provisioning endpoint. platform.api sends it; the main core.api
@@ -39,20 +38,12 @@ const platformEnv = {
 }
 
 /**
- * The second tenant's sign-in door. Identical to core.api in every respect but the pinned tenant.
- *
- * Needed only because anonymous sign-in resolves its tenant from configuration rather than the
- * hostname (D5), so one process can sign in exactly one tenant. It is used for SIGN-IN AND NOTHING
- * ELSE: every other tenant B request goes to the same core.api and tickets.api that serve tenant
- * A, so the isolation being proved is the session-scoped filter inside a shared process — not two
- * processes that were never able to see each other's tenant in the first place.
+ * A second core.api with a REAL anonymous rate limit (10 a minute), which rate-limit.spec.mjs
+ * exhausts. Every other server's limit is high enough never to bite, because every request in this
+ * suite comes from one address. Nothing else signs in here.
  */
-const otherCoreEnv = {
+const limitedCoreEnv = {
   ...apiEnv,
-  Tenant__PublicId: tenants.otherTenant,
-  // The one server here with a REAL anonymous rate limit, which rate-limit.spec.mjs exhausts. It
-  // is this one because only the isolation spec signs in through it, a handful of times, and the
-  // rate-limit spec runs after that.
   RateLimits__AnonymousPerMinute: '10',
 }
 
@@ -92,8 +83,7 @@ export default defineConfig({
     // M2 item 17: the operator error feed, served to operators only. Reuses the saved operator
     // session, so after `license`.
     { name: 'error-feed', testMatch: /error-feed\.spec\.mjs/, dependencies: ['license'] },
-    // Exhausts the anonymous rate limit on the tenant-B sign-in core (5103), so it runs after
-    // the only spec that signs in there. Nothing depends on it.
+    // Exhausts the anonymous rate limit on its own core (5103). Nothing depends on it.
     { name: 'rate-limit', testMatch: /rate-limit\.spec\.mjs/, dependencies: ['isolation'] },
     // D17: an employee invited by the admin accepts and signs in. Needs the admin accepted.
     { name: 'employee-invite', testMatch: /employee-invite\.spec\.mjs/, dependencies: ['license'] },
@@ -117,7 +107,8 @@ export default defineConfig({
   ],
   timeout: 30_000,
   use: {
-    baseURL: 'http://localhost:5273',
+    // The journey's tenant, at its own address: sign-in reads the tenant from the host.
+    baseURL: tenantOrigin(5273),
     trace: 'retain-on-failure',
   },
   webServer: [
@@ -160,7 +151,7 @@ export default defineConfig({
       url: 'http://localhost:5103/api/core/v1/auth/session',
       reuseExistingServer: false,
       timeout: 120_000,
-      env: otherCoreEnv,
+      env: limitedCoreEnv,
     },
     {
       // The operator console. Its dev server proxies /api/platform to the platform.api above.

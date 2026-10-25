@@ -5,6 +5,7 @@ import {
   Alert, Badge, Button, Card, CardContent, CardHeader, ConfirmDialog, Dialog, DialogBody, DialogFooter, EmptyState,
   Field, Input, Loading, PageHeader, PageStack, Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@app-platform/ui-kit'
+import { AddressField } from '../components/address-field'
 import { ReadAt } from '../components/read-at'
 import { StatusBadge } from '../components/status-badge'
 import { AuditTable } from './audit-log'
@@ -67,6 +68,7 @@ export function TenantPage() {
   const { data: tenant, error, readAt, reload } = useLoad<TenantDetail>(routes.tenant(tenantId))
   const [change, setChange] = useState<StatusChange | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
+  const [changingAddress, setChangingAddress] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -151,6 +153,32 @@ export function TenantPage() {
       </Card>
 
       <Card>
+        <CardHeader
+          className="pb-5"
+          title="Address"
+          description={tenant.signInUrl
+            ? <>Their people sign in at <a href={tenant.signInUrl} className="font-medium text-foreground underline">{tenant.signInUrl}</a>.</>
+            : 'This tenant has no address, so nobody can sign in to it.'}
+          actions={!retired && <Button onClick={() => setChangingAddress(true)}>Change address</Button>}
+        />
+        {tenant.addresses.some((a) => a.replacedAt) && (
+          <CardContent>
+            <p className="mb-2 text-sm text-muted-foreground">
+              Former addresses no longer sign anyone in, and stay reserved to this tenant.
+            </p>
+            <ul aria-label="Former addresses" className="grid gap-1 text-sm">
+              {tenant.addresses.filter((a) => a.replacedAt).map((a) => (
+                <li key={a.subdomain}>
+                  <span className="font-mono">{a.subdomain}</span>
+                  <span className="text-muted-foreground"> · until {formatMoment(a.replacedAt!)}</span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        )}
+      </Card>
+
+      <Card>
         <CardHeader title="Apps" description="Licensing an app turns it on for this tenant. Revoking hides it; nothing is deleted." />
         <CardContent className="grid gap-2">
           {LICENSABLE_APPS.map((app) => {
@@ -223,6 +251,17 @@ export function TenantPage() {
         />
       )}
 
+      {changingAddress && (
+        <AddressDialog
+          tenant={tenant}
+          onClose={() => setChangingAddress(false)}
+          onChanged={() => {
+            setChangingAddress(false)
+            void reload()
+          }}
+        />
+      )}
+
       <ConfirmDialog
         open={revoking !== null}
         onOpenChange={(open) => !open && setRevoking(null)}
@@ -278,6 +317,66 @@ function StatusDialog({
           <Button type="submit" variant={change.typeToConfirm ? 'destructive' : 'primary'} disabled={busy || !confirmed}>
             {change.verb}
           </Button>
+        </DialogFooter>
+      </form>
+    </Dialog>
+  )
+}
+
+/** Refusals of an address change whose message the operator can act on as written. */
+const ADDRESS_REFUSALS = ['validation_failed', 'subdomain_taken', 'already_in_that_state']
+
+/**
+ * Moves a tenant to a new address. Says what that does to its people before it is done: the old
+ * address stops signing anyone in at once, so a bookmark or an unaccepted invitation's link leads
+ * nowhere, while anyone signed in there stays signed in until their session ends.
+ */
+function AddressDialog({
+  tenant, onClose, onChanged,
+}: {
+  tenant: TenantDetail
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const [value, setValue] = useState(tenant.subdomain ?? '')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      await api(routes.address(tenant.tenantId), { method: 'POST', body: JSON.stringify({ subdomain: value }) })
+      onChanged()
+    } catch (caught) {
+      setError(caught instanceof ApiError && ADDRESS_REFUSALS.includes(caught.problemCode)
+        ? caught.message
+        : 'The address could not be changed. Try again.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => !open && !busy && onClose()}
+      dismissible={false}
+      title={`Change ${tenant.name}'s address?`}
+      description={
+        `From then on their people sign in at the new address only. ${tenant.subdomain ? `"${tenant.subdomain}"` : 'The old address'} ` +
+        'stops working at once for anyone signed out, including links in invitations not yet accepted; anyone ' +
+        'signed in there stays signed in until their session ends. The old address stays reserved to this tenant.'
+      }
+    >
+      <form onSubmit={submit}>
+        <DialogBody className="grid gap-4">
+          <AddressField id="new-address" value={value} onChange={setValue} />
+          {error && <Alert tone="danger">{error}</Alert>}
+        </DialogBody>
+        <DialogFooter>
+          <Button type="button" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Changing…' : 'Change address'}</Button>
         </DialogFooter>
       </form>
     </Dialog>

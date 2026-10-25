@@ -32,13 +32,14 @@ public class CreateTenantTests
     [Fact]
     public async Task A_valid_request_delegates_to_core_and_records_the_outcome()
     {
-        var result = await Handler().Handle(_operator, new("Acme", "Admin@Acme.com", "key-1"));
+        var result = await Handler().Handle(_operator, new("Acme", "Admin@Acme.com", "key-1", "acme"));
 
         Assert.True(result.Succeeded);
         // Platform never writes tenant business data — it asks core, which can commit the
         // tenant, its company, and the admin invite in one transaction.
         _provisioning.Verify(p => p.ProvisionAsync(
-            It.Is<ProvisionRequest>(r => r.TenantName == "Acme" && r.AdminEmail == "admin@acme.com"), default),
+            It.Is<ProvisionRequest>(r =>
+                r.TenantName == "Acme" && r.AdminEmail == "admin@acme.com" && r.Subdomain == "acme"), default),
             Times.Once);
         _idempotency.Verify(i => i.TryRecordAsync(
             Operation, "key-1", It.IsAny<string>(), It.IsAny<PlatformAuditLog>(), default), Times.Once);
@@ -47,7 +48,7 @@ public class CreateTenantTests
     [Fact]
     public async Task Creating_a_tenant_is_audited_with_the_operator_and_without_the_admins_address()
     {
-        await Handler().Handle(_operator, new("Acme", "admin@acme.com", "key-1"));
+        await Handler().Handle(_operator, new("Acme", "admin@acme.com", "key-1", "acme"));
 
         // Committed with the idempotency record, so it is written once however often the call is retried.
         var entry = Assert.Single(_audit);
@@ -62,7 +63,7 @@ public class CreateTenantTests
     [Fact]
     public async Task A_missing_idempotency_key_is_refused()
     {
-        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", null));
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", null, "acme"));
 
         // Required rather than generated: a caller that did not supply one cannot correlate a
         // retry with its original attempt, so generating one here would defeat the point.
@@ -76,7 +77,7 @@ public class CreateTenantTests
         _idempotency.Setup(i => i.FindResponseAsync(Operation, "key-1", default))
             .ReturnsAsync("""{"tenantId":"ten_original"}""");
 
-        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1"));
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", "acme"));
 
         Assert.True(result.Succeeded);
         // The failure this prevents: a timed-out call retried, provisioning a SECOND tenant
@@ -85,8 +86,6 @@ public class CreateTenantTests
         // And no second audit entry: the tenant was created once.
         Assert.Empty(_audit);
         Assert.Contains("ten_original", System.Text.Json.JsonSerializer.Serialize(result.Value), StringComparison.Ordinal);
-        // And no second audit entry: the tenant was created once.
-        Assert.Empty(_audit);
     }
 
     [Fact]
@@ -98,7 +97,7 @@ public class CreateTenantTests
             .ReturnsAsync((string?)null)
             .ReturnsAsync("""{"tenantId":"ten_winner"}""");
 
-        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1"));
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", "acme"));
 
         // Two concurrent retries both find nothing and both provision; only the unique index
         // stops both being recorded. Returning our own id would hand out a different tenant for
@@ -112,7 +111,7 @@ public class CreateTenantTests
         _provisioning.Setup(p => p.ProvisionAsync(It.IsAny<ProvisionRequest>(), default))
             .ReturnsAsync(new ProvisionResult(false, null, "core returned 500"));
 
-        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1"));
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", "acme"));
 
         Assert.Equal(PlatformProblems.ProvisioningFailed, result.ProblemCode);
         // Recording the failure would make every retry replay it forever, when a retry after a
@@ -127,9 +126,44 @@ public class CreateTenantTests
     [InlineData("   ", "a@b.c")]
     public async Task Missing_details_are_refused_before_calling_core(string? name, string? email)
     {
-        var result = await Handler().Handle(_operator, new(name, email, "key-1"));
+        var result = await Handler().Handle(_operator, new(name, email, "key-1", "acme"));
 
         Assert.Equal(CommandOutcome.Invalid, result.Outcome);
         _provisioning.Verify(p => p.ProvisionAsync(It.IsAny<ProvisionRequest>(), default), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("ab")]
+    [InlineData("www")]
+    public async Task An_unusable_address_is_refused_before_calling_core(string? subdomain)
+    {
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", subdomain));
+
+        Assert.Equal(PlatformProblems.ValidationFailed, result.ProblemCode);
+        _provisioning.Verify(p => p.ProvisionAsync(It.IsAny<ProvisionRequest>(), default), Times.Never);
+    }
+
+    [Fact]
+    public async Task The_address_is_sent_as_stored_lowercase()
+    {
+        await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", " Acme-Fire "));
+
+        _provisioning.Verify(p => p.ProvisionAsync(It.Is<ProvisionRequest>(r => r.Subdomain == "acme-fire"), default));
+    }
+
+    [Fact]
+    public async Task An_address_core_says_is_taken_is_a_conflict_the_operator_can_fix_and_retry()
+    {
+        _provisioning.Setup(p => p.ProvisionAsync(It.IsAny<ProvisionRequest>(), default))
+            .ReturnsAsync(new ProvisionResult(false, null, "core returned 409", PlatformProblems.SubdomainTaken));
+
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", "acme"));
+
+        Assert.Equal(CommandOutcome.Conflict, result.Outcome);
+        Assert.Equal(PlatformProblems.SubdomainTaken, result.ProblemCode);
+        // Not recorded, so the same key with another address goes on to create the tenant.
+        _idempotency.Verify(i => i.TryRecordAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlatformAuditLog>(), default), Times.Never);
     }
 }

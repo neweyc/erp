@@ -27,7 +27,8 @@ scripts against a real PostgreSQL rather than by reading them:**
    exception grants core `INSERT` on `platform.tenant`; without `GRANT USAGE ON SCHEMA
    platform`, that does nothing and the failure is `permission denied for schema
    platform`. USAGE conveys no access to anything *in* the schema, so granting it does not
-   widen the exception: core still reaches `platform.tenant` and no other platform table.
+   widen the exception: core still reaches `platform.tenant`, its addresses, and no other platform
+   table.
 
 It follows that:
 
@@ -48,7 +49,7 @@ One database, one owner, one runtime role per deployable, one migration role per
 |---|---|---|---|
 | `ap_owner` | all | all | all — **never used by a running process**; owns published views and SECURITY DEFINER functions |
 | `ap_platform_rt` | `platform` | `platform` | none |
-| `ap_core_rt` | `core`, `identity`, `core_v1`, **`platform.tenant`** | `core`, `identity`, **INSERT only on `platform.tenant`** | none |
+| `ap_core_rt` | `core`, `identity`, `core_v1`, **`platform.tenant`, `platform.tenant_subdomain`** | `core`, `identity`, **INSERT only on `platform.tenant` and `platform.tenant_subdomain`** | none |
 | `ap_tickets_rt` | `tickets`, `core_v1` | `tickets` | none |
 | `ap_ledger_rt` | `ledger`, `core_v1` | `ledger` — **INSERT only** on `journal_entry` and `journal_line`, which are append-only | none |
 | every `ap_%_rt` | its own `audit_log` | **INSERT only** on it — no UPDATE (table or column), DELETE or TRUNCATE | none |
@@ -83,8 +84,13 @@ It is split by **operation**, and the split carries a meaning worth keeping:
 - It has **no UPDATE or DELETE**. Lifecycle — suspend, resume, retire — belongs to the
   platform alone. Core can bring a tenant into existence; only the operator can change
   what it is allowed to do.
-- The grant is on `platform.tenant` **only**, never `platform`. No entitlement row,
-  billing record, operator account, or audit entry is reachable from core.
+- **`platform.tenant_subdomain` on the same terms** (Cycle 19, D5): SELECT and INSERT, no UPDATE
+  or DELETE. Provisioning writes a tenant's first address in the tenant's own transaction, and
+  anonymous sign-in reads the address to find which tenant a request is for. Renaming is the
+  operator's. A widening of the exception by one table, recorded here because the boundary is
+  only as good as its written record.
+- The grant is on those two tables **only**, never `platform`. No entitlement row, billing
+  record, operator account, or audit entry is reachable from core.
 
 ### The error feed: write-only, through one function
 
@@ -161,8 +167,8 @@ each runtime role** and asserts the negatives:
 - `ap_platform_rt` selecting `core.employee` raises insufficient privilege.
 - `ap_tickets_rt` selecting `core.employee` raises insufficient privilege, while
   `core_v1.employee` succeeds.
-- `ap_core_rt` updating `platform.tenant` raises insufficient privilege, while INSERT
-  succeeds.
+- `ap_core_rt` updating `platform.tenant` or `platform.tenant_subdomain` raises insufficient
+  privilege, while INSERT succeeds.
 - `ap_platform_rt` executing `identity_v1.session_context` raises insufficient privilege.
 - No published view has `security_invoker` set.
 

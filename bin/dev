@@ -8,7 +8,9 @@
 #   bin/dev setup                              once: check tools, build, settings, database
 #   bin/dev operator create <email>            once: an operator (prints the MFA QR code and secret, once)
 #   bin/dev up                                 start everything in the background
-#   bin/dev tenant create "<name>" <email>     a tenant with Tickets and Ledger, and its admin's invitation
+#   bin/dev tenant create "<name>" <email> [address]
+#                                              a tenant with Tickets and Ledger, and its admin's invitation;
+#                                              signs in at <address>.localhost:5173 (default: from the name)
 #   bin/dev invite-link [email]                the newest invitation link (for that address)
 #   bin/dev status                             what is running
 #   bin/dev logs <core|platform|tickets|ledger|shell|console>
@@ -42,6 +44,9 @@ DB_PORT="${DEV_DB_PORT:-5433}"
 # is recognised as unfinished rather than skipped next time.
 SETUP_MARKER="bin/dev: initialised"
 
+# The shell with no tenant in it. Each tenant signs in at a subdomain of it, so "acme-fire" is at
+# http://acme-fire.localhost:5173: browsers send any *.localhost to this machine. core.api and
+# platform.api both get it as Tenant__BaseUrl.
 SHELL_URL="http://localhost:5173"
 CONSOLE_URL="http://localhost:5174"
 
@@ -261,6 +266,8 @@ cmd_setup() {
       echo "# Shared by platform.api and core.api for provisioning tenants."
       printf 'export Internal__ApiKey=%q\n' "$(openssl rand -hex 24)"
       echo "export Core__BaseUrl=http://localhost:5100"
+      echo "# Tenants sign in at subdomains of the shell: acme-fire at http://acme-fire.localhost:5173."
+      echo "export Tenant__BaseUrl=$SHELL_URL"
       echo "# The platform's key-encryption key. NOT exported: give it to platform.api only, as"
       echo "# Encryption__PlatformKeyEncryptionKey=\"\$PLATFORM_KEK\"."
       printf 'PLATFORM_KEK=%q\n' "$(openssl rand -base64 32)"
@@ -298,10 +305,13 @@ cmd_up() {
 
   for service in $SERVICES shell console; do wait_for "$service"; done
 
-  if [ -z "${TENANT:-}" ]; then
-    say "up, with no tenant yet. Next: bin/dev tenant create \"Acme Fire\" admin@acme.test"
+  if [ -n "${TENANT_URL:-}" ]; then
+    say "up. Open $TENANT_URL (operators: $CONSOLE_URL)"
+  elif [ -n "${TENANT:-}" ]; then
+    # A tenant made before tenants had addresses: the console shows the one it was given.
+    say "up. Each tenant signs in at its own address; the console at $CONSOLE_URL shows it"
   else
-    say "up. Open $SHELL_URL (operators: $CONSOLE_URL)"
+    say "up, with no tenant yet. Next: bin/dev tenant create \"Acme Fire\" admin@acme.test"
   fi
 }
 
@@ -325,14 +335,14 @@ start_service() {
   # In a subshell that EXPORTS the service's settings, rather than `env NAME=value …`: a setting
   # passed to `env` is a command-line argument, which any process on the machine can read, and one
   # of them is the platform's key. Each service gets its own database role; only platform.api gets
-  # the platform's key; core.api is pinned to one tenant for anonymous sign-in until tenants resolve
-  # by hostname (D5).
+  # the platform's key. Core reads which tenant a sign-in is for from the host, under Tenant__BaseUrl;
+  # the platform shows each tenant's address from the same setting.
   # shellcheck disable=SC2030 # exported only inside this subshell, on purpose
   (
     export "$(connection_setting_of "$service")=$DB;Username=ap_${service}_rt"
     case "$service" in
-      platform) export Encryption__PlatformKeyEncryptionKey="$platform_key" ;;
-      core) export Tenant__PublicId="${TENANT:-}" ;;
+      platform) export Encryption__PlatformKeyEncryptionKey="$platform_key" Tenant__BaseUrl="$SHELL_URL" ;;
+      core) export Tenant__BaseUrl="$SHELL_URL" ;;
     esac
     exec nohup dotnet run --no-build --project "$(project_of "$service")" \
       --no-launch-profile --urls "http://localhost:$port" > "$LOGS/$service.log" 2>&1
@@ -418,8 +428,10 @@ cmd_status() {
     # shellcheck disable=SC1090
     . "$ENV_FILE"
     echo "operator   ${OPERATOR_EMAIL:-none yet}"
-    if [ -n "${TENANT:-}" ]; then
-      echo "tenant     $TENANT (core.api is pinned to it)"
+    if [ -n "${TENANT_URL:-}" ]; then
+      echo "tenant     ${TENANT:-?}, signs in at $TENANT_URL"
+    elif [ -n "${TENANT:-}" ]; then
+      echo "tenant     $TENANT (its address is on its page in the console)"
     else
       echo "tenant     none yet"
     fi
@@ -495,9 +507,12 @@ operator_sign_in() {
 # A tenant
 # --------------------------------------------------------------------------------------------
 cmd_tenant() {
-  [ "${1:-}" = "create" ] && [ $# -eq 3 ] || die "usage: bin/dev tenant create \"<name>\" <admin-email>"
-  local name="$2" admin tenant answer app
+  [ "${1:-}" = "create" ] && { [ $# -eq 3 ] || [ $# -eq 4 ]; } \
+    || die "usage: bin/dev tenant create \"<name>\" <admin-email> [address]"
+  local name="$2" admin address tenant answer app
   admin="$(normalise_email "$3")"
+  # "Acme Fire" -> acme-fire, unless an address is given. platform.api says if it cannot be used.
+  address="${4:-$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')}"
   load_env
   if ! is_listening 5101 || ! is_listening 5100; then
     die "the services are not running: bin/dev up"
@@ -507,8 +522,8 @@ cmd_tenant() {
 
   # Keyed by the admin's address, so running this twice for the same admin returns the same tenant
   # instead of creating a second.
-  say "creating the tenant"
-  answer="$(json_object "name=$name" "adminEmail=$admin" "idempotencyKey=local-$admin" \
+  say "creating the tenant at $address"
+  answer="$(json_object "name=$name" "adminEmail=$admin" "idempotencyKey=local-$admin" "subdomain=$address" \
     | post_json -b "$OPERATOR_JAR" -H "X-CSRF-Token: $CSRF" http://localhost:5101/api/platform/v1/tenants)"
   tenant="$(echo "$answer" | sed -n 's/.*"tenantId":"\([^"]*\)".*/\1/p')"
   [ -n "$tenant" ] || die "tenant creation failed: $answer"
@@ -525,14 +540,16 @@ cmd_tenant() {
     esac
   done
 
-  # Sign-in resolves the tenant from core.api's configuration until it resolves it from the
-  # hostname (D5), so core.api is pinned to this tenant and restarted.
+  # Remembered so 'up', 'status' and 'invite-link' can say where to go. Read back from the
+  # platform rather than built here: a retried create returns the tenant first made, whose address
+  # may be another one.
+  local tenant_url
+  tenant_url="$(curl -fsS -b "$OPERATOR_JAR" "http://localhost:5101/api/platform/v1/tenants/$tenant" \
+    | sed -n 's/.*"signInUrl":"\([^"]*\)".*/\1/p')"
+  [ -n "$tenant_url" ] || die "could not read $tenant's address back from platform.api"
   set_setting TENANT "$tenant"
-  TENANT="$tenant"
-  say "restarting core.api pinned to $tenant"
-  stop_service core
-  start_service core
-  wait_for core
+  set_setting TENANT_URL "$tenant_url"
+  TENANT_URL="$tenant_url"
 
   say "waiting for the invitation to $admin"
   local link=""
@@ -543,11 +560,13 @@ cmd_tenant() {
   done
   [ -n "$link" ] || die "no invitation arrived in $LOCAL/mail; see bin/dev logs core"
 
-  say "open this to set the admin's password, then sign in at $SHELL_URL as $admin"
+  say "open this to set the admin's password, then sign in at $TENANT_URL as $admin"
   echo "    $link"
 }
 
-# The newest captured invitation's link, for one address or for anyone.
+# The newest captured invitation's link, for one address or for anyone. On the last tenant's
+# address: accepting there leaves the person on the page they sign in from. (The invitation does
+# not yet say which tenant's address to use; a real email transport will have to.)
 invite_link() {
   node -e '
     const fs = require("fs"), dir = process.argv[1], to = process.argv[2], shell = process.argv[3];
@@ -557,11 +576,12 @@ invite_link() {
       .map(f => JSON.parse(fs.readFileSync(f.path, "utf8")))
       .filter(m => m.payload && m.payload.token && (!to || m.to === to));
     if (invites.length) console.log(shell + "/accept-invite?token=" + encodeURIComponent(invites[0].payload.token));
-  ' "$LOCAL/mail" "$1" "$SHELL_URL"
+  ' "$LOCAL/mail" "$1" "${TENANT_URL:-$SHELL_URL}"
 }
 
 cmd_invite_link() {
   local address="" link
+  load_env
   [ -n "${1:-}" ] && address="$(normalise_email "$1")"
   link="$(invite_link "$address")"
   [ -n "$link" ] || die "no invitation found in $LOCAL/mail${address:+ for $address}"
@@ -600,6 +620,7 @@ cmd_reset() {
 
   rm -rf "$LOCAL/keys" "$LOCAL/mail" "$OPERATOR_JAR"
   remove_setting TENANT
+  remove_setting TENANT_URL
   remove_setting OPERATOR_EMAIL
   say "reset. Start again with: bin/dev setup"
 }

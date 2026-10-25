@@ -21,6 +21,8 @@
          Postgres grants make it true even for code that is not in this repo. -->
     <ProjectReference Include="../packages/api/AppPlatform.Api.csproj" />
     <ProjectReference Include="../packages/ids/AppPlatform.Ids.csproj" />
+    <!-- For TenantAddress, the address rules core applies too. Platform maps no tenant-scoped table. -->
+    <ProjectReference Include="../packages/tenancy/AppPlatform.Tenancy.csproj" />
     <ProjectReference Include="../packages/encryption/AppPlatform.Encryption.csproj" />
     <ProjectReference Include="../packages/errorfeed/AppPlatform.ErrorFeed.csproj" />
   </ItemGroup>

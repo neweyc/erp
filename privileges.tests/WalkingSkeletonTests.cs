@@ -85,7 +85,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
 
         var result = await new Core.Features.Internal.ProvisionTenantFeature
             .ProvisionTenantCommandHandler(db, tenant, actor, TimeProvider.System)
-            .Handle(new(name, email, Guid.NewGuid().ToString()));
+            .Handle(new(name, email, Guid.NewGuid().ToString(), "t" + Guid.NewGuid().ToString("N")[..12]));
 
         Assert.True(result.Succeeded, result.Message);
 

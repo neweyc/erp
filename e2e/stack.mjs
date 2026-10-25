@@ -263,19 +263,38 @@ function captureFloor() {
 }
 
 /**
- * The environment every API process is started with, for a database and the tenant that
- * anonymous sign-in resolves to. Shared by the Playwright config and the restore drill, which
- * starts a second set of APIs against the restored copy.
+ * The shell with no tenant in it. Each tenant signs in at a subdomain of its host: the journey's
+ * at e2e.localhost, the second tenant's at other.localhost. Browsers and Node both send *.localhost
+ * to this machine, so one set of processes serves both tenants, as in a deployment.
  */
-export function apiEnvironment({ connection, tenantPublicId, capturePath }) {
+export const SHELL_BASE_URL = 'http://localhost:5273'
+
+/** The addresses `SeedE2E` gives its two tenants. */
+export const TENANT_SUBDOMAIN = 'e2e'
+export const OTHER_TENANT_SUBDOMAIN = 'other'
+
+/**
+ * A service as one tenant reaches it: `tenantOrigin(5100)` is core at http://e2e.localhost:5100.
+ * Sign-in reads the tenant from that host, and the cookies it sets belong to it, so a tenant's
+ * every call goes to its own host.
+ */
+export function tenantOrigin(port, subdomain = TENANT_SUBDOMAIN) {
+  return `http://${subdomain}.localhost:${port}`
+}
+
+/**
+ * The environment every API process is started with, for a database. Shared by the Playwright
+ * config and the restore drill, which starts a second set of APIs against the restored copy.
+ */
+export function apiEnvironment({ connection, capturePath }) {
   return {
     ConnectionStrings__Core: connection,
     ConnectionStrings__Tickets: connection,
     ConnectionStrings__Ledger: connection,
     ConnectionStrings__Platform: connection,
-    // Pins the tenant for anonymous sign-in. On localhost there is no hostname to resolve, and
-    // falling back to "the first tenant" would be a cross-tenant login.
-    Tenant__PublicId: tenantPublicId,
+    // Where tenants' addresses sit: core reads the tenant a sign-in is for from the request's host
+    // under it, and the platform shows each tenant's address from it.
+    Tenant__BaseUrl: SHELL_BASE_URL,
     // Shared key ring. Without it the cookie issued by core.api cannot be decrypted by
     // tickets.api, and every app API answers 401 to a user who has just signed in successfully.
     DataProtection__KeyPath: join(ROOT, 'e2e/.keys'),
@@ -435,12 +454,12 @@ export async function operatorSignIn() {
  * sessions (role_changed), so callers sign in again afterwards. Idempotent — adding a role already
  * held is a 200 that changes nothing and ends nothing, so a re-run is safe.
  *
- * @param signInBase where to sign in; tenant B signs in at its own pinned core (D5).
+ * @param core core at the tenant's own host, from `tenantOrigin`.
  */
-export async function grantOwnAppRole({ core, signInBase = core, email, password, app, role }) {
+export async function grantOwnAppRole({ core, email, password, app, role }) {
   const api = await request.newContext()
   try {
-    const signIn = await api.post(`${signInBase}/api/core/v1/auth/sign-in`, { data: { email, password } })
+    const signIn = await api.post(`${core}/api/core/v1/auth/sign-in`, { data: { email, password } })
     if (signIn.status() !== 200) throw new Error(`sign-in failed: ${signIn.status()} ${await signIn.text()}`)
 
     const csrf = (await api.storageState()).cookies.find((c) => c.name === 'ap_csrf')?.value

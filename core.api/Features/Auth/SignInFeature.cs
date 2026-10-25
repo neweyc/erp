@@ -110,9 +110,16 @@ public static class SignInFeature
                 // Sign-in is anonymous, so there is no session to take a tenant from. It is
                 // resolved from the REQUEST HOST, never from the body: a client-supplied tenant
                 // id would let anyone choose whose users they are attacking.
+                //
+                // An unknown address says so, rather than "wrong password", so someone who mistyped
+                // it is not left retrying a correct password. It does confirm whether an address is
+                // in use, which the address itself already does: it is how people reach us.
                 var tenantId = await tenants.ResolveAsync(http.Request.Host.Host, ct);
                 if (tenantId is not { } id)
-                    return CommandResult.Forbidden(AuthProblems.InvalidCredentials, "Sign-in failed.").CreateIResult();
+                {
+                    return CommandResult.NotFound(
+                        AuthProblems.TenantNotFound, "No organization signs in at this address.").CreateIResult();
+                }
 
                 tenantScope.UseTenant(id);
 

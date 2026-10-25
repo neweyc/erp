@@ -20,13 +20,14 @@ Vite + React, the shared `ui-kit` and `web-api` client, served on its own origin
 
 - **Sign-in**: email, password and authenticator code in one form; no session exists until all
   three pass. Problem codes are explained, never matched on message text.
-- **Tenants**: every tenant with status and licensed apps; **New tenant** creates one through core's
-  provisioning. The idempotency key is made once per opening of the dialog, so pressing Create again
+- **Tenants**: every tenant with status, address and licensed apps; **New tenant** creates one through
+  core's provisioning, with an address suggested from the name and shown in full before it is used. The idempotency key is made once per opening of the dialog, so pressing Create again
   after a timeout returns the tenant the first attempt made, and the dialog cannot be closed while a
   submit is pending (reopening would make a new key).
-- **A tenant**: suspend, resume, retire (suspend and retire are typed-name confirmations that say
-  what the customer's people will experience), license and revoke apps, the license history, and
-  the operator actions taken on it.
+- **A tenant**: where its people sign in, its former addresses and **Change address** (which says the
+  old address stops working at once for anyone signed out); suspend, resume, retire (suspend and
+  retire are typed-name confirmations that say what the customer's people will experience), license
+  and revoke apps, the license history, and the operator actions taken on it.
 - **Errors**: the error feed. **Audit log**: the 100 most recent operator actions, failed sign-ins
   included.
 

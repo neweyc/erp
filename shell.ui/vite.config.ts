@@ -7,8 +7,12 @@ export default defineConfig({
   server: {
     // Same-origin in development too, so the auth cookie behaves exactly as it does in
     // production. A CORS setup here would hide the cookie problems until deployment.
+    //
+    // Core keeps the browser's Host header (changeOrigin: false): sign-in reads which tenant it is
+    // for from the host, so acme-fire.localhost:5173 must reach core as acme-fire.localhost, not as
+    // localhost:5100. nginx does the same in a deployment.
     proxy: {
-      '/api/core': { target: 'http://localhost:5100', changeOrigin: true },
+      '/api/core': { target: 'http://localhost:5100', changeOrigin: false },
       '/api/tickets': { target: 'http://localhost:5102', changeOrigin: true },
       '/api/ledger': { target: 'http://localhost:5104', changeOrigin: true },
     },

@@ -113,5 +113,7 @@ public static class AuthProblems
     public const string InvalidToken = "invalid_token";
     public const string WeakPassword = "weak_password";
     public const string InvalidCredentials = "invalid_credentials";
+    /// <summary>Sign-in at a host that is no tenant's current address.</summary>
+    public const string TenantNotFound = "tenant_not_found";
     public const string NotSignedIn = "not_signed_in";
 }

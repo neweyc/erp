@@ -5,9 +5,10 @@ import {
   Alert, Button, Card, DataTable, Dialog, DialogBody, DialogFooter, EmptyState, Field, Input, Loading, PageHeader,
   PageStack, type ColumnDef,
 } from '@app-platform/ui-kit'
+import { AddressField } from '../components/address-field'
 import { ReadAt } from '../components/read-at'
 import { StatusBadge } from '../components/status-badge'
-import { api, ApiError, appName, formatMoment, routes, type TenantSummary } from '../lib/api'
+import { api, ApiError, appName, formatMoment, routes, suggestSubdomain, type TenantSummary } from '../lib/api'
 import { useLoad } from '../lib/use-load'
 
 const columns: ColumnDef<TenantSummary, any>[] = [
@@ -21,6 +22,11 @@ const columns: ColumnDef<TenantSummary, any>[] = [
     ),
   },
   { accessorKey: 'status', header: 'Status', cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+  {
+    accessorKey: 'subdomain',
+    header: 'Address',
+    cell: ({ row }) => row.original.subdomain ?? <span className="text-muted-foreground">None</span>,
+  },
   {
     id: 'apps',
     header: 'Licensed apps',
@@ -86,9 +92,12 @@ export function Tenants() {
   )
 }
 
+/** Refusals whose message the operator can act on as written. */
+const PLAIN_REFUSALS = ['validation_failed', 'subdomain_taken']
+
 /**
- * Creates a tenant: its organization, its company, and an invitation for its first administrator,
- * all made by core in one transaction.
+ * Creates a tenant: its organization, its address, its company, and an invitation for its first
+ * administrator, all made by core in one transaction.
  *
  * The idempotency key is made once per opening of this dialog and reused by every submit from it.
  * A submit that times out has an unknown result; pressing Create again then returns the tenant the
@@ -100,6 +109,9 @@ function NewTenantDialog({ onClose }: { onClose: () => void }) {
   const [key] = useState(() => crypto.randomUUID())
   const [name, setName] = useState('')
   const [adminEmail, setAdminEmail] = useState('')
+  // Follows the name until the operator types an address of their own.
+  const [subdomain, setSubdomain] = useState<string | null>(null)
+  const address = subdomain ?? suggestSubdomain(name)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -110,13 +122,14 @@ function NewTenantDialog({ onClose }: { onClose: () => void }) {
     try {
       const created = await api<{ tenantId: string }>(routes.tenants, {
         method: 'POST',
-        body: JSON.stringify({ name, adminEmail, idempotencyKey: key }),
+        body: JSON.stringify({ name, adminEmail, idempotencyKey: key, subdomain: address }),
       })
       navigate(`/tenants/${created.tenantId}`)
     } catch (caught) {
-      // A validation message is written for people ("An admin email is required."). Anything else,
-      // including core being unreachable, is worth retrying, and the key makes that safe.
-      setError(caught instanceof ApiError && caught.problemCode === 'validation_failed'
+      // A validation message, or an address already used, is written for people ("An admin email is
+      // required."); the operator fixes the form and presses Create again with the same key. Anything
+      // else, including core being unreachable, is worth retrying, and the key makes that safe.
+      setError(caught instanceof ApiError && PLAIN_REFUSALS.includes(caught.problemCode)
         ? caught.message
         : 'The tenant could not be created. Try again: it will not be created twice.')
       setBusy(false)
@@ -136,6 +149,7 @@ function NewTenantDialog({ onClose }: { onClose: () => void }) {
           <Field label="Organization name" htmlFor="tenant-name">
             <Input id="tenant-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} required />
           </Field>
+          <AddressField id="tenant-address" value={address} onChange={setSubdomain} />
           <Field label="Administrator's email" htmlFor="admin-email">
             <Input id="admin-email" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} required />
           </Field>

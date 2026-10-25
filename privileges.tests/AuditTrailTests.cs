@@ -172,7 +172,7 @@ public class AuditTrailTests(PrivilegeFixture fixture)
 
         var result = await new ProvisionTenantFeature.ProvisionTenantCommandHandler(
             db, tenant, actor, TimeProvider.System)
-            .Handle(new("Audited Ltd", "admin@audited.test", Guid.NewGuid().ToString()));
+            .Handle(new("Audited Ltd", "admin@audited.test", Guid.NewGuid().ToString(), "audited-ltd"));
         Assert.True(result.Succeeded, result.Message);
 
         var admin = await db.Users.SingleAsync(u => u.Email == "admin@audited.test");

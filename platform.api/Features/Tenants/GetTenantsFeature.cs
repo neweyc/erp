@@ -11,10 +11,15 @@ namespace AppPlatform.Platform.Features.Tenants;
 /// </summary>
 public static class GetTenantsFeature
 {
-    public class GetTenantsQueryHandler(ITenantService tenants)
+    public class GetTenantsQueryHandler(ITenantService tenants, TenantSite site)
     {
         public async Task<CommandResult> Handle(CancellationToken ct = default)
-            => CommandResult.Ok(await tenants.ListSummariesAsync(ct));
+        {
+            var summaries = await tenants.ListSummariesAsync(ct);
+            return CommandResult.Ok(summaries
+                .Select(t => t with { SignInUrl = t.Subdomain is { } s ? site.SignInUrl(s) : null })
+                .ToList());
+        }
     }
 
     public class Endpoint : IEndpoint
@@ -23,11 +28,12 @@ public static class GetTenantsFeature
             async (
                 [FromServices] IOperatorContext operatorContext,
                 [FromServices] ITenantService tenants,
+                [FromServices] TenantSite site,
                 CancellationToken ct) =>
             {
                 // Operators only: see GetErrorFeedFeature.
                 operatorContext.Require();
-                return (await new GetTenantsQueryHandler(tenants).Handle(ct)).CreateIResult();
+                return (await new GetTenantsQueryHandler(tenants, site).Handle(ct)).CreateIResult();
             })
             .RequireAuthorization();
     }

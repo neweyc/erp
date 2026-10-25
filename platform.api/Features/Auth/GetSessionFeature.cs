@@ -1,5 +1,6 @@
 using AppPlatform.Api;
 using AppPlatform.Platform.Auth;
+using AppPlatform.Platform.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AppPlatform.Platform.Features.Auth;
@@ -10,19 +11,21 @@ namespace AppPlatform.Platform.Features.Auth;
 /// </summary>
 public static class GetSessionFeature
 {
-    public record OperatorSessionModel(string Email);
+    /// <param name="TenantBaseUrl">Where tenants' addresses sit, so the console can show the address
+    /// an operator is choosing before it is created.</param>
+    public record OperatorSessionModel(string Email, string TenantBaseUrl);
 
-    public class GetSessionQueryHandler
+    public class GetSessionQueryHandler(TenantSite site)
     {
         public CommandResult Handle(OperatorPrincipal principal)
-            => CommandResult.Ok(new OperatorSessionModel(principal.Email));
+            => CommandResult.Ok(new OperatorSessionModel(principal.Email, site.BaseUrl.GetLeftPart(UriPartial.Authority)));
     }
 
     public class Endpoint : IEndpoint
     {
         public void Map(IEndpointRouteBuilder routes) => routes.MapGet("/api/platform/v1/auth/session",
-            ([FromServices] IOperatorContext operatorContext) =>
-                new GetSessionQueryHandler().Handle(operatorContext.Require()).CreateIResult())
+            ([FromServices] IOperatorContext operatorContext, [FromServices] TenantSite site) =>
+                new GetSessionQueryHandler(site).Handle(operatorContext.Require()).CreateIResult())
             .RequireAuthorization();
     }
 }

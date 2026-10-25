@@ -90,6 +90,8 @@ public static class CoreProblems
     public const string CannotTerminateSelf = "cannot_terminate_self";
     /// <summary>The account is already linked to an employee record.</summary>
     public const string UserHasEmployee = "user_has_employee";
+    /// <summary>Another tenant has, or once had, that address. An address is never given to a second tenant.</summary>
+    public const string SubdomainTaken = "subdomain_taken";
     /// <summary>Re-exported from the permission check, so a handler refusing something itself uses the same code.</summary>
     public const string NotPermitted = AuthProblem.NotPermitted;
 

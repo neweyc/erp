@@ -9,8 +9,9 @@ using Microsoft.EntityFrameworkCore.Metadata;
 namespace AppPlatform.BoundaryTests;
 
 /// <summary>
-/// <c>platform.tenant</c> is mapped by BOTH services: platform owns its DDL, core maps a twin so
-/// provisioning can insert a row. Nothing in the compiler relates the two.
+/// <c>platform.tenant</c> and <c>platform.tenant_subdomain</c> are mapped by BOTH services: platform
+/// owns their DDL, core maps a twin of each so provisioning can insert a row. Nothing in the
+/// compiler relates the two.
 ///
 /// This exists because the omission it catches is invisible until production. Core's twin was
 /// missing <c>created_at</c> — not-null in the real schema with no default — so every unit test
@@ -37,19 +38,21 @@ public class TwinParityTests
             new DbContextOptionsBuilder<PlatformDbContext>()
                 .UseNpgsql("Host=unused").UseSnakeCaseNamingConvention().Options).Model;
 
-    private static Dictionary<string, (string Type, bool Nullable)> TenantColumns(IModel model)
+    private static Dictionary<string, (string Type, bool Nullable)> Columns(IModel model, string table)
         => model.GetEntityTypes()
-            .Single(e => e.GetTableName() == "tenant" && e.GetSchema() == "platform")
+            .Single(e => e.GetTableName() == table && e.GetSchema() == "platform")
             .GetProperties()
             .ToDictionary(
                 p => p.GetColumnName(),
                 p => (p.GetColumnType(), p.IsNullable));
 
-    [Fact]
-    public void Core_maps_every_column_platform_requires()
+    [Theory]
+    [InlineData("tenant")]
+    [InlineData("tenant_subdomain")]
+    public void Core_maps_every_column_platform_requires(string table)
     {
-        var platform = TenantColumns(PlatformModel());
-        var core = TenantColumns(CoreModel());
+        var platform = Columns(PlatformModel(), table);
+        var core = Columns(CoreModel(), table);
 
         // Only the REQUIRED columns matter in this direction: core may legitimately omit an
         // optional one it never reads, but a required column it cannot supply is an INSERT that
@@ -61,15 +64,17 @@ public class TwinParityTests
             .ToArray();
 
         Assert.True(missing.Length == 0,
-            $"core's tenant twin is missing required column(s): {string.Join(", ", missing)}. " +
+            $"core's {table} twin is missing required column(s): {string.Join(", ", missing)}. " +
             "Provisioning would fail with a not-null violation on the first INSERT.");
     }
 
-    [Fact]
-    public void Shared_columns_agree_on_type_and_nullability()
+    [Theory]
+    [InlineData("tenant")]
+    [InlineData("tenant_subdomain")]
+    public void Shared_columns_agree_on_type_and_nullability(string table)
     {
-        var platform = TenantColumns(PlatformModel());
-        var core = TenantColumns(CoreModel());
+        var platform = Columns(PlatformModel(), table);
+        var core = Columns(CoreModel(), table);
 
         var mismatches = core
             .Where(c => platform.ContainsKey(c.Key))
@@ -81,16 +86,18 @@ public class TwinParityTests
         Assert.True(mismatches.Length == 0, string.Join("; ", mismatches));
     }
 
-    [Fact]
-    public void Core_does_not_migrate_the_table_platform_owns()
+    [Theory]
+    [InlineData("tenant")]
+    [InlineData("tenant_subdomain")]
+    public void Core_does_not_migrate_the_tables_platform_owns(string table)
     {
         // The DESIGN-TIME model, not the runtime one: EF strips the exclusion from the
         // read-optimized model and throws if you ask, which is what a migration is generated
         // from anyway — so this is the model whose answer actually matters.
         var twin = CoreContext().GetService<IDesignTimeModel>().Model.GetEntityTypes()
-            .Single(e => e.GetTableName() == "tenant" && e.GetSchema() == "platform");
+            .Single(e => e.GetTableName() == table && e.GetSchema() == "platform");
 
-        // Without the exclusion, core's migration emits CREATE TABLE platform.tenant, colliding
+        // Without the exclusion, core's migration emits CREATE TABLE platform.<table>, colliding
         // with platform's own and failing anyway for want of DDL rights on that schema.
         Assert.True(twin.IsTableExcludedFromMigrations());
     }

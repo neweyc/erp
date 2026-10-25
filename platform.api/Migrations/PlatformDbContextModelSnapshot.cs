@@ -382,6 +382,36 @@ namespace AppPlatform.Platform.Migrations
                     b.ToTable("tenant_app", "platform");
                 });
 
+            modelBuilder.Entity("AppPlatform.Platform.Data.TenantSubdomain", b =>
+                {
+                    b.Property<string>("Subdomain")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("subdomain");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<DateTimeOffset?>("ReplacedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("replaced_at");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Subdomain")
+                        .HasName("pk_tenant_subdomain");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_subdomain_tenant_id")
+                        .HasFilter("replaced_at IS NULL");
+
+                    b.ToTable("tenant_subdomain", "platform");
+                });
+
             modelBuilder.Entity("AppPlatform.Platform.Data.PlatformSession", b =>
                 {
                     b.HasOne("AppPlatform.Platform.Data.PlatformUser", null)
@@ -400,6 +430,16 @@ namespace AppPlatform.Platform.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_tenant_app_tenant_tenant_id");
+                });
+
+            modelBuilder.Entity("AppPlatform.Platform.Data.TenantSubdomain", b =>
+                {
+                    b.HasOne("AppPlatform.Platform.Data.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tenant_subdomain_tenant_tenant_id");
                 });
 #pragma warning restore 612, 618
         }

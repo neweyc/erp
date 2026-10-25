@@ -44,7 +44,7 @@ and prove tenant isolation and entitlement enforcement through the real applicat
 | # | Criterion | State |
 |---|---|---|
 | A1 | Full journey works **through the browser** against the real stack | **Verified for every step that has a UI** — accept, sign in, create, assign, close; and, since Cycle 18, provision and license through the operator console (`operator-console.spec.mjs`, on a tenant of its own). The journey's own tenant is still seeded through the handler and licensed over the operator API, because the other specs depend on it existing before they run. Delivery is a background worker with no UI by nature. Marking this plainly rather than borrowing A6's standard |
-| A2 | A second tenant proves isolation | **Verified** — a real second tenant, signed in with its own session, cannot read, close, reassign, or reference the first tenant's tickets and employees through the running core.api and tickets.api that serve both (`tenant-isolation.spec.mjs`). Found and fixed a real cross-tenant leak on the way (D15) |
+| A2 | A second tenant proves isolation | **Verified** — a real second tenant, signed in with its own session at its own address, cannot read, close, reassign, or reference the first tenant's tickets and employees through the running core.api and tickets.api that serve both (`tenant-isolation.spec.mjs`), and its session carried to the first tenant's address still reaches only its own data. Found and fixed a real cross-tenant leak on the way (D15) |
 | A3 | Unlicensed access rejected by the **API** | **Verified** — an authenticated tenant admin is refused 403 `app_not_licensed` by the *running* tickets service before the grant, and accepted after, on the same session |
 | A4 | Fresh-database initialization succeeds using the documented scripts | **Verified** — `PrivilegeFixture` builds an empty database from `database/privileges/01`, all three `migrations-all.sql`, then `02-grants`, applied **as `ap_owner`**, and `99-verify` reports zero findings. The browser harness does the same as superuser (D7) |
 | A5 | Workflow automated as a CI gate | **Verified** — run `36146705790` passed all three jobs (dotnet, ui, e2e) in 3m24s after the D13 readiness fix |
@@ -226,7 +226,7 @@ ERP will need again.
 | **D9** | Low | No unit coverage for `accept-invite.tsx` or the new signed-out routing. | `shell.ui/src` | Four render branches and a problem-code map are exercised only through the browser journey. |
 | **D6** | Low | `EFAuthService.FindTokenAsync` uses `IgnoreQueryFilters`, so a token lookup is tenant-blind before the scope is entered. | Inspection, `core.api/Services/EFAuthService.cs` | Necessary — acceptance precedes any session — but it means token-hash uniqueness is the only thing preventing a cross-tenant match. Mitigated by a unique index on the hash and 256 bits of entropy. Recorded so it is a considered exception, not an oversight. |
 | **D3** | Medium | The shared Data Protection key ring has no automated assertion. | Remove `DataProtection__KeyPath` from `e2e/playwright.config.mjs`; specs fail with 401 but for an unexplained reason | A regression reappears as "signed in but every API call is 401", which took a browser run to diagnose once already. |
-| **D5** | Medium (was Low) | Host-based tenant resolution is unimplemented; `EFTenantResolver` returns null unless `Tenant:PublicId` is configured. | `core.api/Services/ITenantResolver.cs` | Multi-tenant sign-in on one deployment does not work. Deliberate: returning null is safer than guessing. Raised because A2 needed a workaround — the e2e runs a second core.api pinned to tenant B, used for sign-in only — and a real second customer would need the same, or this. |
+| **D5** | Medium — **fixed** (Cycle 19) | Host-based tenant resolution was unimplemented; `EFTenantResolver` returned null unless `Tenant:PublicId` was configured. | `core.api/Services/ITenantResolver.cs` | Multi-tenant sign-in on one deployment did not work, and the e2e ran a second core.api pinned to tenant B. Fixed: each tenant signs in at its own address, a subdomain of `Tenant:BaseUrl`; the pinning setting is gone, and one core.api signs in both e2e tenants. Evidence: `ProvisioningTests` (resolution against the real migrations), `TenantAddressChangeTests`, and `operator-console.spec.mjs`, where a tenant created in the console signs in at its address, then at its new address only. |
 
 ---
 
@@ -243,6 +243,8 @@ ERP will need again.
 - **Multi-company** features. Column ships; no UI, no consolidation.
 - **Webhooks, public API, API keys.** Designed in `docs/integration.md`; the three irreversible
   decisions are built, the surface is not.
+- **Customers' own domains** and a redirect from a tenant's former address (D5 built the subdomain
+  only); the invitation link on the tenant's address, when a real email transport is built.
 - **Idle timeout, notifications bell** — `ActivityPolicy` anticipates both; neither is built.
 - **Undoing a termination (rehiring).** Termination is built (Cycle 16); reversing it is not, and
   would have to decide whether the old account comes back with its old roles.
@@ -645,6 +647,75 @@ ahead of review while Codex was at its usage limit; the review then ran and its 
 Open from the closure: D16.
 
 ## Current cycle
+
+**Cycle 19 — tenants sign in at their own address (D5).** Chris: "lets work on D5 now", after the
+console made the gap plain: a tenant created there could not be signed in to, because core resolved
+sign-in's tenant only from a pinned setting. **Built and tested. Independent review not yet asked
+for:** it changes how anonymous sign-in chooses a tenant and widens core's grant on the platform
+schema by one table, so it is in the review-required class.
+
+Decided (Chris, 2026-10-25):
+- **A subdomain of one base domain** (`acme-fire.app.example.com`). Customers' own domains are
+  deferred (docs/open-questions.md).
+- **The operator chooses it, and can change it later.** Suggested from the name at creation.
+- **The pinning setting is removed.** The host is the only way sign-in finds a tenant.
+
+Decided by default (stated here, not asked):
+- **An address belongs to one tenant forever.** `platform.tenant_subdomain` keeps every address a
+  tenant has had; a former one signs nobody in and is never given to another tenant, because people
+  still signed in there hold that host's cookie. A tenant may take back its own former address.
+  Existing tenants were given `t-<public id>` by the migration.
+- **An unknown address is 404 `tenant_not_found`**, not "wrong password", so a mistyped address is
+  told apart. It confirms that an address is in use, which the address itself already does.
+- **Changing an address asks once, without typing the name**: nothing is taken away, and the dialog
+  says the old address stops working at once for anyone signed out.
+- Rules for an address: 3 to 40 lowercase letters, digits and single hyphens, a letter first; a
+  short reserved list (`www`, `api`, `console`, `login` and others).
+- One setting, `Tenant:BaseUrl`, for core (the base domain) and platform (the full address shown).
+
+Built:
+- `packages/tenancy/TenantAddress`: the rules, parsing a host, building an address.
+- **platform**: `tenant_subdomain` (primary key on the address; one current address per tenant by a
+  partial unique index; restricted delete) and its migration with the backfill; `subdomain` on
+  tenant creation, passed to core, with `subdomain_taken` from core reported as a conflict; `POST
+  /tenants/{id}/address` (two saves in one transaction, retiring the old address first; audited as
+  `tenant.address_changed`); addresses and the full sign-in address in the tenant reads.
+- **core**: the resolver reads the host under the base domain; provisioning writes the first address
+  in the tenant's transaction and refuses one already held; sign-in answers `tenant_not_found`.
+  `Tenant:BaseUrl` is required at startup in both services.
+- **Grants**: core gets SELECT and INSERT on `platform.tenant_subdomain`, nothing more. Recorded in
+  docs/database-privileges.md, `99-verify.sql` (core may not modify it, and may read no other
+  platform table), `CoreBoundaryTests` (the pinned list of platform tables) and `TwinParityTests`.
+- **Console**: the address in the tenant list, the New tenant dialog (suggested, shown in full),
+  and on a tenant's page with its former addresses and Change address. **Shell**: the sign-in page
+  says when no organization signs in at the address. Its dev proxy keeps the Host for core.
+- **Local and e2e**: `bin/dev` passes `Tenant__BaseUrl`, takes an optional address on `tenant create`
+  and no longer restarts core pinned; the e2e suite reaches each tenant at `e2e.localhost` and
+  `other.localhost`, and the second core.api remains only for the rate-limit spec.
+
+Not built, and recorded:
+- **The invitation does not say which address to use.** The accept link is built by whoever sends
+  it (bin/dev prints the tenant's address); a real email transport must build it on the tenant's
+  current address. An invitation outstanding across a rename carries the old one.
+- Customers' own domains; a redirect from a former address.
+
+Evidence:
+- .NET 957 passing (was 879). Unit tests for the address rules, creation and the rename handler.
+  Real PostgreSQL: resolution, a former address refused, an address held refused with no second
+  tenant left, four concurrent provisionings for one address (one wins), concurrent renames of one
+  tenant (one current address survives; **with the partial unique index removed the test fails, 3
+  of 3 runs**), two tenants racing for one address, an address never given out again, and the reads
+  as `ap_platform_rt`. Access matrix and two new 99-verify break-and-repair cases.
+- Console: 60 Vitest tests, 100% line coverage. Shell: 67.
+- Playwright 35/35. New: a session cookie carried to the other tenant's address still sees only its
+  own tenant; the console creates a tenant whose administrator accepts and signs in at its address,
+  the operator changes the address, and sign-in then works at the new one and answers
+  `tenant_not_found` at the old.
+- Local: the migration and grants applied to the dev database as `ap_owner`, 99-verify clean,
+  `bin/dev up` running; sign-in through the shell's proxy at the tenant's address reaches it, and
+  `localhost:5173` answers `tenant_not_found`.
+
+## Previous cycle
 
 **Cycle 18 — the operator console (D14; M3 item 23).** Chris: "lets work on the operator console
 now", after asking what was next. `platform.console` was an empty directory, so creating a customer

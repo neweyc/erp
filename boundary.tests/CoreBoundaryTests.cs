@@ -38,17 +38,22 @@ public class CoreBoundaryTests
     }
 
     [Fact]
-    public void Core_maps_exactly_one_table_from_the_platform_schema()
+    public void Core_maps_exactly_the_tenant_and_its_addresses_from_the_platform_schema()
     {
-        // The single deliberate exception, pinned. A second platform table appearing here is a
-        // design decision, and this test is where it has to be argued for.
+        // The deliberate exception, pinned. Another platform table appearing here is a design
+        // decision, and this test is where it has to be argued for.
+        //
+        // tenant_subdomain was argued for in Cycle 19 (D5): anonymous sign-in must find its tenant
+        // from the request's host, and provisioning must write the first address in the tenant's
+        // own transaction. Same terms as the tenant row: SELECT and INSERT, no UPDATE
+        // (docs/database-privileges.md). Renaming stays the operator's.
         var platformTables = Context().Model.GetEntityTypes()
             .Where(e => e.GetSchema() == "platform")
             .Select(e => e.GetTableName() ?? "(unnamed)")
             .Order()
             .ToArray();
 
-        Assert.Equal(["tenant"], platformTables);
+        Assert.Equal(["tenant", "tenant_subdomain"], platformTables);
     }
 
     [Fact]

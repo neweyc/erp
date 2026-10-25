@@ -63,13 +63,23 @@ public class ProvisioningTests : IAsyncLifetime
             tenant, actor, TimeProvider.System), tenant, actor);
     }
 
-    private async Task<Api.CommandResult> ProvisionAsync(string name, string email, string key)
+    /// <summary>A fresh address unless one is given, so tests do not collide on addresses by accident.</summary>
+    private async Task<Api.CommandResult> ProvisionAsync(string name, string email, string key, string? subdomain = null)
     {
         var (db, tenant, actor) = Open();
         await using var _ = db;
 
         return await new ProvisionTenantCommandHandler(db, tenant, actor, TimeProvider.System)
-            .Handle(new(name, email, key));
+            .Handle(new(name, email, key, subdomain ?? FreshAddress()));
+    }
+
+    private static string FreshAddress() => "t" + Guid.NewGuid().ToString("N")[..12];
+
+    private async Task<int?> ResolveAsync(string host)
+    {
+        var (db, _, _) = Open();
+        await using var _db = db;
+        return await new Core.Services.EFTenantResolver(db, "app.example.com").ResolveAsync(host);
     }
 
     [Fact]
@@ -251,5 +261,87 @@ public class ProvisioningTests : IAsyncLifetime
         var companies = await db.Companies.ToListAsync();
         Assert.Single(companies);
         Assert.Equal("Alpha", companies[0].Name);
+    }
+
+    [Fact]
+    public async Task A_provisioned_tenant_signs_in_at_its_address_and_nowhere_else()
+    {
+        var result = await ProvisionAsync("Address Ltd", "a@address.test", Guid.NewGuid().ToString(), "address-ltd");
+        Assert.True(result.Succeeded, result.Message);
+
+        var (db, _, _) = Open();
+        await using var _db = db;
+        var tenantId = (await db.Tenants.SingleAsync(t => t.Name == "Address Ltd")).Id;
+
+        Assert.Equal(tenantId, await ResolveAsync("address-ltd.app.example.com"));
+        Assert.Null(await ResolveAsync("app.example.com"));
+        Assert.Null(await ResolveAsync("nobody.app.example.com"));
+        Assert.Null(await ResolveAsync("address-ltd.elsewhere.com"));
+    }
+
+    [Fact]
+    public async Task A_former_address_no_longer_signs_anyone_in()
+    {
+        await ProvisionAsync("Moved Ltd", "a@moved.test", Guid.NewGuid().ToString(), "moved-old");
+
+        // What the platform's rename leaves behind: the old row, replaced.
+        await using (var connection = new NpgsqlConnection(_connection))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(
+                "UPDATE platform.tenant_subdomain SET replaced_at = now() WHERE subdomain = 'moved-old'", connection);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.Null(await ResolveAsync("moved-old.app.example.com"));
+    }
+
+    [Fact]
+    public async Task An_address_already_held_is_refused_and_no_second_tenant_is_left()
+    {
+        await ProvisionAsync("First Ltd", "a@first.test", Guid.NewGuid().ToString(), "shared-name");
+
+        var second = await ProvisionAsync("Second Ltd", "a@second.test", Guid.NewGuid().ToString(), "shared-name");
+
+        Assert.Equal(Api.CoreProblems.SubdomainTaken, second.ProblemCode);
+        var (db, _, _) = Open();
+        await using var _db = db;
+        Assert.False(await db.Tenants.AnyAsync(t => t.Name == "Second Ltd"));
+    }
+
+    [Fact]
+    public async Task Concurrent_calls_for_one_address_create_exactly_one_tenant()
+    {
+        // Different keys, so the idempotency index does not decide; both pass the fast check and
+        // only the address's primary key stops the second. The loser must leave nothing behind.
+        var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(i =>
+            ProvisionAsync($"Contested {i} Ltd", $"a{i}@contested.test", Guid.NewGuid().ToString(), "contested")));
+
+        Assert.Single(results, r => r.Succeeded);
+        Assert.All(results.Where(r => !r.Succeeded), r => Assert.Equal(Api.CoreProblems.SubdomainTaken, r.ProblemCode));
+
+        var (db, _, _) = Open();
+        await using var _db = db;
+        Assert.Single(await db.Tenants.Where(t => t.Name.StartsWith("Contested ")).ToListAsync());
+        Assert.Single(await db.TenantSubdomains.Where(s => s.Subdomain == "contested").ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_retry_of_a_creation_that_succeeded_gets_its_tenant_back_not_address_taken()
+    {
+        var key = Guid.NewGuid().ToString();
+        await ProvisionAsync("Retried Ltd", "a@retried.test", key, "retried");
+
+        var again = await ProvisionAsync("Retried Ltd", "a@retried.test", key, "retried");
+
+        Assert.True(again.Succeeded, again.Message);
+    }
+
+    [Fact]
+    public async Task An_unusable_address_is_refused()
+    {
+        var result = await ProvisionAsync("Bad Address Ltd", "a@bad.test", Guid.NewGuid().ToString(), "www");
+
+        Assert.Equal(Api.CoreProblems.ValidationFailed, result.ProblemCode);
     }
 }

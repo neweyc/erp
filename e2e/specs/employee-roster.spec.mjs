@@ -1,5 +1,5 @@
 import { expect, request, test } from '@playwright/test'
-import { waitForInvitation } from '../stack.mjs'
+import { tenantOrigin, waitForInvitation } from '../stack.mjs'
 
 /**
  * The roster, in the browser: an administrator adds someone to it and invites them in one step,
@@ -8,7 +8,7 @@ import { waitForInvitation } from '../stack.mjs'
  * administrator made at provisioning is the exception, and the Users page says so.
  */
 
-const CORE = 'http://localhost:5100'
+const CORE = tenantOrigin(5100)
 const ADMIN = { email: 'admin@e2e.test', password: 'correct horse battery' }
 
 test('an administrator adds and invites someone from the roster, then terminates them', async ({ page }) => {

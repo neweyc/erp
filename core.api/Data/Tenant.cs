@@ -38,3 +38,17 @@ public class Tenant : IPublicIdentified
     /// <summary>Written by provisioning; unique, and what makes a retry safe. See the platform twin.</summary>
     public string? ProvisioningKey { get; set; }
 }
+
+/// <summary>
+/// A tenant's address, mapped from the <c>platform</c> schema on the same terms as
+/// <see cref="Tenant"/>: SELECT and INSERT, no UPDATE. Provisioning writes the first one with the
+/// tenant; anonymous sign-in reads the current one (<see cref="ReplacedAt"/> null) to find the
+/// tenant a request is for. Renaming is the operator's. Platform owns the table; see its twin.
+/// </summary>
+public class TenantSubdomain
+{
+    public required string Subdomain { get; set; }
+    public int TenantId { get; set; }
+    public DateTimeOffset AssignedAt { get; set; }
+    public DateTimeOffset? ReplacedAt { get; set; }
+}

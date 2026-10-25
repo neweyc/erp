@@ -16,6 +16,7 @@ const ACTIONS: Record<string, string> = {
   'tenant.active': 'Resumed the tenant',
   'tenant.suspended': 'Suspended the tenant',
   'tenant.retired': 'Retired the tenant',
+  'tenant.address_changed': 'Changed the address',
   'entitlement.granted': 'Licensed an app',
   'entitlement.revoked': 'Revoked an app',
 }

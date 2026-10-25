@@ -1,5 +1,5 @@
 import { expect, request, test } from '@playwright/test'
-import { waitForInvitation } from '../stack.mjs'
+import { tenantOrigin, waitForInvitation } from '../stack.mjs'
 
 /**
  * An account's life after the invitation, through the running services and the Users page:
@@ -9,7 +9,7 @@ import { waitForInvitation } from '../stack.mjs'
  * reactivates them, after which they sign in again but a copy of the old cookie stays dead.
  */
 
-const CORE = 'http://localhost:5100'
+const CORE = tenantOrigin(5100)
 const ADMIN = { email: 'admin@e2e.test', password: 'correct horse battery' }
 
 test('an administrator resends an invitation, then deactivates and reactivates the account', async ({ page }) => {
