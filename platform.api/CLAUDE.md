@@ -33,8 +33,10 @@ Widening any of this is a design decision with a written record, never a conveni
 - **Addresses** (Cycle 19, D5): each tenant signs in at a subdomain of `Tenant:BaseUrl`
   (`acme-fire.app.example.com`), chosen by the operator at creation and changeable later
   (`POST /tenants/{id}/address`, audited as `tenant.address_changed`). `platform.tenant_subdomain`
-  keeps every address a tenant has had, and an address is never given to another tenant. Core reads
-  the current one at sign-in; see docs/auth-and-access.md §6b.
+  keeps one row per address a tenant has had, and an address is never given to another tenant. Core
+  reads the current one at sign-in; see docs/auth-and-access.md §6b. Each span at a former address is
+  recorded in the append-only `platform.tenant_address_period`, platform's alone, because a tenant
+  taking an address back overwrites that address's own row.
 - **Entitlements**: which apps a tenant has licensed, with effective dates. This is the
   business model — see the root CLAUDE.md.
 - **Billing records**: plans, terms, entitlement dates, activation authorization.

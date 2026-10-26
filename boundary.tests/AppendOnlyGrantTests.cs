@@ -87,7 +87,9 @@ public partial class AppendOnlyGrantTests
     [Fact]
     public void Discovery_finds_the_known_append_only_tables()
         // Guards the guard: if discovery silently found nothing, the comparisons below would pass.
-        => Assert.Equal(["ledger.journal_entry", "ledger.journal_line", "platform.data_key"], AppendOnlyTablesInCode());
+        => Assert.Equal(
+            ["ledger.journal_entry", "ledger.journal_line", "platform.data_key", "platform.tenant_address_period"],
+            AppendOnlyTablesInCode());
 
     [Theory]
     [InlineData("02-grants.sql")]

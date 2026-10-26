@@ -1,6 +1,7 @@
 import { expect, request, test } from '@playwright/test'
 import {
-  currentStep, OPERATOR_EMAIL, OPERATOR_PASSWORD, operatorSecret, tenantOrigin, totpCode, waitForInvitation,
+  CONSOLE_PORT, currentStep, OPERATOR_EMAIL, OPERATOR_PASSWORD, operatorSecret, SHELL_PORT, tenantOrigin, totpCode,
+  waitForInvitation,
 } from '../stack.mjs'
 
 /**
@@ -13,7 +14,7 @@ import {
  * Runs after operator-mfa, the only other spec that signs in with fresh codes.
  */
 
-const CONSOLE = 'http://localhost:5274'
+const CONSOLE = `http://localhost:${CONSOLE_PORT}`
 
 // Signing in may have to wait for the next authenticator code.
 test.setTimeout(120_000)
@@ -69,14 +70,14 @@ test('an operator creates, licenses, suspends and resumes a tenant from the cons
   const create = page.getByRole('dialog', { name: 'New tenant' })
   await create.getByLabel('Organization name').fill(name)
   await expect(create.getByLabel('Address')).toHaveValue(address)
-  await expect(create).toContainText(`People sign in at ${tenantOrigin(5273, address)}`)
+  await expect(create).toContainText(`People sign in at ${tenantOrigin(SHELL_PORT, address)}`)
   await create.getByLabel("Administrator's email").fill(adminEmail)
   await create.getByRole('button', { name: 'Create tenant' }).click()
 
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible()
   await expect(page.getByText(/^Read at /)).toBeVisible()
   const tenantId = await page.getByText(/^ten_/).textContent()
-  await expect(page.getByRole('link', { name: tenantOrigin(5273, address) })).toBeVisible()
+  await expect(page.getByRole('link', { name: tenantOrigin(SHELL_PORT, address) })).toBeVisible()
 
   // ---- License an app ----
   await page.getByRole('button', { name: 'License Tickets' }).click()
@@ -118,11 +119,12 @@ test('an operator creates, licenses, suspends and resumes a tenant from the cons
   await expect(change).toContainText('stays reserved to this tenant')
   await change.getByLabel('Address').fill(moved)
   await change.getByRole('button', { name: 'Change address' }).click()
-  await expect(page.getByRole('link', { name: tenantOrigin(5273, moved) })).toBeVisible()
+  await expect(page.getByRole('link', { name: tenantOrigin(SHELL_PORT, moved) })).toBeVisible()
   await expect(page.getByRole('list', { name: 'Former addresses' })).toContainText(address)
 
   expect(await signInAt(moved, admin)).toEqual({ status: 200, problemCode: null })
-  expect(await signInAt(address, admin)).toEqual({ status: 404, problemCode: 'tenant_not_found' })
+  // Answered as a wrong password, so an address cannot be probed for whether a tenant uses it.
+  expect(await signInAt(address, admin)).toEqual({ status: 403, problemCode: 'invalid_credentials' })
 
   // ---- The tenant's own trail, newest first ----
   const actions = page.getByRole('table', { name: 'Operator actions' })

@@ -124,4 +124,39 @@ public class TenantAddressChangeTests(PrivilegeFixture fixture)
         Assert.Equal(second, Assert.Single(await service.ListSummariesAsync(), t => t.TenantId == tenant.PublicId).Subdomain);
         Assert.Equal([second, first], (await service.AddressHistoryAsync(tenant.Id)).Select(a => a.Subdomain));
     }
+
+    [Fact]
+    public async Task An_address_left_taken_back_and_left_again_keeps_both_spans()
+    {
+        var first = Fresh("span");
+        var tenant = await SeedTenantAsync(first);
+        var second = Fresh("span");
+        Assert.True((await ChangeAsync(tenant, second)).Succeeded);
+        Assert.True((await ChangeAsync(tenant, first)).Succeeded);
+        Assert.True((await ChangeAsync(tenant, second)).Succeeded);
+
+        await using var db = Open();
+        var history = await new EFTenantService(db).AddressHistoryAsync(tenant.Id);
+
+        // Current first, then each former span, latest first. Before the periods table, the
+        // first span at "first" was overwritten when the tenant took it back.
+        Assert.Equal([second, first, second, first], history.Select(a => a.Subdomain));
+        Assert.Null(history[0].ReplacedAt);
+        Assert.All(history.Skip(1), a => Assert.NotNull(a.ReplacedAt));
+    }
+
+    [Fact]
+    public async Task A_recorded_span_cannot_be_edited_or_deleted_by_the_platform_role()
+    {
+        var tenant = await SeedTenantAsync(Fresh("ao"));
+        Assert.True((await ChangeAsync(tenant, Fresh("ao"))).Succeeded);
+
+        await using var db = Open();
+        var update = await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlAsync(
+            $"UPDATE platform.tenant_address_period SET replaced_at = now() WHERE tenant_id = {tenant.Id}"));
+        Assert.Equal("42501", update.SqlState);
+        var delete = await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlAsync(
+            $"DELETE FROM platform.tenant_address_period WHERE tenant_id = {tenant.Id}"));
+        Assert.Equal("42501", delete.SqlState);
+    }
 }

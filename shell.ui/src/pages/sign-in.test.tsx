@@ -22,20 +22,13 @@ async function attempt() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('signing in', () => {
-  it('says when no organization signs in at this address, rather than blaming the password', async () => {
-    stubSignIn(404, { problemCode: 'tenant_not_found' })
-
-    await attempt()
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      `No organization signs in at ${window.location.host}. Check the address you were given.`)
-  })
-
-  it('says when the email and password do not match', async () => {
+  it('names the address when the email and password do not match, since a mistyped address answers the same', async () => {
     stubSignIn(403, { problemCode: 'invalid_credentials' })
 
     await attempt()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('That email address and password do not match.')
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      `That email address and password do not match an account at ${window.location.host}. ` +
+      'Check them, and that this is the address you were given.')
   })
 })

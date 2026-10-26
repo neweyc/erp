@@ -18,6 +18,7 @@ public class ChangeTenantAddressTests
     private readonly Guid _operator = Guid.NewGuid();
     private readonly List<PlatformAuditLog> _audit = [];
     private readonly List<TenantSubdomain> _added = [];
+    private readonly List<TenantAddressPeriod> _periods = [];
     private readonly Tenant _tenant = new() { Id = 7, PublicId = PublicId.New("ten").ToString(), Name = "Acme" };
     private readonly TenantSubdomain _current = new() { Subdomain = "acme", TenantId = 7, AssignedAt = Now.AddDays(-30) };
 
@@ -29,6 +30,7 @@ public class ChangeTenantAddressTests
         _tenants.Setup(t => t.TrySaveAsync(default)).ReturnsAsync(true);
         _tenants.Setup(t => t.Audit(It.IsAny<PlatformAuditLog>())).Callback<PlatformAuditLog>(_audit.Add);
         _tenants.Setup(t => t.Add(It.IsAny<TenantSubdomain>())).Callback<TenantSubdomain>(_added.Add);
+        _tenants.Setup(t => t.Add(It.IsAny<TenantAddressPeriod>())).Callback<TenantAddressPeriod>(_periods.Add);
     }
 
     private Task<CommandResult> Change(string? subdomain)
@@ -47,6 +49,15 @@ public class ChangeTenantAddressTests
         Assert.Equal(7, added.TenantId);
         Assert.Null(added.ReplacedAt);
         _transaction.Verify(t => t.CommitAsync(default), Times.Once);
+    }
+
+    [Fact]
+    public async Task Records_the_span_the_old_address_was_in_use()
+    {
+        await Change("acme-fire");
+
+        var period = Assert.Single(_periods);
+        Assert.Equal(("acme", 7, Now.AddDays(-30), Now), (period.Subdomain, period.TenantId, period.AssignedAt, period.ReplacedAt));
     }
 
     [Fact]
@@ -101,6 +112,8 @@ public class ChangeTenantAddressTests
         Assert.Equal(Now, former.AssignedAt);
         Assert.Equal(Now, _current.ReplacedAt);
         Assert.Empty(_added);
+        // The reclaimed row's own dates are overwritten; its earlier span was recorded when it was left.
+        Assert.Equal("acme", Assert.Single(_periods).Subdomain);
     }
 
     [Fact]

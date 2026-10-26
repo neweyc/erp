@@ -30,13 +30,23 @@ public class EFTenantService(PlatformDbContext db) : ITenantService
             .Select(a => new GrantRow(a.App, a.GrantedAt, a.RevokedAt))
             .ToListAsync(ct);
 
-    public Task<List<AddressRow>> AddressHistoryAsync(int tenantId, CancellationToken ct = default)
-        => db.TenantSubdomains
-            .Where(s => s.TenantId == tenantId)
-            // The current one first, then the rest by when they were replaced.
-            .OrderBy(s => s.ReplacedAt != null).ThenByDescending(s => s.ReplacedAt).ThenBy(s => s.Subdomain)
-            .Select(s => new AddressRow(s.Subdomain, s.AssignedAt, s.ReplacedAt))
+    public async Task<List<AddressRow>> AddressHistoryAsync(int tenantId, CancellationToken ct = default)
+    {
+        // The current address from its own row; every former span from the periods, so an address
+        // the tenant left twice appears twice.
+        var current = await db.TenantSubdomains
+            .Where(s => s.TenantId == tenantId && s.ReplacedAt == null)
+            .Select(s => new AddressRow(s.Subdomain, s.AssignedAt, null))
             .ToListAsync(ct);
+
+        var former = await db.TenantAddressPeriods
+            .Where(p => p.TenantId == tenantId)
+            .OrderByDescending(p => p.ReplacedAt).ThenByDescending(p => p.Id)
+            .Select(p => new AddressRow(p.Subdomain, p.AssignedAt, p.ReplacedAt))
+            .ToListAsync(ct);
+
+        return [.. current, .. former];
+    }
 
     public Task<TenantSubdomain?> CurrentAddressAsync(int tenantId, CancellationToken ct = default)
         => db.TenantSubdomains.FirstOrDefaultAsync(s => s.TenantId == tenantId && s.ReplacedAt == null, ct);
@@ -54,6 +64,8 @@ public class EFTenantService(PlatformDbContext db) : ITenantService
     public void Add(TenantApp grant) => db.TenantApps.Add(grant);
 
     public void Add(TenantSubdomain address) => db.TenantSubdomains.Add(address);
+
+    public void Add(TenantAddressPeriod period) => db.TenantAddressPeriods.Add(period);
 
     public void Audit(PlatformAuditLog entry) => db.AuditLogs.Add(entry);
 

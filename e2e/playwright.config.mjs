@@ -1,7 +1,8 @@
 import { defineConfig } from '@playwright/test'
 import { join } from 'node:path'
 import {
-  apiEnvironment, CAPTURE_DIR, CONNECTION, ensureStack, PLATFORM_KEK_FOR_TESTS_ONLY, ROOT, tenantOrigin,
+  apiEnvironment, CAPTURE_DIR, CONNECTION, CONSOLE_PORT, ensureStack, PLATFORM_KEK_FOR_TESTS_ONLY, ROOT, SHELL_PORT,
+  tenantOrigin,
 } from './stack.mjs'
 
 /**
@@ -108,7 +109,7 @@ export default defineConfig({
   timeout: 30_000,
   use: {
     // The journey's tenant, at its own address: sign-in reads the tenant from the host.
-    baseURL: tenantOrigin(5273),
+    baseURL: tenantOrigin(SHELL_PORT),
     trace: 'retain-on-failure',
   },
   webServer: [
@@ -155,15 +156,15 @@ export default defineConfig({
     },
     {
       // The operator console. Its dev server proxies /api/platform to the platform.api above.
-      command: `npm run dev --workspace @app-platform/console -- --port 5274 --strictPort`,
-      url: 'http://localhost:5274',
+      command: `npm run dev --workspace @app-platform/console -- --port ${CONSOLE_PORT} --strictPort`,
+      url: `http://localhost:${CONSOLE_PORT}`,
       cwd: ROOT,
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command: `npm run dev --workspace @app-platform/shell -- --port 5273 --strictPort`,
-      url: 'http://localhost:5273',
+      command: `npm run dev --workspace @app-platform/shell -- --port ${SHELL_PORT} --strictPort`,
+      url: `http://localhost:${SHELL_PORT}`,
       cwd: ROOT,
       reuseExistingServer: false,
       timeout: 120_000,

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -32,7 +33,7 @@ public sealed class HttpProvisioningClient(HttpClient http, string apiKey) : IPr
         if (!response.IsSuccessStatusCode)
         {
             return new ProvisionResult(
-                false, null, $"core returned {(int)response.StatusCode}: {body}", ProblemCodeOf(body));
+                false, null, $"core returned {(int)response.StatusCode}: {body}", RefusalOf(response.StatusCode, body));
         }
 
         using var json = JsonDocument.Parse(body);
@@ -40,21 +41,27 @@ public sealed class HttpProvisioningClient(HttpClient http, string apiKey) : IPr
             true, json.RootElement.GetProperty("tenantId").GetString(), null);
     }
 
-    /// <summary>Core's stable problem code, when its refusal carries one. Never its message.</summary>
-    private static string? ProblemCodeOf(string body)
+    /// <summary>
+    /// Core's refusal, when it refused the request rather than failed: a 400 or 409 carrying a
+    /// problem code and message. Anything else (a 401 for a wrong internal key, a 500, a proxy's
+    /// error page) is a failure for the operator to retry or report, not a refusal to act on.
+    /// </summary>
+    private static ProvisionRefusal? RefusalOf(HttpStatusCode status, string body)
     {
+        if (status is not (HttpStatusCode.BadRequest or HttpStatusCode.Conflict))
+            return null;
+
         try
         {
             using var json = JsonDocument.Parse(body);
             return json.RootElement.ValueKind == JsonValueKind.Object
-                && json.RootElement.TryGetProperty("problemCode", out var code)
-                && code.ValueKind == JsonValueKind.String
-                ? code.GetString()
+                && json.RootElement.TryGetProperty("problemCode", out var code) && code.ValueKind == JsonValueKind.String
+                && json.RootElement.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String
+                ? new ProvisionRefusal(status == HttpStatusCode.Conflict, code.GetString()!, message.GetString()!)
                 : null;
         }
         catch (JsonException)
         {
-            // A proxy's HTML error page, or nothing at all: no code to report.
             return null;
         }
     }

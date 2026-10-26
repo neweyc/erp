@@ -48,7 +48,7 @@ One database, one owner, one runtime role per deployable, one migration role per
 | Role | SELECT | INSERT/UPDATE/DELETE | DDL |
 |---|---|---|---|
 | `ap_owner` | all | all | all — **never used by a running process**; owns published views and SECURITY DEFINER functions |
-| `ap_platform_rt` | `platform` | `platform` | none |
+| `ap_platform_rt` | `platform` | `platform` — **INSERT only** on `data_key` and `tenant_address_period`, which are append-only | none |
 | `ap_core_rt` | `core`, `identity`, `core_v1`, **`platform.tenant`, `platform.tenant_subdomain`** | `core`, `identity`, **INSERT only on `platform.tenant` and `platform.tenant_subdomain`** | none |
 | `ap_tickets_rt` | `tickets`, `core_v1` | `tickets` | none |
 | `ap_ledger_rt` | `ledger`, `core_v1` | `ledger` — **INSERT only** on `journal_entry` and `journal_line`, which are append-only | none |

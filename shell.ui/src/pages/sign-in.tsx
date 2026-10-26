@@ -16,7 +16,6 @@ const EXPLANATION: Record<string, string> = {
   role_changed: 'Your permissions changed. Please sign in again.',
   user_deactivated: 'This account is no longer active. Contact your administrator.',
   tenant_retired: 'This organization’s account has been closed.',
-  invalid_credentials: 'That email address and password do not match.',
 }
 
 export function SignIn() {
@@ -39,10 +38,12 @@ export function SignIn() {
       await refresh()
     } catch (caught) {
       const code = caught instanceof ApiError ? caught.problemCode : 'unknown'
-      // Sign-in finds the organization from the address in the browser (acme.app.example.com), so
-      // a mistyped or out-of-date address is told apart from a wrong password.
-      setError(code === 'tenant_not_found'
-        ? `No organization signs in at ${window.location.host}. Check the address you were given.`
+      // Sign-in finds the organization from the address in the browser (acme.app.example.com). The
+      // API answers an unknown address as it does a wrong password, so organizations cannot be
+      // listed by trying names; the message names the address so a mistyped one can be spotted.
+      setError(code === 'invalid_credentials'
+        ? `That email address and password do not match an account at ${window.location.host}. ` +
+          'Check them, and that this is the address you were given.'
         : EXPLANATION[code] ?? 'Sign-in failed. Please try again.')
     } finally {
       setSubmitting(false)

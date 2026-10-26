@@ -168,9 +168,12 @@ export function TenantPage() {
             </p>
             <ul aria-label="Former addresses" className="grid gap-1 text-sm">
               {tenant.addresses.filter((a) => a.replacedAt).map((a) => (
-                <li key={a.subdomain}>
+                // One entry per span, so an address taken back and left again appears twice.
+                <li key={`${a.subdomain}@${a.replacedAt}`}>
                   <span className="font-mono">{a.subdomain}</span>
-                  <span className="text-muted-foreground"> · until {formatMoment(a.replacedAt!)}</span>
+                  <span className="text-muted-foreground">
+                    {' '}· {formatMoment(a.assignedAt)} until {formatMoment(a.replacedAt!)}
+                  </span>
                 </li>
               ))}
             </ul>

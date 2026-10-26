@@ -88,6 +88,22 @@ public class CreateTenantTests
         Assert.Contains("ten_original", System.Text.Json.JsonSerializer.Serialize(result.Value), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("www")]
+    public async Task A_replay_returns_the_original_tenant_whatever_address_the_retry_sends(string? subdomain)
+    {
+        _idempotency.Setup(i => i.FindResponseAsync(Operation, "key-1", default))
+            .ReturnsAsync("""{"tenantId":"ten_original"}""");
+
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", subdomain));
+
+        // A client from before addresses existed retries with none. Checking the address before the
+        // replay would refuse a creation that already succeeded.
+        Assert.True(result.Succeeded);
+        Assert.Contains("ten_original", System.Text.Json.JsonSerializer.Serialize(result.Value), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Losing_the_race_returns_the_winners_result_not_ours()
     {
@@ -156,14 +172,32 @@ public class CreateTenantTests
     public async Task An_address_core_says_is_taken_is_a_conflict_the_operator_can_fix_and_retry()
     {
         _provisioning.Setup(p => p.ProvisionAsync(It.IsAny<ProvisionRequest>(), default))
-            .ReturnsAsync(new ProvisionResult(false, null, "core returned 409", PlatformProblems.SubdomainTaken));
+            .ReturnsAsync(new ProvisionResult(false, null, "core returned 409",
+                new ProvisionRefusal(true, PlatformProblems.SubdomainTaken, "taken, as core words it")));
 
         var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", "acme"));
 
         Assert.Equal(CommandOutcome.Conflict, result.Outcome);
         Assert.Equal(PlatformProblems.SubdomainTaken, result.ProblemCode);
+        Assert.Equal("taken, as core words it", result.Message);
         // Not recorded, so the same key with another address goes on to create the tenant.
         _idempotency.Verify(i => i.TryRecordAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<PlatformAuditLog>(), default), Times.Never);
+    }
+
+    [Fact]
+    public async Task Any_refusal_from_core_reaches_the_operator_as_core_gave_it()
+    {
+        _provisioning.Setup(p => p.ProvisionAsync(It.IsAny<ProvisionRequest>(), default))
+            .ReturnsAsync(new ProvisionResult(false, null, "core returned 400",
+                new ProvisionRefusal(false, PlatformProblems.ValidationFailed, "An address may use letters...")));
+
+        var result = await Handler().Handle(_operator, new("Acme", "a@b.c", "key-1", "acme"));
+
+        // Not "try again": a rule core applies that platform does not (version skew) would fail
+        // every retry, so the operator needs core's own reason.
+        Assert.Equal(CommandOutcome.Invalid, result.Outcome);
+        Assert.Equal(PlatformProblems.ValidationFailed, result.ProblemCode);
+        Assert.Equal("An address may use letters...", result.Message);
     }
 }

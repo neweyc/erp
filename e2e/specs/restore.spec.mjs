@@ -1,6 +1,7 @@
 import { expect, request, test } from '@playwright/test'
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -31,7 +32,13 @@ const ADMIN = { email: 'admin@e2e.test', password: 'correct horse battery' }
 
 /** The tenant's own address on each set of services: sign-in reads the tenant from it. */
 const LIVE = { core: tenantOrigin(5100), tickets: tenantOrigin(5102), ledger: tenantOrigin(5104) }
-const RESTORED = { core: tenantOrigin(5200), tickets: tenantOrigin(5202), ledger: tenantOrigin(5204) }
+// 53xx, clear of the live stack's 51xx and the 52xx a common local API default takes.
+const RESTORED_PORTS = { core: 5300, tickets: 5302, ledger: 5304 }
+const RESTORED = {
+  core: tenantOrigin(RESTORED_PORTS.core),
+  tickets: tenantOrigin(RESTORED_PORTS.tickets),
+  ledger: tenantOrigin(RESTORED_PORTS.ledger),
+}
 
 /** Fixed once, so both reads of the trial balance ask for the same day even across midnight UTC. */
 const asOf = new Date().toISOString().slice(0, 10)
@@ -100,6 +107,20 @@ async function replaySession(savedCookies, coreBase) {
   const result = { status: response.status(), body: await response.text() }
   await replay.dispose()
   return result
+}
+
+/**
+ * Refuses a port something else already listens on. The readiness check below accepts any HTTP
+ * answer, so without this a stranger's server on the port is taken for the restored API and the
+ * drill fails later with an answer that makes no sense (a 404 where a session check belongs).
+ */
+async function assertPortFree(port) {
+  const inUse = await new Promise((resolve) => {
+    const socket = createConnection({ host: 'localhost', port })
+    socket.once('connect', () => { socket.destroy(); resolve(true) })
+    socket.once('error', () => resolve(false))
+  })
+  if (inUse) throw new Error(`port ${port} is already in use; the restore drill needs it for a restored API`)
 }
 
 /** Listens on localhost; reached at the tenant's address, which resolves to the same machine. */
@@ -193,9 +214,10 @@ test('a backup restores into a working, verified copy', async () => {
     connection: connectionString(RESTORE_DB_PORT),
     capturePath: restoredCapture,
   })
-  startRestoredApi('core.api', 5200, { ...env, Outbox__DeliveryPaused: 'true' })
-  startRestoredApi('apps/tickets/tickets.api', 5202, env)
-  startRestoredApi('apps/ledger/ledger.api', 5204, env)
+  for (const port of Object.values(RESTORED_PORTS)) await assertPortFree(port)
+  startRestoredApi('core.api', RESTORED_PORTS.core, { ...env, Outbox__DeliveryPaused: 'true' })
+  startRestoredApi('apps/tickets/tickets.api', RESTORED_PORTS.tickets, env)
+  startRestoredApi('apps/ledger/ledger.api', RESTORED_PORTS.ledger, env)
   await waitUntilAnswering(`${RESTORED.core}/api/core/v1/auth/session`)
   await waitUntilAnswering(`${RESTORED.tickets}/api/tickets/v1/tickets`)
   await waitUntilAnswering(`${RESTORED.ledger}/api/ledger/v1/accounts`)

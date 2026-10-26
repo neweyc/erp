@@ -78,6 +78,7 @@ public class TenantAddressTests
     [InlineData("app.example.com")]               // no scheme
     [InlineData("ftp://app.example.com")]
     [InlineData("https://app.example.com/shell")] // a path would be lost from every address
+    [InlineData("https://user:pw@app.example.com")] // would be shown in every sign-in address
     [InlineData("https://app.example.com/?x=1")]
     public void Refuses_a_base_url_it_cannot_build_addresses_from(string? baseUrl)
     {

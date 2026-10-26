@@ -175,8 +175,7 @@ public static class ProvisionTenantFeature
         }
 
         private static CommandResult AddressTaken(string subdomain)
-            => CommandResult.Conflict(
-                CoreProblems.SubdomainTaken, $"The address \"{subdomain}\" belongs to another tenant. Choose another.");
+            => CommandResult.Conflict(CoreProblems.SubdomainTaken, TenantAddress.TakenMessage(subdomain));
 
         /// <summary>
         /// A replay returns the tenant only. The admin user id is deliberately absent: the

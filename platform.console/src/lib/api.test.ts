@@ -22,4 +22,9 @@ describe('the full address', () => {
     expect(signInUrlFor('acme', 'https://app.example.com')).toBe('https://acme.app.example.com')
     expect(signInUrlFor('acme', 'http://localhost:5173')).toBe('http://acme.localhost:5173')
   })
+
+  it.each(['acme fire', 'acme/x', 'ab', '1acme', 'acme--fire', 'acme-'])(
+    'shows no address for %j, which is not one', (subdomain) => {
+      expect(signInUrlFor(subdomain, 'https://app.example.com')).toBeNull()
+    })
 })

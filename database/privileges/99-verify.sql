@@ -172,7 +172,8 @@ mutable_append_only AS (
     FROM unnest(ARRAY[
       'ledger.journal_entry',
       'ledger.journal_line',
-      'platform.data_key'
+      'platform.data_key',
+      'platform.tenant_address_period'
     ]) AS listed
     WHERE to_regclass(listed) IS NOT NULL
   ) t

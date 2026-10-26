@@ -263,11 +263,19 @@ function captureFloor() {
 }
 
 /**
+ * The ports the suite serves the shell and the console on: 53xx, clear of the 5173/5174 `bin/dev`
+ * uses and of the 52xx range other local projects commonly take, so a suite run does not collide
+ * with a developer's other running work. The restore drill's APIs sit at 5300-5304.
+ */
+export const SHELL_PORT = 5373
+export const CONSOLE_PORT = 5374
+
+/**
  * The shell with no tenant in it. Each tenant signs in at a subdomain of its host: the journey's
  * at e2e.localhost, the second tenant's at other.localhost. Browsers and Node both send *.localhost
  * to this machine, so one set of processes serves both tenants, as in a deployment.
  */
-export const SHELL_BASE_URL = 'http://localhost:5273'
+export const SHELL_BASE_URL = `http://localhost:${SHELL_PORT}`
 
 /** The addresses `SeedE2E` gives its two tenants. */
 export const TENANT_SUBDOMAIN = 'e2e'

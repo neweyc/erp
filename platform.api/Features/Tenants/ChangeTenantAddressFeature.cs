@@ -59,6 +59,12 @@ public static class ChangeTenantAddressFeature
             if (current is not null)
             {
                 current.ReplacedAt = now;
+                // The span it was in use, kept here because taking this address back later would
+                // overwrite the dates on its own row.
+                tenants.Add(new TenantAddressPeriod
+                {
+                    TenantId = tenant.Id, Subdomain = current.Subdomain, AssignedAt = current.AssignedAt, ReplacedAt = now,
+                });
                 await tenants.SaveAsync(ct);
             }
 
@@ -98,9 +104,7 @@ public static class ChangeTenantAddressFeature
         }
 
         private static CommandResult Taken(string subdomain)
-            => CommandResult.Conflict(
-                PlatformProblems.SubdomainTaken,
-                $"The address \"{subdomain}\" belongs to another tenant, now or before. Choose another.");
+            => CommandResult.Conflict(PlatformProblems.SubdomainTaken, TenantAddress.TakenMessage(subdomain));
     }
 
     public class Endpoint : IEndpoint

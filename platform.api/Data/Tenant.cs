@@ -1,4 +1,5 @@
 using AppPlatform.Ids;
+using AppPlatform.Tenancy;
 
 namespace AppPlatform.Platform.Data;
 
@@ -45,8 +46,8 @@ public class Tenant : IPublicIdentified
 
 /// <summary>
 /// An address a tenant signs in at (<c>acme-fire</c>, meaning <c>acme-fire.{base domain}</c>), and
-/// how sign-in finds the tenant. Rows are kept after a rename, so a tenant's history lists every
-/// address it has had.
+/// how sign-in finds the tenant. One row per address, kept after a rename so the address stays the
+/// tenant's; when each address was in use is recorded in <see cref="TenantAddressPeriod"/>.
 ///
 /// The subdomain is the key, so an address belongs to one tenant forever and is never given to
 /// another. Its people may still be signed in at the old address after a rename, holding a cookie
@@ -60,10 +61,28 @@ public class TenantSubdomain
 {
     public required string Subdomain { get; set; }
     public int TenantId { get; set; }
+
+    /// <summary>When it last became the tenant's current address; a tenant taking it back resets it.</summary>
     public DateTimeOffset AssignedAt { get; set; }
 
     /// <summary>Null for the tenant's current address; set when a rename replaces it.</summary>
     public DateTimeOffset? ReplacedAt { get; set; }
+}
+
+/// <summary>
+/// A span of time a tenant signed in at an address it has since left, written by the rename that
+/// left it. <see cref="TenantSubdomain"/> holds one row per address, so a tenant that moves away
+/// and later takes an address back overwrites that row's dates; these rows keep each earlier span.
+/// The current address has no row here until it too is replaced. Platform only: core never reads
+/// it. Append-only, because it is history.
+/// </summary>
+public class TenantAddressPeriod : IAppendOnly
+{
+    public long Id { get; set; }
+    public int TenantId { get; set; }
+    public required string Subdomain { get; set; }
+    public DateTimeOffset AssignedAt { get; set; }
+    public DateTimeOffset ReplacedAt { get; set; }
 }
 
 /// <summary>

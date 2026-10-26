@@ -15,14 +15,15 @@ export function AddressField({
 }) {
   const { session } = useSession()
   const subdomain = value.trim().toLowerCase()
+  const full = session ? signInUrlFor(subdomain, session.tenantBaseUrl) : null
 
   return (
     <Field
       label="Address"
       htmlFor={id}
-      hint={subdomain && session
-        ? `People sign in at ${signInUrlFor(subdomain, session.tenantBaseUrl)}`
-        : 'Letters, digits and hyphens, starting with a letter.'}
+      hint={full
+        ? `People sign in at ${full}`
+        : 'Letters, digits and single hyphens, starting with a letter: 3 to 40 characters.'}
     >
       <Input
         id={id}

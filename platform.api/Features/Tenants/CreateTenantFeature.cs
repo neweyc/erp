@@ -41,11 +41,6 @@ public static class CreateTenantFeature
             if (string.IsNullOrWhiteSpace(email))
                 return CommandResult.Invalid(PlatformProblems.ValidationFailed, "An admin email is required.");
 
-            // Checked here for a prompt answer; core checks again, and its primary key is what
-            // actually keeps an address to one tenant.
-            if (!TenantAddress.TryNormalize(cmd.Subdomain, out var subdomain, out var addressProblem))
-                return CommandResult.Invalid(PlatformProblems.ValidationFailed, addressProblem);
-
             // Required, not optional. Provisioning is expensive and externally triggered: a
             // call that times out has an unknown outcome, and a retry without a key creates a
             // SECOND tenant — a failure the caller cannot see and the operator discovers as
@@ -62,15 +57,23 @@ public static class CreateTenantFeature
             if (await idempotency.FindResponseAsync(Operation, key, ct) is { } existing)
                 return CommandResult.Ok(JsonSerializer.Deserialize<JsonElement>(existing));
 
+            // After the replay, so a retry of a creation that succeeded gets its tenant back even
+            // if it sends no address, or one that is no longer valid. Checked here for a prompt
+            // answer; core checks again, and its primary key is what keeps an address to one tenant.
+            if (!TenantAddress.TryNormalize(cmd.Subdomain, out var subdomain, out var addressProblem))
+                return CommandResult.Invalid(PlatformProblems.ValidationFailed, addressProblem);
+
             var result = await provisioning.ProvisionAsync(new(name, email, key, subdomain), ct);
 
-            if (result is { Succeeded: false, ProblemCode: PlatformProblems.SubdomainTaken })
+            if (result.Refusal is { } refusal)
             {
-                // Not recorded either, for the same reason as below: the operator chooses another
-                // address and presses Create again with the same key, and that must be able to succeed.
-                return CommandResult.Conflict(
-                    PlatformProblems.SubdomainTaken,
-                    $"The address \"{subdomain}\" belongs to another tenant, now or before. Choose another.");
+                // Core refused (the address is taken, say), so its code and message go to the
+                // operator as they are. Not recorded either, for the same reason as below: the
+                // operator corrects the request and presses Create again with the same key, and
+                // that must be able to succeed.
+                return refusal.IsConflict
+                    ? CommandResult.Conflict(refusal.ProblemCode, refusal.Message)
+                    : CommandResult.Invalid(refusal.ProblemCode, refusal.Message);
             }
 
             if (!result.Succeeded)

@@ -11,7 +11,7 @@ namespace AppPlatform.Platform.Features.Tenants;
 /// </summary>
 public static class GetTenantsFeature
 {
-    public class GetTenantsQueryHandler(ITenantService tenants, TenantSite site)
+    public class GetTenantsQueryHandler(ITenantService tenants, ITenantSite site)
     {
         public async Task<CommandResult> Handle(CancellationToken ct = default)
         {
@@ -28,7 +28,7 @@ public static class GetTenantsFeature
             async (
                 [FromServices] IOperatorContext operatorContext,
                 [FromServices] ITenantService tenants,
-                [FromServices] TenantSite site,
+                [FromServices] ITenantSite site,
                 CancellationToken ct) =>
             {
                 // Operators only: see GetErrorFeedFeature.

@@ -21,7 +21,7 @@ public static class GetTenantFeature
         string? Subdomain, string? SignInUrl, List<AddressRow> Addresses,
         List<string> Apps, List<GrantRow> Grants, List<AuditRow> Actions);
 
-    public class GetTenantQueryHandler(ITenantService tenants, IAuditLogService audit, TenantSite site)
+    public class GetTenantQueryHandler(ITenantService tenants, IAuditLogService audit, ITenantSite site)
     {
         public async Task<CommandResult> Handle(string tenantPublicId, CancellationToken ct = default)
         {
@@ -54,7 +54,7 @@ public static class GetTenantFeature
                 [FromServices] IOperatorContext operatorContext,
                 [FromServices] ITenantService tenants,
                 [FromServices] IAuditLogService audit,
-                [FromServices] TenantSite site,
+                [FromServices] ITenantSite site,
                 CancellationToken ct) =>
             {
                 // Operators only: see GetErrorFeedFeature.

@@ -31,6 +31,7 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<TenantApp> TenantApps => Set<TenantApp>();
     public DbSet<TenantSubdomain> TenantSubdomains => Set<TenantSubdomain>();
+    public DbSet<TenantAddressPeriod> TenantAddressPeriods => Set<TenantAddressPeriod>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<PlatformUser> PlatformUsers => Set<PlatformUser>();
     public DbSet<PlatformSession> PlatformSessions => Set<PlatformSession>();
@@ -86,6 +87,16 @@ public class PlatformDbContext(DbContextOptions<PlatformDbContext> options) : Db
 
             // Restrict, not cascade: deleting a tenant must not quietly free its addresses for reuse.
             e.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<TenantAddressPeriod>(e =>
+        {
+            e.ToTable("tenant_address_period", Schema);
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Subdomain).HasMaxLength(TenantAddress.MaxLength);
+            e.HasIndex(x => x.TenantId);
+            e.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<TenantSubdomain>().WithMany().HasForeignKey(x => x.Subdomain).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<TenantApp>(e =>

@@ -215,7 +215,11 @@ describe('creating a tenant', () => {
 
     const address = within(dialog).getByLabelText('Address')
     await user.clear(address)
-    expect(dialog).toHaveTextContent('Letters, digits and hyphens')
+    expect(dialog).toHaveTextContent('Letters, digits and single hyphens')
+    // Not an address yet, so no full address is shown for it.
+    await user.type(address, 'gam ma')
+    expect(dialog).not.toHaveTextContent('People sign in at')
+    await user.clear(address)
     await user.type(address, 'gamma')
     await user.type(within(dialog).getByLabelText('Organization name'), ' Group')
 

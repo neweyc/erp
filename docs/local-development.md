@@ -378,17 +378,12 @@ kill $(lsof -ti tcp:5100 -sTCP:LISTEN)     # or 5101, 5102, 5104, 5173
 ring. Every API tab must have run `source .local/dev.env` (it sets `DataProtection__KeyPath`).
 Restart any tab that did not.
 
-**Sign-in says "No organization signs in at localhost:5173".** You are on the shell's bare
-address. Use the tenant's own address, such as `http://acme-fire.localhost:5173`; the console shows
-it on the tenant's page. The same message at a tenant's address means the address was changed or
-mistyped.
+**Sign-in says the email or password is wrong, and it is right.** You are at the wrong address:
+the shell's bare `localhost:5173`, another tenant's address, a former or mistyped one. Sign-in
+answers all of these as a wrong password, so addresses cannot be probed. Use the address on the
+tenant's page in the console, such as `http://acme-fire.localhost:5173`.
 
-**The admin's sign-in says the email or password is wrong, and it is right.** You are at another
-tenant's address: sign-in looks the account up in the tenant the address names. Check the
-address on the tenant's page in the console.
-
-**Sign-in says no organization signs in at the address, after a pull, for a tenant made earlier.**
-Tenants made before addresses existed were given one made from their id (`t-01h…`); the console
+**The same, after a pull, for a tenant made earlier.** Tenants made before addresses existed were given one made from their id (`t-01h…`); the console
 shows it, and changes it. If the address table is missing altogether, the local database needs the
 new migration: see "After pulling new code".
 

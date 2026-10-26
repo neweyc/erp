@@ -9,7 +9,7 @@ public record TenantSummary(
     string TenantId, string Name, string Status, DateTimeOffset CreatedAt, DateTimeOffset? StatusChangedAt,
     List<string> Apps, string? Subdomain)
 {
-    /// <summary>The full address, filled in by the handler from <see cref="TenantSite"/>.</summary>
+    /// <summary>The full address, filled in by the handler from <see cref="ITenantSite"/>.</summary>
     public string? SignInUrl { get; init; }
 }
 
@@ -27,7 +27,10 @@ public interface ITenantService
     /// <summary>Every grant the tenant has ever had, newest first, revoked ones included.</summary>
     Task<List<GrantRow>> GrantHistoryAsync(int tenantId, CancellationToken ct = default);
 
-    /// <summary>Every address the tenant has had: the current one, then former ones, latest first.</summary>
+    /// <summary>
+    /// The current address, then each span at a former one, latest first. An address the tenant
+    /// left, took back and left again appears once per span.
+    /// </summary>
     Task<List<AddressRow>> AddressHistoryAsync(int tenantId, CancellationToken ct = default);
 
     /// <summary>The tenant's current address, tracked for a rename.</summary>
@@ -40,6 +43,7 @@ public interface ITenantService
     Task<TenantApp?> FindGrantAsync(int tenantId, string app, CancellationToken ct = default);
     void Add(TenantApp grant);
     void Add(TenantSubdomain address);
+    void Add(TenantAddressPeriod period);
     void Audit(PlatformAuditLog entry);
     Task SaveAsync(CancellationToken ct = default);
 

@@ -15,7 +15,7 @@ public static class GetSessionFeature
     /// an operator is choosing before it is created.</param>
     public record OperatorSessionModel(string Email, string TenantBaseUrl);
 
-    public class GetSessionQueryHandler(TenantSite site)
+    public class GetSessionQueryHandler(ITenantSite site)
     {
         public CommandResult Handle(OperatorPrincipal principal)
             => CommandResult.Ok(new OperatorSessionModel(principal.Email, site.BaseUrl.GetLeftPart(UriPartial.Authority)));
@@ -24,7 +24,7 @@ public static class GetSessionFeature
     public class Endpoint : IEndpoint
     {
         public void Map(IEndpointRouteBuilder routes) => routes.MapGet("/api/platform/v1/auth/session",
-            ([FromServices] IOperatorContext operatorContext, [FromServices] TenantSite site) =>
+            ([FromServices] IOperatorContext operatorContext, [FromServices] ITenantSite site) =>
                 new GetSessionQueryHandler(site).Handle(operatorContext.Require()).CreateIResult())
             .RequireAuthorization();
     }

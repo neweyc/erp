@@ -175,14 +175,17 @@ accounts to try.
 - `Tenant:BaseUrl` (`https://app.example.com`) is read by core and platform alike, and required at
   startup. Its host is the base domain; `TenantAddress` (packages/tenancy) holds the rules for an
   address and parses a host.
-- A host that is no tenant's current address resolves to nothing, and sign-in answers **404
-  `tenant_not_found`**, so a mistyped address is not mistaken for a wrong password. That confirms
-  whether an address is in use, which the address already does by being how people reach us.
-  Nothing falls back to a default tenant.
+- A host that is no tenant's current address resolves to nothing, and sign-in answers exactly as
+  it does a wrong password (**403 `invalid_credentials`**, after the same password-hash work).
+  With a wildcard DNS record every subdomain reaches us, so a distinct answer would let anyone list
+  our customers by trying names (Cycle 19 review). The cost is that a mistyped address reads as a
+  wrong password; the shell's message names the address so it can be spotted. Nothing falls back
+  to a default tenant.
 - **An address belongs to one tenant forever.** A rename keeps the old row as a former address,
   which signs nobody in but is never given to another tenant: people still signed in there hold a
   cookie for that host, and a stranger taking it would put them on someone else's address. A tenant
-  may take back one of its own former addresses.
+  may take back one of its own former addresses. When each was in use is kept in
+  `platform.tenant_address_period`, which core never reads.
 - **The address chooses the tenant for sign-in only.** Afterwards the session does, on every
   request. A session cookie carried to another tenant's address still reaches only its own tenant
   (`tenant-isolation.spec.mjs`). Cookies are host-only, so a browser never carries one across.

@@ -344,6 +344,45 @@ namespace AppPlatform.Platform.Migrations
                     b.ToTable("tenant", "platform");
                 });
 
+            modelBuilder.Entity("AppPlatform.Platform.Data.TenantAddressPeriod", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<DateTimeOffset>("ReplacedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("replaced_at");
+
+                    b.Property<string>("Subdomain")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("subdomain");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tenant_address_period");
+
+                    b.HasIndex("Subdomain")
+                        .HasDatabaseName("ix_tenant_address_period_subdomain");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_tenant_address_period_tenant_id");
+
+                    b.ToTable("tenant_address_period", "platform");
+                });
+
             modelBuilder.Entity("AppPlatform.Platform.Data.TenantApp", b =>
                 {
                     b.Property<int>("Id")
@@ -420,6 +459,23 @@ namespace AppPlatform.Platform.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_platform_session_platform_user_platform_user_id");
+                });
+
+            modelBuilder.Entity("AppPlatform.Platform.Data.TenantAddressPeriod", b =>
+                {
+                    b.HasOne("AppPlatform.Platform.Data.TenantSubdomain", null)
+                        .WithMany()
+                        .HasForeignKey("Subdomain")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tenant_address_period_tenant_subdomain_subdomain");
+
+                    b.HasOne("AppPlatform.Platform.Data.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tenant_address_period_tenant_tenant_id");
                 });
 
             modelBuilder.Entity("AppPlatform.Platform.Data.TenantApp", b =>

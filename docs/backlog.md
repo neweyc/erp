@@ -650,9 +650,8 @@ Open from the closure: D16.
 
 **Cycle 19 — tenants sign in at their own address (D5).** Chris: "lets work on D5 now", after the
 console made the gap plain: a tenant created there could not be signed in to, because core resolved
-sign-in's tenant only from a pinned setting. **Built and tested. Independent review not yet asked
-for:** it changes how anonymous sign-in chooses a tenant and widens core's grant on the platform
-schema by one table, so it is in the review-required class.
+sign-in's tenant only from a pinned setting. **Built, tested, independently reviewed (2026-10-25),
+review fixes applied, Playwright 35/35 after them (2026-10-26).**
 
 Decided (Chris, 2026-10-25):
 - **A subdomain of one base domain** (`acme-fire.app.example.com`). Customers' own domains are
@@ -665,8 +664,7 @@ Decided by default (stated here, not asked):
   tenant has had; a former one signs nobody in and is never given to another tenant, because people
   still signed in there hold that host's cookie. A tenant may take back its own former address.
   Existing tenants were given `t-<public id>` by the migration.
-- **An unknown address is 404 `tenant_not_found`**, not "wrong password", so a mistyped address is
-  told apart. It confirms that an address is in use, which the address itself already does.
+- ~~An unknown address is 404 `tenant_not_found`~~ — **reversed by the review**; see Review below.
 - **Changing an address asks once, without typing the name**: nothing is taken away, and the dialog
   says the old address stops working at once for anyone signed out.
 - Rules for an address: 3 to 40 lowercase letters, digits and single hyphens, a letter first; a
@@ -714,6 +712,36 @@ Evidence:
 - Local: the migration and grants applied to the dev database as `ap_owner`, 99-verify clean,
   `bin/dev up` running; sign-in through the shell's proxy at the tenant's address reaches it, and
   `localhost:5173` answers `tenant_not_found`.
+
+Review (2026-10-25, `/code-review high` on `8fd1dc5`): 9 findings, none critical. All applied, two by
+Chris's decision:
+- **Address enumeration (decided: close it).** With wildcard DNS every subdomain reaches us, so 404
+  `tenant_not_found` listed customers. An unknown address now answers 403 `invalid_credentials` after
+  the same hash work; `tenant_not_found` is gone. The shell's wrong-password message names the address
+  so a mistyped one can be spotted.
+- **Address history (decided: keep every span).** Taking a former address back overwrote its row's
+  dates. New append-only `platform.tenant_address_period` (platform only; core's grants unchanged),
+  written by each rename, backfilled from existing former rows; migration `AddTenantAddressPeriods`,
+  both SQL scripts generated, listed in `02-grants`/`99-verify`. The console shows each span.
+- A retried create with no or an invalid address was refused before the replay; the replay is now first.
+- Every core 400/409 refusal reaches the operator with core's code and message (was: only
+  `subdomain_taken`, all else "try again"); one shared "address taken" wording (`TenantAddress.TakenMessage`).
+- `Tenant:BaseUrl` with a user name or password is refused at startup.
+- The console shows the full address only once what is typed has an address's shape.
+- Handlers depend on `ITenantSite`, not the concrete record.
+- `bin/dev invite-link` builds the link on the invited user's own tenant's address, not the newest tenant's.
+
+Evidence after the fixes: .NET 969 passing (was 957), including real PostgreSQL tests that an address
+left, taken back and left again keeps both spans, and that the platform role cannot edit or delete a
+span (42501); console 66 tests at 100% lines; shell 66 (two sign-in tests merged into one);
+Playwright 35/35, with `operator-console.spec.mjs` expecting 403 `invalid_credentials` at a former
+address. The migration is not yet applied to the local dev database.
+
+Found on the way: the suite's fixed ports collided with another local project's servers (5200, 5273,
+5274). The restore drill's API answered for a stranger on 5200, because its readiness check accepts
+any HTTP answer, and failed with a misleading 404. The suite now serves the shell and console on
+5373/5374 and the restore drill on 5300-5304, named once in `e2e/stack.mjs`; the drill refuses a
+port already in use before starting.
 
 ## Previous cycle
 

@@ -564,19 +564,37 @@ cmd_tenant() {
   echo "    $link"
 }
 
-# The newest captured invitation's link, for one address or for anyone. On the last tenant's
-# address: accepting there leaves the person on the page they sign in from. (The invitation does
-# not yet say which tenant's address to use; a real email transport will have to.)
+# The newest captured invitation's link, for one address or for anyone, on the address of the
+# tenant the invitation belongs to: accepting there leaves the person on the page they sign in
+# from. The message does not name its tenant (a real email transport will have to), so the tenant
+# is looked up from the invited user, in the local database, as bin/dev may.
 invite_link() {
-  node -e '
-    const fs = require("fs"), dir = process.argv[1], to = process.argv[2], shell = process.argv[3];
+  local found token user subdomain
+  found="$(node -e '
+    const fs = require("fs"), dir = process.argv[1], to = process.argv[2];
     const invites = fs.readdirSync(dir).filter(n => n.endsWith(".json"))
       .map(n => ({ path: dir + "/" + n, time: fs.statSync(dir + "/" + n).mtimeMs }))
       .sort((a, b) => b.time - a.time)
       .map(f => JSON.parse(fs.readFileSync(f.path, "utf8")))
       .filter(m => m.payload && m.payload.token && (!to || m.to === to));
-    if (invites.length) console.log(shell + "/accept-invite?token=" + encodeURIComponent(invites[0].payload.token));
-  ' "$LOCAL/mail" "$1" "${TENANT_URL:-$SHELL_URL}"
+    if (invites.length) console.log(invites[0].payload.token + " " + (invites[0].payload.userId || ""));
+  ' "$LOCAL/mail" "$1")"
+  [ -n "$found" ] || return 0
+  token="${found%% *}"
+  user="${found#* }"
+
+  # A public id is letters, digits and underscores; anything else is refused before it reaches SQL.
+  case "$user" in *[!A-Za-z0-9_]*|"") ;; *)
+    subdomain="$(db_sql "SELECT s.subdomain FROM identity.\"user\" u
+      JOIN platform.tenant_subdomain s ON s.tenant_id = u.tenant_id AND s.replaced_at IS NULL
+      WHERE u.public_id = '$user'" 2>/dev/null || true)" ;;
+  esac
+
+  # http://localhost:5173 becomes http://acme-fire.localhost:5173. The bare shell address, which
+  # signs nobody in, only when the tenant cannot be found.
+  local base="$SHELL_URL"
+  [ -n "${subdomain:-}" ] && base="${SHELL_URL/:\/\//://$subdomain.}"
+  echo "$base/accept-invite?token=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$token")"
 }
 
 cmd_invite_link() {

@@ -94,6 +94,8 @@ public static partial class TenantAddress
     {
         if (Uri.TryCreate(configured, UriKind.Absolute, out var url)
             && url.Scheme is "http" or "https"
+            // A user name or password would appear in every sign-in address the console shows.
+            && string.IsNullOrEmpty(url.UserInfo)
             && url.AbsolutePath == "/" && string.IsNullOrEmpty(url.Query) && string.IsNullOrEmpty(url.Fragment))
         {
             return url;
@@ -104,6 +106,13 @@ public static partial class TenantAddress
             "https://app.example.com (http://localhost:5173 in development). Tenants sign in at " +
             "subdomains of its host, and sign-in reads the tenant from the request's host.");
     }
+
+    /// <summary>
+    /// The refusal when another tenant has, or once had, the address. One wording wherever it is
+    /// refused: platform's rename and core's provisioning, whose message platform passes on.
+    /// </summary>
+    public static string TakenMessage(string subdomain)
+        => $"The address \"{subdomain}\" belongs to another tenant, now or before. Choose another.";
 
     /// <summary>Where a tenant's people sign in: <c>https://acme-fire.app.example.com</c>.</summary>
     public static string SignInUrl(string subdomain, Uri baseUrl)

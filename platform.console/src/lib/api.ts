@@ -94,8 +94,20 @@ export function suggestSubdomain(name: string): string {
     .replace(/-+$/, '')
 }
 
-/** The address an operator is choosing, in full: acme-fire under https://app.example.com. */
-export function signInUrlFor(subdomain: string, tenantBaseUrl: string): string {
+/**
+ * The shape of an address, as TenantAddress (packages/tenancy) checks it: 3 to 40 lowercase letters,
+ * digits and single hyphens, a letter first and a letter or digit last. The reserved names are left
+ * to platform.api, which decides; this only keeps the console from showing an address that is not one.
+ */
+const ADDRESS_SHAPE = /^(?=.{3,40}$)[a-z](?:[a-z0-9]|-(?!-))*[a-z0-9]$/
+
+/**
+ * The address an operator is choosing, in full: acme-fire under https://app.example.com. Null until
+ * it has an address's shape: the URL API ignores or cuts short a host it cannot use ("acme fire"),
+ * which would show an address other than the one being submitted.
+ */
+export function signInUrlFor(subdomain: string, tenantBaseUrl: string): string | null {
+  if (!ADDRESS_SHAPE.test(subdomain)) return null
   const url = new URL(tenantBaseUrl)
   url.hostname = `${subdomain}.${url.hostname}`
   return url.origin
