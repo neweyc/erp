@@ -21,7 +21,7 @@ public class InviteEmployeeTests
     private static readonly DateTimeOffset Now = new(2026, 9, 29, 12, 0, 0, TimeSpan.Zero);
 
     private InviteEmployeeCommandHandler Handler()
-        => new(_employees.Object, _users.Object, _roles.Object, _outbox, new FakeTimeProvider(Now));
+        => new(_employees.Object, _users.Object, _roles.Object, _outbox, Fake.Tenants(), new FakeTimeProvider(Now));
 
     public InviteEmployeeTests()
     {
@@ -94,6 +94,12 @@ public class InviteEmployeeTests
         var plaintext = payload.GetProperty("token").GetString()!;
         Assert.Equal(TokenGenerator.HashOf(plaintext), token.TokenHash);
         Assert.NotEqual(plaintext, token.TokenHash);
+
+        // The link the email carries, on the tenant's own address: the shell there accepts it and
+        // leaves the person on the page they sign in from.
+        Assert.Equal(
+            $"{Fake.SignInUrl}/accept-invite?token={Uri.EscapeDataString(plaintext)}",
+            payload.GetProperty("acceptUrl").GetString());
     }
 
     // Who may invite (core.user.manage, admins only) is enforced on the route: see

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AppPlatform.Core.Data;
 
 namespace AppPlatform.Core.Services;
@@ -40,14 +41,27 @@ public static class InvitationToken
         return (row, plaintext);
     }
 
-    /// <summary>The email inviting someone into an organisation that already exists.</summary>
-    public static string EmailPayload(string userPublicId, string plaintext)
-        => Payload("invite", userPublicId, plaintext);
+    /// <summary>The email inviting someone into an organization that already exists.</summary>
+    public static string EmailPayload(string userPublicId, string plaintext, string signInUrl)
+        => Payload("invite", userPublicId, plaintext, signInUrl);
 
-    /// <summary>The email inviting a new organisation's first administrator.</summary>
-    public static string TenantAdminEmailPayload(string userPublicId, string plaintext)
-        => Payload("tenant_admin_invite", userPublicId, plaintext);
+    /// <summary>The email inviting a new organization's first administrator.</summary>
+    public static string TenantAdminEmailPayload(string userPublicId, string plaintext, string signInUrl)
+        => Payload("tenant_admin_invite", userPublicId, plaintext, signInUrl);
 
-    private static string Payload(string kind, string userPublicId, string plaintext)
-        => $$"""{"kind":"{{kind}}","userId":"{{userPublicId}}","token":"{{plaintext}}"}""";
+    /// <summary>
+    /// What the email transport needs to write the message. <c>acceptUrl</c> is the link, on the
+    /// tenant's address as it is when the invitation is made: the shell there sets the password and
+    /// leaves the person on their sign-in page. If the address changes before they use it, the old
+    /// link still works, because acceptance finds the tenant from the token, and acceptance answers
+    /// with the current address so the shell sends them on (AcceptInviteFeature).
+    /// </summary>
+    private static string Payload(string kind, string userPublicId, string plaintext, string signInUrl)
+        => JsonSerializer.Serialize(new
+        {
+            kind,
+            userId = userPublicId,
+            token = plaintext,
+            acceptUrl = $"{signInUrl}/accept-invite?token={Uri.EscapeDataString(plaintext)}",
+        });
 }

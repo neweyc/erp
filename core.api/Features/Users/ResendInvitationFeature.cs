@@ -22,7 +22,7 @@ namespace AppPlatform.Core.Features.Users;
 public static class ResendInvitationFeature
 {
     public class ResendInvitationCommandHandler(
-        IUserService users, IEmployeeService employees, IOutbox outbox, TimeProvider clock)
+        IUserService users, IEmployeeService employees, IOutbox outbox, ITenantResolver tenants, TimeProvider clock)
     {
         public async Task<CommandResult> Handle(Caller caller, string userPublicId, CancellationToken ct = default)
         {
@@ -54,7 +54,8 @@ public static class ResendInvitationFeature
             var (token, plaintext) = InvitationToken.Issue(user.Id, clock.GetUtcNow());
             users.AddToken(token);
             var message = outbox.AddMessage(OutboxTransports.Email, destination: user.Email,
-                payload: InvitationToken.EmailPayload(user.PublicId, plaintext));
+                payload: InvitationToken.EmailPayload(
+                    user.PublicId, plaintext, await tenants.SignInUrlAsync(caller.TenantId, ct)));
             token.MessageId = message.Id;
 
             await users.SaveAsync(ct);
@@ -73,10 +74,11 @@ public static class ResendInvitationFeature
                 [FromServices] IUserService users,
                 [FromServices] IEmployeeService employees,
                 [FromServices] IOutbox outbox,
+                [FromServices] ITenantResolver tenants,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new ResendInvitationCommandHandler(users, employees, outbox, clock);
+                var handler = new ResendInvitationCommandHandler(users, employees, outbox, tenants, clock);
                 return (await handler.Handle(callerContext.Require(), userId, ct)).CreateIResult();
             })
             .RequireAuthorization()

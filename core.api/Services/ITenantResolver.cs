@@ -5,14 +5,23 @@ using Microsoft.EntityFrameworkCore;
 namespace AppPlatform.Core.Services;
 
 /// <summary>
-/// Which tenant an anonymous request belongs to.
-///
-/// Needed only before a session exists: sign-in. Everywhere else the tenant comes from the
-/// validated session, and a tenant id in a header or body is an attack rather than a feature.
+/// Between a tenant and its web address, both ways.
 /// </summary>
 public interface ITenantResolver
 {
+    /// <summary>
+    /// Which tenant an anonymous request belongs to. Needed only before a session exists: sign-in.
+    /// Everywhere else the tenant comes from the validated session, and a tenant id in a header or
+    /// body is an attack rather than a feature.
+    /// </summary>
     Task<int?> ResolveAsync(string host, CancellationToken ct = default);
+
+    /// <summary>
+    /// Where the tenant's people sign in now: <c>https://acme-fire.app.example.com</c>. For the links
+    /// core sends and the page it sends someone to. Throws if the tenant has no current address,
+    /// which provisioning never allows: a link to nowhere is worse than a visible failure.
+    /// </summary>
+    Task<string> SignInUrlAsync(int tenantId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -24,16 +33,29 @@ public interface ITenantResolver
 /// anyone in. Nothing here falls back to a default tenant, because "the first tenant" for a host
 /// nobody recognizes is a sign-in into somebody else's organization.
 /// </summary>
-public class EFTenantResolver(CoreDbContext db, string baseDomain) : ITenantResolver
+/// <param name="baseUrl">The shell's address with no tenant in it, from <c>Tenant:BaseUrl</c>.</param>
+public class EFTenantResolver(CoreDbContext db, Uri baseUrl) : ITenantResolver
 {
     public async Task<int?> ResolveAsync(string host, CancellationToken ct = default)
     {
-        if (TenantAddress.SubdomainOf(host, baseDomain) is not { } subdomain)
+        if (TenantAddress.SubdomainOf(host, baseUrl.Host) is not { } subdomain)
             return null;
 
         return await db.TenantSubdomains
             .Where(s => s.Subdomain == subdomain && s.ReplacedAt == null)
             .Select(s => (int?)s.TenantId)
             .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<string> SignInUrlAsync(int tenantId, CancellationToken ct = default)
+    {
+        // Keyed by the tenant id explicitly: platform's address table has no tenant filter (D15).
+        var subdomain = await db.TenantSubdomains
+            .Where(s => s.TenantId == tenantId && s.ReplacedAt == null)
+            .Select(s => s.Subdomain)
+            .FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException($"Tenant {tenantId} has no current address.");
+
+        return TenantAddress.SignInUrl(subdomain, baseUrl);
     }
 }

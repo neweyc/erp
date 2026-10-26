@@ -201,14 +201,15 @@ export function applyMigrations() {
 }
 
 /**
- * Waits for the outbox worker to deliver the invitation, then returns its token.
+ * Waits for the outbox worker to deliver the invitation, then returns its token, or with
+ * `part: 'acceptUrl'` the link the email carries, which is what a person actually follows.
  *
  * Read from the CAPTURED MESSAGE, never from the database. The point is not that the token is
  * unavailable elsewhere — the outbox payload carries it until pruned — but that reading anything
  * the application wrote locally would let this pass even if no invitation were ever delivered.
  */
 export async function waitForInvitation(
-  toAddress, { timeoutMs = 20_000, notBefore, directory = CAPTURE_DIR } = {}) {
+  toAddress, { timeoutMs = 20_000, notBefore, directory = CAPTURE_DIR, part = 'token' } = {}) {
   // Captures from an earlier run can survive: an interrupted run skips globalTeardown, so the
   // container and the capture directory both outlive it. Without a freshness floor, readdir
   // order decides which token the journey uses, and a stale one fails at accept-invite with a
@@ -229,12 +230,12 @@ export async function waitForInvitation(
           return null
         }
       })
-      .filter((c) => c !== null && c.to === toAddress && c.payload?.token)
+      .filter((c) => c !== null && c.to === toAddress && c.payload?.[part])
       .filter((c) => new Date(c.capturedAt) >= floor)
       // Newest wins, so a surviving older capture for the same address cannot be chosen.
       .sort((a, b) => new Date(b.capturedAt) - new Date(a.capturedAt))
 
-    if (candidates.length > 0) return candidates[0].payload.token
+    if (candidates.length > 0) return candidates[0].payload[part]
 
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
@@ -242,7 +243,7 @@ export async function waitForInvitation(
   throw new Error(
     `No invitation delivered to ${toAddress} after ${floor.toISOString()} within ${timeoutMs}ms. ` +
     'The outbox worker did not run, delivery failed (check core.outbox_message.last_error), or the ' +
-    'message was delivered without a token in its payload.')
+    `message was delivered without a ${part} in its payload.`)
 }
 
 export function resetCapture() {
@@ -494,7 +495,7 @@ export function seed() {
     'run', '--project', join(ROOT, 'core.api'), '--no-launch-profile', '--no-restore', '--', 'seed-e2e',
   ], {
     stdio: 'inherit',
-    env: { ...process.env, ConnectionStrings__Core: CONNECTION },
+    env: { ...process.env, ConnectionStrings__Core: CONNECTION, Tenant__BaseUrl: SHELL_BASE_URL },
   })
 }
 

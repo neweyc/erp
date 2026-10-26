@@ -171,7 +171,7 @@ public class AuditTrailTests(PrivilegeFixture fixture)
             tenant, actor, TimeProvider.System);
 
         var result = await new ProvisionTenantFeature.ProvisionTenantCommandHandler(
-            db, tenant, actor, TimeProvider.System)
+            db, tenant, actor, new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")), TimeProvider.System)
             .Handle(new("Audited Ltd", "admin@audited.test", Guid.NewGuid().ToString(), "audited-ltd"));
         Assert.True(result.Succeeded, result.Message);
 

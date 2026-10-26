@@ -39,6 +39,10 @@ public class UserRolesTests(PrivilegeFixture fixture)
             $"VALUES ('{PublicId.New("ten")}', 'Roles {Guid.NewGuid():N}', 'Active', now()) RETURNING id"))!;
         await Scalar(connection,
             $"INSERT INTO platform.tenant_app (tenant_id, app, granted_at) VALUES ({tenantId}, 'tickets', now())");
+        // Every tenant has an address (provisioning writes one); invitations link to it.
+        await Scalar(connection,
+            "INSERT INTO platform.tenant_subdomain (subdomain, tenant_id, assigned_at) " +
+            $"VALUES ('t{Guid.NewGuid():N}'::varchar(20), {tenantId}, now())");
         var companyId = (int)(await Scalar(connection,
             "INSERT INTO core.company (tenant_id, public_id, name, active) " +
             $"VALUES ({tenantId}, '{PublicId.New("co")}', 'Roles Ltd', true) RETURNING id"))!;
@@ -543,7 +547,8 @@ public class UserRolesTests(PrivilegeFixture fixture)
                 .UseSnakeCaseNamingConvention().Options,
             tenant, actor, TimeProvider.System);
         var accept = new AcceptInviteFeature.AcceptInviteCommandHandler(
-                new EFAuthService(acceptDb), new EFUserService(acceptDb, tenant), tenant, actor, TimeProvider.System)
+                new EFAuthService(acceptDb), new EFUserService(acceptDb, tenant), tenant, actor,
+                new Core.Services.EFTenantResolver(acceptDb, new Uri("https://app.example.com")), TimeProvider.System)
             .Handle(new(plaintext, "correct horse battery"));
 
         await Task.Delay(BlockedFor);
@@ -570,7 +575,7 @@ public class UserRolesTests(PrivilegeFixture fixture)
             await using var db = Core(seeded.TenantId, seeded.FirstAdmin);
             var result = await new ResendInvitationFeature.ResendInvitationCommandHandler(
                     Users(db, seeded.TenantId), new EFEmployeeService(db), new Outbox.Outbox(db, TimeProvider.System),
-                    TimeProvider.System)
+                    new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")), TimeProvider.System)
                 .Handle(Admin(seeded.TenantId), invitedPublicId);
             Assert.True(result.Succeeded, result.Message);
         }

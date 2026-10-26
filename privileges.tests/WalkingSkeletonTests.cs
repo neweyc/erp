@@ -84,7 +84,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var db = Core(tenant, actor);
 
         var result = await new Core.Features.Internal.ProvisionTenantFeature
-            .ProvisionTenantCommandHandler(db, tenant, actor, TimeProvider.System)
+            .ProvisionTenantCommandHandler(db, tenant, actor, new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")), TimeProvider.System)
             .Handle(new(name, email, Guid.NewGuid().ToString(), "t" + Guid.NewGuid().ToString("N")[..12]));
 
         Assert.True(result.Succeeded, result.Message);
@@ -114,7 +114,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var db = Core(tenant, actor);
 
         var accepted = await new AcceptInviteFeature.AcceptInviteCommandHandler(
-            new EFAuthService(db), new EFUserService(db, tenant), tenant, actor, TimeProvider.System)
+            new EFAuthService(db), new EFUserService(db, tenant), tenant, actor, new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")), TimeProvider.System)
             .Handle(new(await Task.FromResult(TokenFor(tenantId)), password));
 
         Assert.True(accepted.Succeeded, accepted.Message);
@@ -274,7 +274,7 @@ public class WalkingSkeletonTests : IAsyncLifetime
         await using var db = Core(tenant, actor);
 
         var second = await new AcceptInviteFeature.AcceptInviteCommandHandler(
-            new EFAuthService(db), new EFUserService(db, tenant), tenant, actor, TimeProvider.System)
+            new EFAuthService(db), new EFUserService(db, tenant), tenant, actor, new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")), TimeProvider.System)
             .Handle(new(token, "a different password"));
 
         // A link that still works after use is a permanent way in for anyone who saw the email.

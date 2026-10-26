@@ -69,7 +69,7 @@ public class ProvisioningTests : IAsyncLifetime
         var (db, tenant, actor) = Open();
         await using var _ = db;
 
-        return await new ProvisionTenantCommandHandler(db, tenant, actor, TimeProvider.System)
+        return await new ProvisionTenantCommandHandler(db, tenant, actor, new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")), TimeProvider.System)
             .Handle(new(name, email, key, subdomain ?? FreshAddress()));
     }
 
@@ -79,7 +79,7 @@ public class ProvisioningTests : IAsyncLifetime
     {
         var (db, _, _) = Open();
         await using var _db = db;
-        return await new Core.Services.EFTenantResolver(db, "app.example.com").ResolveAsync(host);
+        return await new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")).ResolveAsync(host);
     }
 
     [Fact]
@@ -277,6 +277,62 @@ public class ProvisioningTests : IAsyncLifetime
         Assert.Null(await ResolveAsync("app.example.com"));
         Assert.Null(await ResolveAsync("nobody.app.example.com"));
         Assert.Null(await ResolveAsync("address-ltd.elsewhere.com"));
+    }
+
+    [Fact]
+    public async Task An_invitation_accepted_after_a_rename_answers_with_the_new_address()
+    {
+        var result = await ProvisionAsync("Renamed Ltd", "a@renamed.test", Guid.NewGuid().ToString(), "renamed-old");
+        Assert.True(result.Succeeded, result.Message);
+
+        await using var connection = new NpgsqlConnection(_connection);
+        await connection.OpenAsync();
+        string token;
+        await using (var read = new NpgsqlCommand(
+            "SELECT payload FROM core.outbox_message WHERE destination = 'a@renamed.test'", connection))
+        {
+            var payload = System.Text.Json.JsonDocument.Parse((string)(await read.ExecuteScalarAsync())!).RootElement;
+            token = payload.GetProperty("token").GetString()!;
+        }
+
+        // What the platform's rename does, after the email went out with the old address in it.
+        await using (var rename = new NpgsqlCommand(
+            "UPDATE platform.tenant_subdomain SET replaced_at = now() WHERE subdomain = 'renamed-old'; " +
+            "INSERT INTO platform.tenant_subdomain (subdomain, tenant_id, assigned_at) " +
+            "SELECT 'renamed-new', tenant_id, now() FROM platform.tenant_subdomain WHERE subdomain = 'renamed-old';",
+            connection))
+        {
+            await rename.ExecuteNonQueryAsync();
+        }
+
+        var (db, tenant, actor) = Open();
+        await using var _db = db;
+        var accepted = await new Core.Features.Auth.AcceptInviteFeature.AcceptInviteCommandHandler(
+                new Core.Services.EFAuthService(db), new Core.Services.EFUserService(db, tenant), tenant, actor,
+                new Core.Services.EFTenantResolver(db, new Uri("https://app.example.com")), TimeProvider.System)
+            .Handle(new(token, "correct horse battery"));
+
+        // The old link still works, since acceptance finds the tenant from the token, and the answer
+        // names the address they sign in at now.
+        Assert.True(accepted.Succeeded, accepted.Message);
+        Assert.Contains("https://renamed-new.app.example.com",
+            System.Text.Json.JsonSerializer.Serialize(accepted.Value), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_first_administrators_invitation_links_to_the_tenants_address()
+    {
+        var result = await ProvisionAsync("Linked Ltd", "a@linked.test", Guid.NewGuid().ToString(), "linked-ltd");
+        Assert.True(result.Succeeded, result.Message);
+
+        await using var connection = new NpgsqlConnection(_connection);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            "SELECT payload FROM core.outbox_message WHERE destination = 'a@linked.test'", connection);
+        var payload = System.Text.Json.JsonDocument.Parse((string)(await command.ExecuteScalarAsync())!).RootElement;
+
+        // Read back from the address row written in provisioning's own transaction.
+        Assert.StartsWith("https://linked-ltd.app.example.com/accept-invite?token=", payload.GetProperty("acceptUrl").GetString());
     }
 
     [Fact]

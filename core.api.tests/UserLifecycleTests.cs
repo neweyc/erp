@@ -73,7 +73,7 @@ public class UserLifecycleTests
         => new ReactivateUserCommandHandler(_users.Object, _employees.Object, _outbox).Handle(_admin, user.PublicId);
 
     private Task<CommandResult> Resend(User user)
-        => new ResendInvitationCommandHandler(_users.Object, _employees.Object, _outbox, _clock).Handle(_admin, user.PublicId);
+        => new ResendInvitationCommandHandler(_users.Object, _employees.Object, _outbox, Fake.Tenants(), _clock).Handle(_admin, user.PublicId);
 
     private void LinkTo(User user, EmployeeStatus status)
     {

@@ -1,12 +1,25 @@
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
+using AppPlatform.Core.Services;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
+using Moq;
 
 namespace AppPlatform.Core.Tests;
 
 internal static class Fake
 {
+    /// <summary>Where every tenant in these tests signs in.</summary>
+    public const string SignInUrl = "https://acme.app.example.com";
+
+    /// <summary>A resolver that knows one address, for the handlers that build invitation links.</summary>
+    public static ITenantResolver Tenants()
+    {
+        var tenants = new Mock<ITenantResolver>();
+        tenants.Setup(t => t.SignInUrlAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(SignInUrl);
+        return tenants.Object;
+    }
+
     public static Caller Caller() => new()
     {
         PrincipalId = Guid.NewGuid(),

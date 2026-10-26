@@ -30,7 +30,7 @@ public class AuthTests
     }
 
     private AcceptInviteFeature.AcceptInviteCommandHandler Accept()
-        => new(_auth.Object, _users.Object, _tenant, _actor, _clock);
+        => new(_auth.Object, _users.Object, _tenant, _actor, Fake.Tenants(), _clock);
 
     private SignInFeature.SignInCommandHandler SignIn() => new(_auth.Object, _users.Object, _roles.Object, _actor, _clock);
 
@@ -67,6 +67,8 @@ public class AuthTests
         Assert.Equal(UserStatus.Active, user.Status);
         Assert.True(PasswordHasher.Verify("correct horse battery", user.PasswordHash));
         Assert.Equal(Now, token.UsedAt);
+        // Where they sign in now, which the link may be older than; the shell sends them there.
+        Assert.Contains(Fake.SignInUrl, System.Text.Json.JsonSerializer.Serialize(result.Value), StringComparison.Ordinal);
     }
 
     [Fact]

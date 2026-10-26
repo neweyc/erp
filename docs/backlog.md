@@ -223,7 +223,7 @@ ERP will need again.
 | **D11** | High — **fixed** (Cycle 5) | `packages/audit` did not exist. | — | Built: see Cycle 5 and `docs/audit.md`. Sign-in events are not audited (security log, not data history). |
 | **D7** | Low (was Medium) | The Playwright harness's APIs connect as the `postgres` superuser. | `e2e/stack.mjs`, `connectionString` | Narrowed twice. `PrivilegeFixture` applies the **shipped** scripts as `ap_owner` and every access test connects as a runtime role. Since Cycle 8 the harness also builds its database with `database/init-local.sh` (roles, schemas, migrations as `ap_owner`, grants), so its ownership and grants match a deployment and the restore drill's `99-verify` is meaningful. What remains: the running APIs bypass grants, so a grant regression is caught by `AccessMatrixTests` and `VerificationTests`, not the browser. Checked by hand on 2026-09-29 while writing `docs/local-development.md`: every service connected as its own runtime role, and the full journey (operator with MFA, provisioning, licensing, invitation, sign-in, a ticket, the ledger, the error feed) worked with no missing grant. |
 | **D8** | Low | Outbox lease is taken per batch but sized for a single send. | `packages/outbox/OutboxBackoff.cs` — `LeaseDuration` 2 min vs `BatchSize` 20 | With more than one worker replica and a slow transport, the tail of a batch can outlive its lease and be re-delivered. Cannot bite today: one replica, instant local transport. |
-| **D9** | Low | No unit coverage for `accept-invite.tsx` or the new signed-out routing. | `shell.ui/src` | Four render branches and a problem-code map are exercised only through the browser journey. |
+| **D9** | Low — **narrowed** (2026-10-26) | No unit coverage for the signed-out routing. `accept-invite.tsx` now has its own tests. | `shell.ui/src` | The routing is exercised only through the browser journey. |
 | **D6** | Low | `EFAuthService.FindTokenAsync` uses `IgnoreQueryFilters`, so a token lookup is tenant-blind before the scope is entered. | Inspection, `core.api/Services/EFAuthService.cs` | Necessary — acceptance precedes any session — but it means token-hash uniqueness is the only thing preventing a cross-tenant match. Mitigated by a unique index on the hash and 256 bits of entropy. Recorded so it is a considered exception, not an oversight. |
 | **D3** | Medium | The shared Data Protection key ring has no automated assertion. | Remove `DataProtection__KeyPath` from `e2e/playwright.config.mjs`; specs fail with 401 but for an unexplained reason | A regression reappears as "signed in but every API call is 401", which took a browser run to diagnose once already. |
 | **D5** | Medium — **fixed** (Cycle 19) | Host-based tenant resolution was unimplemented; `EFTenantResolver` returned null unless `Tenant:PublicId` was configured. | `core.api/Services/ITenantResolver.cs` | Multi-tenant sign-in on one deployment did not work, and the e2e ran a second core.api pinned to tenant B. Fixed: each tenant signs in at its own address, a subdomain of `Tenant:BaseUrl`; the pinning setting is gone, and one core.api signs in both e2e tenants. Evidence: `ProvisioningTests` (resolution against the real migrations), `TenantAddressChangeTests`, and `operator-console.spec.mjs`, where a tenant created in the console signs in at its address, then at its new address only. |
@@ -244,7 +244,7 @@ ERP will need again.
 - **Webhooks, public API, API keys.** Designed in `docs/integration.md`; the three irreversible
   decisions are built, the surface is not.
 - **Customers' own domains** and a redirect from a tenant's former address (D5 built the subdomain
-  only); the invitation link on the tenant's address, when a real email transport is built.
+  only).
 - **Idle timeout, notifications bell** — `ActivityPolicy` anticipates both; neither is built.
 - **Undoing a termination (rehiring).** Termination is built (Cycle 16); reversing it is not, and
   would have to decide whether the old account comes back with its old roles.
@@ -692,9 +692,7 @@ Built:
   `other.localhost`, and the second core.api remains only for the rate-limit spec.
 
 Not built, and recorded:
-- **The invitation does not say which address to use.** The accept link is built by whoever sends
-  it (bin/dev prints the tenant's address); a real email transport must build it on the tenant's
-  current address. An invitation outstanding across a rename carries the old one.
+- ~~The invitation does not say which address to use.~~ **Built 2026-10-26**; see the follow-up below.
 - Customers' own domains; a redirect from a former address.
 
 Evidence:
@@ -735,13 +733,26 @@ Evidence after the fixes: .NET 969 passing (was 957), including real PostgreSQL 
 left, taken back and left again keeps both spans, and that the platform role cannot edit or delete a
 span (42501); console 66 tests at 100% lines; shell 66 (two sign-in tests merged into one);
 Playwright 35/35, with `operator-console.spec.mjs` expecting 403 `invalid_credentials` at a former
-address. The migration is not yet applied to the local dev database.
+address. The migration was applied to the local dev database as `ap_owner` (2026-10-26), 99-verify clean.
 
 Found on the way: the suite's fixed ports collided with another local project's servers (5200, 5273,
 5274). The restore drill's API answered for a stranger on 5200, because its readiness check accepts
 any HTTP answer, and failed with a misleading 404. The suite now serves the shell and console on
 5373/5374 and the restore drill on 5300-5304, named once in `e2e/stack.mjs`; the drill refuses a
 port already in use before starting.
+
+Follow-up (2026-10-26): **the invitation carries its link.** Every invitation payload (provisioning,
+invite, resend) now has `acceptUrl`, built when the invitation is made on the tenant's current
+address (`ITenantResolver.SignInUrlAsync`, keyed by tenant id). Building it at send time instead
+was considered and dropped: an email's text is fixed once sent, so that only narrows a window of
+seconds. What covers a rename after sending is acceptance: it finds the tenant from the token at any
+address, and now answers with `signInUrl`, the current address, which the shell sends the person
+to. A real transport renders `acceptUrl` and needs no knowledge of addresses. `bin/dev invite-link`
+reads it from the message and no longer queries the database. Evidence: unit tests for the payload
+and the answer; real PostgreSQL for the first administrator's link and for acceptance after a rename
+(old link accepted, new address returned); 5 shell tests for `accept-invite.tsx` (D9, partly), one
+refusing a non-web address; the browser journey now follows the delivered link itself. .NET 972,
+shell 71, Playwright 35/35.
 
 ## Previous cycle
 

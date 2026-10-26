@@ -14,6 +14,23 @@ const EXPLANATION: Record<string, string> = {
 }
 
 /**
+ * Where the person signs in, from the API's answer: the organization's address now. The link they
+ * followed was made when they were invited, and the address may have changed since (it still works,
+ * because the token says which organization it is for). Null when it is this page's own address,
+ * so the ordinary in-app link is used.
+ */
+function elsewhere(signInUrl: string | undefined): string | null {
+  if (!signInUrl) return null
+  try {
+    const url = new URL(signInUrl)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+    return url.origin === window.location.origin ? null : url.origin
+  } catch {
+    return null
+  }
+}
+
+/**
  * Turns an invitation into a usable account.
  *
  * Reachable while signed out, because the person has no account yet — the token in the URL is
@@ -24,6 +41,7 @@ export function AcceptInvite() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [accepted, setAccepted] = useState(false)
+  const [signInAt, setSignInAt] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   async function submit(event: React.FormEvent) {
@@ -32,10 +50,11 @@ export function AcceptInvite() {
     setError(null)
 
     try {
-      await api('/api/core/v1/auth/accept-invite', {
+      const result = await api<{ signInUrl?: string }>('/api/core/v1/auth/accept-invite', {
         method: 'POST',
         body: JSON.stringify({ token, password }),
       })
+      setSignInAt(elsewhere(result?.signInUrl))
       setAccepted(true)
     } catch (caught) {
       const code = caught instanceof ApiError ? caught.problemCode : 'unknown'
@@ -47,7 +66,12 @@ export function AcceptInvite() {
 
   if (accepted) {
     return (
-      <AuthLayout title="Invitation accepted" description="Your password is set. You can now sign in.">
+      <AuthLayout
+        title="Invitation accepted"
+        description={signInAt
+          ? `Your password is set. Your organization signs in at ${signInAt}.`
+          : 'Your password is set. You can now sign in.'}
+      >
         {/*
           Deliberately not signed in automatically. Accepting proves the person holds the link;
           signing in proves they know the password they just chose, which is what every later
@@ -57,7 +81,7 @@ export function AcceptInvite() {
           <CircleCheck className="size-10 text-success" />
         </div>
         <Button asChild variant="primary" className="w-full">
-          <Link to="/">Go to sign in</Link>
+          {signInAt ? <a href={signInAt}>Go to sign in</a> : <Link to="/">Go to sign in</Link>}
         </Button>
       </AuthLayout>
     )

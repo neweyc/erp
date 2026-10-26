@@ -2,6 +2,7 @@ using AppPlatform.Audit;
 using AppPlatform.Api;
 using AppPlatform.Auth;
 using AppPlatform.Core.Data;
+using AppPlatform.Core.Services;
 using AppPlatform.Ids;
 using AppPlatform.Outbox;
 using AppPlatform.Tenancy;
@@ -28,6 +29,7 @@ public static class ProvisionTenantFeature
         CoreDbContext db,
         IBackgroundTenantScope tenantScope,
         IAuditActorScope auditActor,
+        ITenantResolver tenants,
         TimeProvider clock)
     {
         public async Task<CommandResult> Handle(
@@ -165,7 +167,9 @@ public static class ProvisionTenantFeature
             var message = new Outbox.Outbox(db, clock).AddMessage(
                 OutboxTransports.Email,
                 destination: email,
-                payload: Services.InvitationToken.TenantAdminEmailPayload(admin.PublicId, plaintext));
+                // The address saved above, read back inside this transaction.
+                payload: Services.InvitationToken.TenantAdminEmailPayload(
+                    admin.PublicId, plaintext, await tenants.SignInUrlAsync(tenant.Id, ct)));
             token.MessageId = message.Id;
 
             await db.SaveChangesAsync(ct);
@@ -196,6 +200,7 @@ public static class ProvisionTenantFeature
                 [FromServices] CoreDbContext db,
                 [FromServices] IBackgroundTenantScope tenantScope,
                 [FromServices] IAuditActorScope auditActor,
+                [FromServices] ITenantResolver tenants,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
@@ -212,7 +217,7 @@ public static class ProvisionTenantFeature
                 if (cmd is null)
                     return Results.BadRequest(new { problemCode = CoreProblems.ValidationFailed });
 
-                var handler = new ProvisionTenantCommandHandler(db, tenantScope, auditActor, clock);
+                var handler = new ProvisionTenantCommandHandler(db, tenantScope, auditActor, tenants, clock);
                 return (await handler.Handle(cmd, ct)).CreateIResult();
             })
             // No .RequireAuthorization(): there is no session during provisioning. The shared

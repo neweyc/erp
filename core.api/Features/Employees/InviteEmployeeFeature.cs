@@ -33,6 +33,7 @@ public static class InviteEmployeeFeature
         IUserService users,
         IRoleService roles,
         IOutbox outbox,
+        ITenantResolver tenants,
         TimeProvider clock)
     {
         public async Task<CommandResult> Handle(
@@ -134,7 +135,8 @@ public static class InviteEmployeeFeature
             var message = outbox.AddMessage(
                 OutboxTransports.Email,
                 destination: user.Email,
-                payload: InvitationToken.EmailPayload(user.PublicId, plaintext));
+                payload: InvitationToken.EmailPayload(
+                    user.PublicId, plaintext, await tenants.SignInUrlAsync(caller.TenantId, ct)));
             token.MessageId = message.Id;
 
             await employees.SaveAsync(ct);
@@ -156,10 +158,11 @@ public static class InviteEmployeeFeature
                 [FromServices] IUserService users,
                 [FromServices] IRoleService roles,
                 [FromServices] IOutbox outbox,
+                [FromServices] ITenantResolver tenants,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new InviteEmployeeCommandHandler(employees, users, roles, outbox, clock);
+                var handler = new InviteEmployeeCommandHandler(employees, users, roles, outbox, tenants, clock);
                 var result = await handler.Handle(callerContext.Require(), employeeId, cmd, ct);
                 return result.CreateIResult();
             })

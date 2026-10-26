@@ -20,7 +20,7 @@ public static class AcceptInviteFeature
 
     public class AcceptInviteCommandHandler(
         IAuthService auth, IUserService users, IBackgroundTenantScope tenantScope, IAuditActorScope auditActor,
-        TimeProvider clock)
+        ITenantResolver tenants, TimeProvider clock)
     {
         /// <summary>
         /// Short, because a password is what people choose badly. Length is the only requirement
@@ -82,7 +82,10 @@ public static class AcceptInviteFeature
             await auth.SaveAsync(ct);
             await transaction.CommitAsync(ct);
 
-            return CommandResult.Ok(new { email = user.Email });
+            // Where they sign in from now on. The link may be older than the tenant's address: it
+            // was built when the invitation was made, and an operator may have changed the address
+            // since. The shell sends them here rather than leaving them on the address they came in at.
+            return CommandResult.Ok(new { email = user.Email, signInUrl = await tenants.SignInUrlAsync(token.TenantId, ct) });
         }
     }
 
@@ -96,10 +99,11 @@ public static class AcceptInviteFeature
                 [FromServices] IUserService users,
                 [FromServices] IBackgroundTenantScope tenantScope,
                 [FromServices] IAuditActorScope auditActor,
+                [FromServices] ITenantResolver tenants,
                 [FromServices] TimeProvider clock,
                 CancellationToken ct) =>
             {
-                var handler = new AcceptInviteCommandHandler(auth, users, tenantScope, auditActor, clock);
+                var handler = new AcceptInviteCommandHandler(auth, users, tenantScope, auditActor, tenants, clock);
                 return (await handler.Handle(cmd, ct)).CreateIResult();
             })
             // Anonymous by necessity: the person has no session yet, and the token is what

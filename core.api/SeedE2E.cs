@@ -78,7 +78,8 @@ public static class SeedE2E
     /// </summary>
     private static AmbientAuditActor SeedActor() => new(AuditActor.System("e2e-seed"));
 
-    public static async Task<int> RunAsync(string connectionString)
+    /// <param name="tenantBaseUrl">From <c>Tenant:BaseUrl</c>: the invitations link to each tenant's address under it.</param>
+    public static async Task<int> RunAsync(string connectionString, Uri tenantBaseUrl)
     {
         var options = new DbContextOptionsBuilder<CoreDbContext>()
             .UseNpgsql(connectionString)
@@ -91,13 +92,13 @@ public static class SeedE2E
         // failed to create the employee could never recover: the tenant row survived, every later
         // run reported success, and the journey failed at the assignee picker — which reads as a
         // tickets-UI bug rather than a half-finished seed.
-        if (!await ProvisionIfMissingAsync(options, TenantName, Subdomain, AdminEmail, "e2e-seed")) return 1;
+        if (!await ProvisionIfMissingAsync(options, tenantBaseUrl, TenantName, Subdomain, AdminEmail, "e2e-seed")) return 1;
 
         var tenantId = await TenantIdAsync(options);
 
         if (!await CreateEmployeeIfMissingAsync(options, tenantId)) return 1;
 
-        if (!await ProvisionIfMissingAsync(options, OtherTenantName, OtherSubdomain, OtherAdminEmail, "e2e-seed-other"))
+        if (!await ProvisionIfMissingAsync(options, tenantBaseUrl, OtherTenantName, OtherSubdomain, OtherAdminEmail, "e2e-seed-other"))
             return 1;
 
         Console.WriteLine(
@@ -109,7 +110,8 @@ public static class SeedE2E
     }
 
     private static async Task<bool> ProvisionIfMissingAsync(
-        DbContextOptions<CoreDbContext> options, string name, string subdomain, string adminEmail, string idempotencyKey)
+        DbContextOptions<CoreDbContext> options, Uri tenantBaseUrl, string name, string subdomain, string adminEmail,
+        string idempotencyKey)
     {
         var tenant = new AmbientTenantProvider();
         // The handler declares its own actor ("provisioning") on this scope, as it does in a request.
@@ -119,7 +121,7 @@ public static class SeedE2E
         if (await db.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Name == name)) return true;
 
         var provisioned = await new ProvisionTenantFeature.ProvisionTenantCommandHandler(
-            db, tenant, actor, TimeProvider.System)
+            db, tenant, actor, new EFTenantResolver(db, tenantBaseUrl), TimeProvider.System)
             .Handle(new(name, adminEmail, idempotencyKey, subdomain));
 
         if (!provisioned.Succeeded)
