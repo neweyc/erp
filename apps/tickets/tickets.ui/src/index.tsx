@@ -41,6 +41,16 @@ export default function TicketsApp({ permissions }: AppProps) {
    */
   const latestRequest = useRef(0)
 
+  /**
+   * The checkbox's value NOW, for a mutation's reload. `run` is the function from the render in
+   * which the button was clicked, so `includeClosed` inside it is the value from then. Ticking
+   * "show closed" while a close was in flight reloaded with closed tickets, and then the close's own
+   * reload, being the latest, replaced them with the open-only list it had captured: the checkbox
+   * on, the closed ticket missing. Caught by the browser journey in CI.
+   */
+  const includeClosedNow = useRef(includeClosed)
+  includeClosedNow.current = includeClosed
+
   const refresh = useCallback(async (closed: boolean) => {
     const request = ++latestRequest.current
     setLoading(true)
@@ -98,7 +108,7 @@ export default function TicketsApp({ permissions }: AppProps) {
       failure = caught instanceof ApiError ? explain(caught.problemCode) : 'Something went wrong.'
     }
 
-    await refresh(includeClosed)
+    await refresh(includeClosedNow.current)
 
     if (failure === null) return true
 

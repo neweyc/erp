@@ -163,6 +163,40 @@ describe('tickets app', () => {
     await waitFor(() => expect(screen.getByLabelText('New ticket')).toHaveValue(''))
   })
 
+  it('shows closed tickets when "show closed" is ticked while a close is still in flight', async () => {
+    let finishClose: () => void = () => {}
+    const closeTicket = new Promise<void>((resolve) => { finishClose = resolve })
+    const closedTicket = { ...oneTicket, status: 'Closed' as const, closedAt: '2026-09-26T00:00:00Z' }
+    let closed = false
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const respond = (body: unknown) => ({ ok: true, status: 200, json: async () => body } as Response)
+      if (url.endsWith('/close')) {
+        await closeTicket
+        closed = true
+        return respond({})
+      }
+      if (url.includes('/api/core/v1/employees')) return respond([])
+      // What the server holds: once closed, the ticket is listed only when closed ones are asked for.
+      const withClosed = url.includes('includeClosed=true')
+      return respond(closed ? (withClosed ? [closedTicket] : []) : [oneTicket])
+    }))
+
+    render(<TicketsApp permissions={agent} />)
+    await screen.findByText('Printer jammed')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close ticket' }))
+    await userEvent.click(screen.getByLabelText('Show closed tickets'))
+    finishClose()
+
+    // The close's own reload must ask for what the checkbox says now, not what it said when the
+    // button was clicked; otherwise it lands last and hides the ticket that was just closed.
+    expect(await screen.findByText('Closed')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText('Assignee')).toBeDisabled())
+    expect(screen.getByLabelText('Show closed tickets')).toBeChecked()
+  })
+
   it('explains a refused close and leaves the list showing what is actually true', async () => {
     let closeAttempted = false
     stubApi({
