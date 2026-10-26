@@ -46,10 +46,30 @@ namespace AppPlatform.Ledger.Migrations
             // shipped posting first). The FK below validates against every existing row, so a
             // (tenant_id, company_id) that already posted needs a books row before the FK is added,
             // or this migration fails the moment it meets a database that isn't freshly created.
+            //
+            // Each public id is minted here as PublicId.New would (docs/integration.md §2.1): "bk_" and
+            // 25 Crockford base32 characters carrying 125 random bits. The bits come from two
+            // gen_random_uuid() values, a cryptographic source built into PostgreSQL, with each
+            // UUID's fixed version and variant digits removed: 30 random hex digits apiece, of which
+            // the first 32 make 128 bits, read 5 at a time for 25 characters. The WHERE on
+            // je.company_id is what makes PostgreSQL run the subquery again for every row: without
+            // a reference to the outer row it runs once, and every books row gets the same id.
+            // (A reference in an unused output column is not enough; the planner drops it.)
             migrationBuilder.Sql("""
                 INSERT INTO ledger.books (id, tenant_id, company_id, public_id, closed_through, version)
                 SELECT gen_random_uuid(), je.tenant_id, je.company_id,
-                       'bk_' || substr(md5(gen_random_uuid()::text || je.tenant_id || '_' || je.company_id), 1, 25),
+                       'bk_' || (
+                           SELECT string_agg(
+                                      substr('0123456789abcdefghjkmnpqrstvwxyz', substring(r.bits FROM i * 5 + 1 FOR 5)::int + 1, 1),
+                                      '' ORDER BY i)
+                           FROM (
+                               SELECT ('x' || substr(
+                                          substr(u.a, 1, 12) || substr(u.a, 14, 3) || substr(u.a, 18) ||
+                                          substr(u.b, 1, 12) || substr(u.b, 14, 3) || substr(u.b, 18), 1, 32))::bit(128) AS bits
+                               FROM (SELECT replace(gen_random_uuid()::text, '-', '') AS a,
+                                            replace(gen_random_uuid()::text, '-', '') AS b
+                                     WHERE je.company_id IS NOT NULL) u
+                           ) r, generate_series(0, 24) AS i),
                        NULL, 1
                 FROM (SELECT DISTINCT tenant_id, company_id FROM ledger.journal_entry) je;
                 """);

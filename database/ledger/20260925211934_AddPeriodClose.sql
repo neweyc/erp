@@ -35,7 +35,18 @@ BEGIN
     IF NOT EXISTS(SELECT 1 FROM ledger.__ef_migrations_history WHERE "migration_id" = '20260925211934_AddPeriodClose') THEN
     INSERT INTO ledger.books (id, tenant_id, company_id, public_id, closed_through, version)
     SELECT gen_random_uuid(), je.tenant_id, je.company_id,
-           'bk_' || substr(md5(gen_random_uuid()::text || je.tenant_id || '_' || je.company_id), 1, 25),
+           'bk_' || (
+               SELECT string_agg(
+                          substr('0123456789abcdefghjkmnpqrstvwxyz', substring(r.bits FROM i * 5 + 1 FOR 5)::int + 1, 1),
+                          '' ORDER BY i)
+               FROM (
+                   SELECT ('x' || substr(
+                              substr(u.a, 1, 12) || substr(u.a, 14, 3) || substr(u.a, 18) ||
+                              substr(u.b, 1, 12) || substr(u.b, 14, 3) || substr(u.b, 18), 1, 32))::bit(128) AS bits
+                   FROM (SELECT replace(gen_random_uuid()::text, '-', '') AS a,
+                                replace(gen_random_uuid()::text, '-', '') AS b
+                         WHERE je.company_id IS NOT NULL) u
+               ) r, generate_series(0, 24) AS i),
            NULL, 1
     FROM (SELECT DISTINCT tenant_id, company_id FROM ledger.journal_entry) je;
     END IF;
