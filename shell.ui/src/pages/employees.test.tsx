@@ -211,6 +211,67 @@ describe('employees page', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/core/v1/employees?includeTerminated=true', expect.anything()))
   })
 
+  it('shows terminated people when the box is ticked while a termination is still in flight', async () => {
+    let finishTerminate: () => void = () => {}
+    const terminating = new Promise<void>((resolve) => { finishTerminate = resolve })
+    let done = false
+    const adaTerminated = { ...ada, status: 'Terminated' }
+    const routes = stubApi({
+      'POST /api/core/v1/employees/emp_ada/terminate': () => {
+        done = true
+        return { body: {} }
+      },
+      // What the server holds: once terminated, Ada is listed only when terminated people are asked for.
+      'GET /api/core/v1/employees?includeTerminated=false': () => ({ body: done ? [grace, linus] : [ada, grace, linus] }),
+      'GET /api/core/v1/employees?includeTerminated=true': () => ({ body: [done ? adaTerminated : ada, grace, linus] }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/terminate')) await terminating
+      return routes(input, init)
+    }))
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    await user.click(await screen.findByRole('button', { name: 'Terminate Ada Lovelace' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm: terminate Ada Lovelace' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Show terminated' }))
+    finishTerminate()
+
+    // The termination's own reload lands last, so it must ask for what the box says now.
+    expect(await screen.findByText('Ada Lovelace is terminated.')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('row', { name: /Ada Lovelace/ })).toBeInTheDocument())
+    expect(screen.getByRole('checkbox', { name: 'Show terminated' })).toBeChecked()
+  })
+
+  it('keeps the newest list when an older request answers last', async () => {
+    let answerSlowRequest: () => void = () => {}
+    const slow = new Promise<void>((resolve) => { answerSlowRequest = resolve })
+    const old = employee('emp_old', 'Old', 'Timer', null, 'Terminated')
+    const routes = stubApi({
+      'GET /api/core/v1/employees?includeTerminated=true': () => ({ body: [ada, grace, linus, old] }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('includeTerminated=true')) await slow
+      return routes(input, init)
+    }))
+    const user = userEvent.setup()
+    await renderEmployees()
+
+    // Ticked and unticked: the second (unticked) request answers first, then the first one.
+    const unticked = () => routes.mock.calls.filter(([url]) => String(url).endsWith('includeTerminated=false')).length
+    const before = unticked()
+    const box = screen.getByRole('checkbox', { name: 'Show terminated' })
+    await user.click(box)
+    await user.click(box)
+    await waitFor(() => expect(unticked()).toBe(before + 1)) // the ticked request is still held back
+    answerSlowRequest()
+
+    // The ticked request's answer is older than what the box now says, so it must not be shown.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('row', { name: /Old Timer/ })).not.toBeInTheDocument()
+    expect(box).not.toBeChecked()
+  })
+
   it('is a plain roster for someone who may only read it', async () => {
     stubApi({ 'GET /api/core/v1/auth/session': () => ({ body: { ...admin, permissions: ['core.employee.read'] } }) })
     await renderEmployees({ withAccounts: false })

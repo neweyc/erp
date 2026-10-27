@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Permissions } from '@app-platform/web-api'
@@ -199,6 +199,43 @@ describe('ledger app', () => {
     expect(screen.getByRole('form', { name: 'Post an entry' })).toBeInTheDocument()
     expect(screen.queryByRole('form', { name: 'Close the books' })).not.toBeInTheDocument()
     expect(screen.queryByRole('form', { name: 'Add account' })).not.toBeInTheDocument()
+  })
+
+  it('reloads the trial balance for the date shown, when the date changes while a post is in flight', async () => {
+    let finishPost: () => void = () => {}
+    const posting = new Promise<void>((resolve) => { finishPost = resolve })
+    const balanceDates: string[] = []
+    const respond = (body: unknown) => ({ ok: true, status: 200, json: async () => body } as Response)
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') {
+        await posting
+        return respond({ entryId: 'je_new' })
+      }
+      if (url.includes('/trial-balance')) {
+        const asOf = new URL(url, 'http://test').searchParams.get('asOf')!
+        balanceDates.push(asOf)
+        return respond({ asOf, currencies: [] })
+      }
+      if (url.includes('/accounts')) return respond([cash, sales])
+      if (url.includes('/periods')) return respond([{ companyId: 'co_a', companyName: 'Acme Ltd', closedThrough: null }])
+      return respond([])
+    }))
+    const user = userEvent.setup()
+    render(<LedgerApp permissions={controller} />)
+    await screen.findByRole('heading', { name: 'Ledger' })
+
+    await fillBalancedEntry(user)
+    await user.click(screen.getByRole('button', { name: 'Post entry' }))
+    fireEvent.change(screen.getByLabelText('As of'), { target: { value: '2026-01-31' } })
+    await waitFor(() => expect(balanceDates).toHaveLength(2)) // the first load, then the new date's
+    finishPost()
+
+    // The third is the post's own reload. Landing last, it decides what the trial balance says,
+    // so it must ask for the date the page now shows.
+    await waitFor(() => expect(balanceDates).toHaveLength(3))
+    expect(balanceDates[2]).toBe('2026-01-31')
   })
 
   it('shows the trial balance per currency with its totals', async () => {

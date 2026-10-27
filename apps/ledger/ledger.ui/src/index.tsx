@@ -35,6 +35,15 @@ export default function LedgerApp({ permissions }: AppProps) {
   /** A response from an earlier load is discarded, so a slow reload cannot overwrite a newer one. */
   const latestRequest = useRef(0)
 
+  /**
+   * The "as of" date NOW, for a change's reload. `run` belongs to the render in which the button
+   * was pressed, so `asOf` inside it is the date from then: changing the date while a post was in
+   * flight reloaded for the new date, and then the post's reload, being the latest, showed the
+   * trial balance for the old one under the new date (D19).
+   */
+  const asOfNow = useRef(asOf)
+  asOfNow.current = asOf
+
   const refresh = useCallback(async (balanceAsOf: string) => {
     const request = ++latestRequest.current
 
@@ -76,7 +85,7 @@ export default function LedgerApp({ permissions }: AppProps) {
       failure = caught instanceof ApiError ? explain(caught.problemCode) : 'Something went wrong.'
     }
 
-    await refresh(asOf)
+    await refresh(asOfNow.current)
 
     if (failure === null) return true
     setError(failure)

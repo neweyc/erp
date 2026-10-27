@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pencil, Send, UserMinus, UserPlus, UsersRound } from 'lucide-react'
 import { api, ApiError, Permissions } from '@app-platform/web-api'
 import {
@@ -95,7 +95,11 @@ export function Employees() {
   const canTerminate = can(Permissions.core.employeeTerminate)
   const myId = session?.userId
 
+  /** Identifies the most recent load; a response to an earlier one is discarded (D19). */
+  const latestLoad = useRef(0)
+
   const load = useCallback(async () => {
+    const request = ++latestLoad.current
     try {
       const [employeeRows, userRows, roleRows, departmentRows, jobTitleRows, locationRows] = await Promise.all([
         api<EmployeeRow[]>(`/api/core/v1/employees?includeTerminated=${showTerminated}`),
@@ -106,6 +110,7 @@ export function Employees() {
         canAdd || canEdit ? api<Record<string, unknown>[]>('/api/core/v1/job-titles') : Promise.resolve([]),
         canAdd || canEdit ? api<Record<string, unknown>[]>('/api/core/v1/locations') : Promise.resolve([]),
       ])
+      if (request !== latestLoad.current) return
       setEmployees(employeeRows)
       setUsers(userRows)
       setRoles(roleRows)
@@ -115,15 +120,23 @@ export function Employees() {
         locations: toRows(locationRows, 'locationId'),
       })
     } catch (e) {
-      setError(explain(e))
+      if (request === latestLoad.current) setError(explain(e))
     } finally {
-      setLoading(false)
+      if (request === latestLoad.current) setLoading(false)
     }
   }, [showTerminated, canSeeAccess, canInvite, canAdd, canEdit])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  /**
+   * The load for the page as it is NOW, for a change's reload. A handler belongs to the render in
+   * which it was started, so its `load` reads "show terminated" as it was then; ticking the box while
+   * a change was in flight would otherwise end with the box ticked and terminated people missing.
+   */
+  const loadNow = useRef(load)
+  loadNow.current = load
 
   const accountOf = useMemo(() => {
     const byEmployee = new Map(users.filter((u) => u.employeeId).map((u) => [u.employeeId!, u]))
@@ -253,7 +266,7 @@ export function Employees() {
     } finally {
       setSaving(false)
     }
-    await load()
+    await loadNow.current()
   }
 
   // The whole record, placements included: an edit replaces all of it, so '' (none) is sent as null.
@@ -305,7 +318,7 @@ export function Employees() {
     } finally {
       setSaving(false)
     }
-    await load()
+    await loadNow.current()
   }
 
   if (loading) return <Loading>Loading employees…</Loading>
